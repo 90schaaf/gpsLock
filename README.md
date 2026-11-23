@@ -83,4 +83,4 @@ Full step-by-step guide: [`docs/technical/setup.md`](docs/technical/setup.md).
 
 ## License
 
-Not yet chosen – add a `LICENSE` file before publishing.
+[MIT](LICENSE) © 2026 90schaaf. Map data © OpenStreetMap contributors (ODbL), shown with attribution on every map.

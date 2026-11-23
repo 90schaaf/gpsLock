@@ -1,6 +1,7 @@
 {
   "name": "gps-lock",
   "private": true,
+  "license": "MIT",
   "version": "0.1.0",
   "description": "GPS based Chaster extension (beta)",
   "type": "module",
