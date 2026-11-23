@@ -42,18 +42,40 @@ extensions can react to `lockation.checked-in` events.
 
 ### Zone roles in the zone overview (requested 2026-11-23, implement later)
 
-- Each zone gets a role label in the Zones tab: **required** or **forbidden** (possibly also *reward* and *neutral*, to be decided).
-- The zone list and the map show the role (badge / colour per role).
-- The *Required* tab's zone picker shows only zones labelled *required*; the *Forbidden* tab shows only *forbidden* zones.
-- Builds on the existing validation that a zone cannot be both required and forbidden.
-- Open questions: which tab lists unlabelled zones (reward, curfew, travel)? Can curfew use *required* zones? What happens to a zone's
-  rule selection when its role changes (remove it from the other rule automatically)? Migration for existing configs: derive the role
-  from the rule that already uses the zone.
-- Could be combined with *Zone matching per zone* (a forbidden role could suggest strict matching).
+- **Decided (2026-11-23):** a zone has roles from this set: **required and/or reward**, **or forbidden**, **or neutral**.
+  - Allowed combinations: `required`, `reward`, `required + reward`, `forbidden`, `neutral` (no role).
+  - `forbidden` excludes every other role; `neutral` means no role (zone is only shown on the map / used by travel display).
+  - Shape: `Zone.roles: ("required" | "reward" | "forbidden")[]` (empty = neutral); validation rejects `forbidden` combined with anything.
+- The zone list and the map show the roles (badge and colour per role; required + reward shows both badges).
+- The *Required* tab lists only zones with role `required`, the *Reward* tab only `reward`, the *Forbidden* tab only `forbidden`.
+  Selecting a zone in a rule tab is replaced by the role: a zone with role `required` **is** a required zone (no separate `zoneIds`).
+- Changing a role in the Zones tab removes the zone's per-zone settings of the dropped role (with a confirm dialog if settings exist).
+- Migration for existing configs: roles are derived from the rules that use the zone (`rules.X.zoneIds`); a zone in
+  required + forbidden (already invalid today) is reported as a migration error.
+- Curfew is merged into required-zone stay windows (see below), so it needs no own role.
+- Could be combined with *Zone matching per zone* (the forbidden role suggests strict matching).
 
 ### Forbidden zones: per-zone cooldown and extra punishment (requested 2026-11-23, implement later)
 
-- **Per-zone cooldown:** each forbidden zone gets its own cooldown, default **5 minutes** (today: one shared `cooldownMinutes`, default 60).
+- **Per-zone escalation with warnings (decided 2026-11-23)** – replaces the single cooldown. Defaults, adjustable per zone:
+  - `firstPenaltyAfterMinutes` = **10**: the first penalty applies after 10 min inside; `firstWarningAfterMinutes` = **2**:
+    warning after 2 min inside ("You are in the forbidden zone *Bar* – leave within 8 min or: +1 h").
+  - `repeatEveryMinutes` = **5**: while still inside, a further penalty every 5 min; `repeatWarningAfterMinutes` = **1**:
+    warning 1 min after each penalty ("Still inside *Bar* – next penalty in 4 min").
+  - Timeline: enter 0′ → ⚠ 2′ → ❌ 10′ → ⚠ 11′ → ❌ 15′ → ⚠ 16′ → ❌ 20′ … until the wearer has clearly left (hysteresis).
+  - Leaving and re-entering within `repeatEveryMinutes` continues the current escalation instead of restarting at 0 (prevents
+    "step out, step in" to reset the timer).
+  - Validation: warnings strictly before the next penalty (`firstWarning < firstPenalty`, `repeatWarning < repeatEvery`);
+    `repeatEveryMinutes ≥ 5`, `firstPenaltyAfterMinutes ≥ 1`.
+  - **Needs background tracking** for the timeline. Without tracking (manual check-in inside a forbidden zone) the penalty
+    applies immediately, as today, and repeats at most every `repeatEveryMinutes`.
+  - Timing: evaluated on every incoming location **and** by the cron. The cron runs every 5 min today, so warnings at 1′/2′
+    would be up to 5 min late → **cron must run every minute** (`* * * * *`, within the free tier) and only process sessions with
+    an active escalation in that minute; the full sweep stays every 5 min. While inside, "still inside" is assumed as long as the
+    last location inside is not older than `heartbeatMinutes`; afterwards the escalation pauses (the missing-signal rule takes over).
+  - Warnings are delivered through the channel of *Warning before a missing-signal penalty* (see there) and are also written to
+    the lock history.
+  - `entryConfirmMinutes` (tracking tab) is no longer needed for forbidden zones – the 10-min first penalty replaces it.
 - **Per-zone extra punishment:** each forbidden zone can have an additional consequence list that applies on top of the rule's
   common `onEnter` list (e.g. all forbidden zones +1 h, "Casino" additionally pillory 2 h).
 - Proposed shape: `rules.forbidden.zones: Record<zoneId, { cooldownMinutes?: number; onEnter?: Consequence[] }>`; the rule-level
@@ -61,19 +83,21 @@ extensions can react to `lockation.checked-in` events.
   contain their explicit value).
 - UI: in the Forbidden tab, each selected zone expands to show its cooldown field and an "Extra punishment" consequence editor.
   Rule summary shown to the wearer lists per-zone cooldowns and extras.
-- Consideration: with background tracking a 5 min cooldown means up to one penalty per OwnTracks report while staying inside
-  (roughly every 5 min); the editor should show a hint that short cooldowns repeat penalties during a longer stay.
-- Tests: per-zone cooldown independent per zone, fallback to rule default, extra list added after the common list, idempotency keys per zone.
+- The editor shows the resulting timeline and what a 1-hour stay costs (e.g. "1 h inside = 11 penalties").
+- Tests: timeline with default values (warnings and penalties at 2/10/11/15/… min), per-zone values independent, re-entry continues
+  the escalation, leaving stops it, no warning at/after a penalty time, manual check-in immediate penalty, extra list after the
+  common list, idempotency keys per zone and escalation step, 1-min cron only touches sessions with active escalations.
 
 ### Required zones: per-zone interval/grace, extra punishment, time windows (requested 2026-11-23, implement later)
 
-- **Per-zone interval and grace period**, falling back to the rule-level values. Requested default: 5 minutes.
-  - To clarify: 5 min fits the *grace period*; as an *interval* it is below today's minimum (15 min) and below the cron
-    resolution (5 min), and would mean a manual check-in every 5 minutes – only realistic with background tracking.
-  - Model change: today all required zones share **one** deadline ("check in at any of them"). Per-zone intervals mean each
-    zone gets its own requirement and deadline ("be at Home every 4 h **and** at Work every 8 h"). State becomes
+- **Per-zone interval and grace period**, falling back to the rule-level values.
+  - **Decided (2026-11-23): grace period default 5 min** (was 15); interval default stays 4 h (minimum 15 min).
+  - **Decided (2026-11-23): each zone separately (AND).** Each required zone gets its own requirement and deadline
+    ("be at Home every 4 h **and** at Work every 8 h"); a check-in at Home doesn't reset Work. State becomes
     `required.byZone: Record<zoneId, {lastValidAt, nextDeadline, missedCount, missedSinceValid}>`; "anywhere" (no zones)
-    keeps the single deadline. Lock page action shows the earliest due deadline.
+    keeps the single deadline. Zones without own values use the rule defaults but still have their own deadline.
+    Lock page action shows the earliest due deadline. Migration: existing configs with several required zones and one shared
+    deadline ("any of them") get a per-rule option `combine: "any"` so their behaviour doesn't change; new configs use `"each"`.
 - **Per-zone extra punishment:** additional `onMissed` (and optionally `onSuccess`/`onOutside`) list per zone, applied on top of
   the rule's common lists.
 - **Time windows per zone:** a zone is required only during one or more windows, e.g. `[{start:"08:00", end:"10:00"}, {start:"18:00", end:"20:00"}]`
@@ -98,11 +122,15 @@ Goal: an option that lets the wearer see **all** hunt checkpoints, and make that
   - Every checkpoint is pinned on the map with its radius, numbered in order, and with its hint text.
   - Status per pin: ✓ found (grey), ▶ current (highlighted), upcoming (outlined). A list below the map mirrors this.
   - The distance band (hot/cold) is shown for the current checkpoint as in `distance`.
-- **Order stays enforced** (same engine logic): only the *current* checkpoint can be found; walking through a later one does
-  nothing. To decide: a separate option *"Any order"* where any unfound checkpoint counts – changes `hunt.index` to a
-  `found: string[]` set in state, and `onComplete` fires when all are found. Proposal: out of scope for this item, note as follow-up.
-- **Wrong guesses** keep working as today (manual "Submit hunt guess" outside the current checkpoint applies `onWrong`).
-  With all targets visible, a keyholder may want *no* wrong-guess penalty – mention in the editor help.
+- **Order – decided (2026-11-23): option per hunt** `rules.hunt.order: "sequence" | "any"` (default `"sequence"`).
+  - `sequence`: as today – only the current checkpoint can be found; walking through a later one does nothing.
+  - `any`: every unfound checkpoint counts; state changes from `hunt.index` to `hunt.found: string[]` (index kept as
+    `found.length` for views); `onCheckpoint` per find, `onComplete` when all are found. Map status: found / open (no "current").
+  - `any` is selectable with every reveal mode; with `hint`/`distance`/`map` the wearer sees the hints/pins of all open checkpoints
+    (with `map`: all open pins), so in practice `any` pairs with `all`.
+  - OwnTracks sync with `any`: all open checkpoints (visible ones only, as decided below).
+- **Wrong guesses – decided (2026-11-23): disabled automatically with reveal `all`.** No "Submit hunt guess" button, no `onWrong`;
+  the *wrong-guess* fields are hidden in the editor while `all` is selected (kept in the config for other modes).
 - **Spec changes:** F6 reveal list gets `all`; **F6 AC3 changes** – "checkpoints after the current one are never sent to the wearer"
   holds for `hint`/`distance`/`map` only; with `all` the full list (coordinates, radius, hint, status) is sent on purpose.
   **Decision (2026-11-23): visible checkpoints are synced to OwnTracks** as waypoints, for reliable detection (the phone
@@ -191,14 +219,17 @@ cooldown and extra punishment*, *Zone roles*.
   - Within one cron run the warning is always processed before the penalty check.
   - Editor shows the resulting time: "Warning after 2 h 30 min without signal, penalty after 3 h".
 - Possibly the same mechanism for required check-in deadlines ("check-in due in 15 min").
-- **Delivery channel – to decide.** The phone app itself can't be reached when it is silent (OwnTracks only receives commands
-  in the response to its own messages), so the warning needs a separate channel:
-  1. **ntfy** (recommended for the beta): the wearer installs the free ntfy app (iOS/Android) and subscribes to a random secret
-     topic shown on the check-in page (QR/link, like the OwnTracks pairing). Worker sends `POST https://ntfy.sh/<topic>`.
-     Simple, no accounts, no keys; topic name is the secret; self-hostable.
-  2. **Web Push** from the GitHub Pages app (service worker + VAPID keys in the worker). No extra app, but iOS only delivers
-     Web Push to web apps added to the home screen (iOS 16.4+), and it can't be set up inside Chaster's iframe.
-  3. **Chaster custom log entry** as a fallback – visible in the lock history, but not a push notification.
+- **Delivery channel – decided (2026-11-23): ntfy.** (OwnTracks can't be reached while silent – it only receives commands in the
+  response to its own messages.)
+  - The wearer installs the free **ntfy** app (iOS/Android) and taps *Set up warnings* on the check-in page: the worker creates a
+    random secret topic (`lockation-<32 random chars>`) and shows a subscribe link `ntfy://ntfy.sh/<topic>` + QR code, like the
+    OwnTracks pairing. KV `NTFY:<sessionId>` → topic; deleted with the session (delete webhook) or via *Stop warnings*.
+  - Worker sends `POST https://ntfy.sh/<topic>` with title, message, priority (`high` for "penalty in < 5 min") and a click URL to
+    the check-in page. Base URL configurable (`NTFY_BASE`, default `https://ntfy.sh`) for a self-hosted server.
+  - Every warning is also written to the Chaster lock history (custom log), so it's visible even without ntfy.
+  - Used by: missing-signal warning, forbidden-zone escalation warnings; later possibly required check-in deadlines.
+  - Web Push is not implemented (iOS only for home-screen web apps, not inside Chaster's iframe).
+  - Free-tier budget: one ntfy request = one Worker subrequest; the 1-min cron batches warnings per run.
 - Privacy: only the warning text is sent, no location; topic/subscription deleted when the session ends.
 - Tests: warning sent once at `nextHeartbeat − warnBeforeMinutes`, not sent if a location arrived, idempotent across cron runs,
   never sent at or after the deadline (late cron run → skipped), validation of the 10 min minimum and `< heartbeatMinutes`.
@@ -207,8 +238,17 @@ cooldown and extra punishment*, *Zone roles*.
 
 - `tracking.heartbeatMinutes` default 180 → **20**, minimum 30 → **15** (three cron runs). Implemented.
 - Risk: a stationary phone in OwnTracks *Significant* mode (especially iOS) may not report for hours → frequent penalties.
-  To verify on real devices; possible follow-ups: provision OwnTracks in *Move* mode (`monitoring: 2`) when the heartbeat
-  is short, a heartbeat quiet-hours option, and the planned warning (min. lead time 10 min fits below 20 min).
+  To verify on real devices; possible follow-ups: a heartbeat quiet-hours option and the planned warning (min. lead time 10 min fits below 20 min).
+- **OwnTracks mode – decided (2026-11-23): keyholder chooses**, setting `tracking.owntracksMode: "auto" | "move" | "significant"`
+  in the Tracking tab, default **`auto`**:
+  - `auto` → pairing provisions **Move** mode (`monitoring: 2`, frequent reports, more battery) if `heartbeatMinutes < 60` **or**
+    forbidden zones are enabled; otherwise battery-saving **Significant** mode (`monitoring: 1`).
+  - `move` / `significant` force the mode.
+  - The editor shows which mode `auto` currently results in and its battery impact; the check-in page tells the wearer which mode
+    to keep. Changing the setting (or the inputs of `auto`) during a lock: the next waypoint push also sends a
+    `setConfiguration` command with the new `monitoring` value, so the wearer doesn't have to pair again.
+  - Tests: auto → move/significant for each input combination, provisioning link contains the right `monitoring`, config change
+    triggers a `setConfiguration` push once.
 
 ### F17 – Reachability safety check for zones and checkpoints (requested 2026-11-23, implement later)
 
