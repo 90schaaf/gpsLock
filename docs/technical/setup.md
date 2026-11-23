@@ -1,8 +1,8 @@
 # Setup & wiring
 
 This guide takes you from a fresh fork to a working beta extension in Chaster.
-The values below are for this repository (`90schaaf/gpsLock`). In a fork, replace `90schaaf` with your GitHub user and `gpsLock` with your repository name.
-Placeholder left for you: `<worker>` = your worker URL (e.g. `https://gps-lock.<cf-subdomain>.workers.dev`).
+The values below are for this repository (`90schaaf/lockation`). In a fork, replace `90schaaf` with your GitHub user and `lockation` with your repository name.
+Placeholder left for you: `<worker>` = your worker URL (e.g. `https://lockation.<cf-subdomain>.workers.dev`).
 
 ## 0. Prerequisites
 
@@ -14,8 +14,8 @@ Placeholder left for you: `<worker>` = your worker URL (e.g. `https://gps-lock.<
 ## 1. Get the code
 
 ```bash
-git clone https://github.com/90schaaf/gpsLock.git
-cd gpsLock
+git clone https://github.com/90schaaf/lockation.git
+cd lockation
 npm install
 npm test          # all unit tests should pass
 ```
@@ -24,7 +24,7 @@ npm test          # all unit tests should pass
 
 1. Open the developer portal → **Applications** → create an application.
 2. **Tokens** (left sidebar) → create a **developer token**. Keep it secret – you need it in step 3.
-3. **Extensions** → create an extension, e.g. display name *GPS Lock*, slug `gps-lock`.
+3. **Extensions** → create an extension, e.g. display name *Lockation*, slug `lockation`.
    The slug cannot be changed later; it must match `EXTENSION_SLUG` in `apps/worker/wrangler.toml`.
 
 The remaining extension settings (URLs) are filled in step 5, once the worker and pages exist.
@@ -34,7 +34,7 @@ The remaining extension settings (URLs) are filled in step 5, once the worker an
 ```bash
 cd apps/worker
 npx wrangler login
-npx wrangler kv namespace create GPS_LOCK_KV
+npx wrangler kv namespace create LOCKATION_KV
 ```
 
 Copy the printed `id` into `apps/worker/wrangler.toml` (`[[kv_namespaces]]`), and set:
@@ -42,7 +42,7 @@ Copy the printed `id` into `apps/worker/wrangler.toml` (`[[kv_namespaces]]`), an
 ```toml
 [vars]
 ALLOWED_ORIGINS = "https://90schaaf.github.io"
-EXTENSION_SLUG  = "gps-lock"
+EXTENSION_SLUG  = "lockation"
 ```
 
 Set the secrets (you will be prompted for the values):
@@ -68,9 +68,9 @@ The cron trigger (`*/5 * * * *`) is created automatically from `wrangler.toml`.
 3. **Settings → Secrets and variables → Actions → Variables** → add:
    - `VITE_API_BASE` = `<worker>` (no trailing slash)
 4. Push to `main` (or run the *Pages* workflow manually). The workflow builds the docs to
-   `https://90schaaf.github.io/gpsLock/` and the app to `https://90schaaf.github.io/gpsLock/app/`.
+   `https://90schaaf.github.io/lockation/` and the app to `https://90schaaf.github.io/lockation/app/`.
 
-Check: `https://90schaaf.github.io/gpsLock/app/?demo` shows the demo.
+Check: `https://90schaaf.github.io/lockation/app/?demo` shows the demo.
 
 ### Optional: deploy the worker from GitHub Actions
 
@@ -84,17 +84,17 @@ In the developer portal, open your extension and set:
 
 | Setting | Value |
 |---------|-------|
-| Main page URL | `https://90schaaf.github.io/gpsLock/app/index.html` |
-| Configuration page URL | `https://90schaaf.github.io/gpsLock/app/config.html` |
+| Main page URL | `https://90schaaf.github.io/lockation/app/index.html` |
+| Configuration page URL | `https://90schaaf.github.io/lockation/app/config.html` |
 | Webhook URL | `<worker>/webhook` |
 | Webhook username / password | the values from step 3 |
 | Browser capabilities | **geolocation** (lets the embedded page ask for the location) |
-| Available modes | **Unlimited** (GPS Lock rate-limits check-ins itself) |
+| Available modes | **Unlimited** (Lockation rate-limits check-ins itself) |
 | Default configuration | `{}` |
 | Configuration description | see below |
-| Documentation URL | `https://90schaaf.github.io/gpsLock/guide/` |
-| Privacy policy URL | `https://90schaaf.github.io/gpsLock/guide/privacy.html` |
-| Disclaimer (in the description) | `https://90schaaf.github.io/gpsLock/guide/disclaimer.html` |
+| Documentation URL | `https://90schaaf.github.io/lockation/guide/` |
+| Privacy policy URL | `https://90schaaf.github.io/lockation/guide/privacy.html` |
+| Disclaimer (in the description) | `https://90schaaf.github.io/lockation/guide/disclaimer.html` |
 
 **Configuration description** (Handlebars, shown on the lock so the wearer knows the rules before accepting):
 
@@ -104,7 +104,7 @@ In the developer portal, open your extension and set:
 
 **Extension description** (shown in Chaster's extension list) – include the disclaimer, e.g.:
 *"Beta. Change your lock based on your GPS location. Use at your own risk – never follow a rule into danger. Not affiliated with Chaster.
-Disclaimer: `https://90schaaf.github.io/gpsLock/guide/disclaimer.html`"*
+Disclaimer: `https://90schaaf.github.io/lockation/guide/disclaimer.html`"*
 
 **Webhook events**: subscribe at least to `extension_session.created`, `extension_session.updated`
 and `extension_session.deleted`.
@@ -115,7 +115,7 @@ While the extension is in **Test** status only listed testers can use it:
 developer portal → extension → **Testers** → add Chaster usernames.
 For shared locks **both the wearer and the keyholder** must be testers.
 
-Create a test lock (Chaster supports test locks), add *GPS Lock*, configure a zone around your
+Create a test lock (Chaster supports test locks), add *Lockation*, configure a zone around your
 position with a short interval and check in from your phone.
 
 Troubleshooting:

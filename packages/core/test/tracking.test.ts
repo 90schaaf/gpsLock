@@ -10,17 +10,17 @@ import {
   owntracksWaypoints,
   parseConfig,
   parseOwnTracks,
-  type GpsLockConfig,
-  type GpsLockState,
+  type LockationConfig,
+  type LockationState,
   type TrackedInput,
 } from '../src/index.js';
 import { BAR, GYM, HOME, Sim, T0, cfg, fixAt, minutes, north, types, zones } from './helpers.js';
 
 class Tracker {
-  state: GpsLockState;
+  state: LockationState;
   n = 0;
   constructor(
-    public config: GpsLockConfig,
+    public config: LockationConfig,
     start = T0,
   ) {
     this.state = initialState(config, start);
@@ -179,10 +179,10 @@ describe('F14 OwnTracks format helpers', () => {
   const config = cfg({ zones: [zones.home, zones.bar], tracking, rules: { hunt: { enabled: true, checkpoints: [{ id: 'c1', name: 'Secret', ...GYM, radiusM: 80, hint: '' }] } } });
 
   it('AC1 provisioning link contains HTTP mode config', () => {
-    const link = owntracksConfigLink({ url: 'https://w.test/track/owntracks', username: 'gl-abc', password: 'pw' });
+    const link = owntracksConfigLink({ url: 'https://w.test/track/owntracks', username: 'lo-abc', password: 'pw' });
     expect(link.startsWith('owntracks:///config?inline=')).toBe(true);
     const json = JSON.parse(atob(decodeURIComponent(link.split('inline=')[1]!)));
-    expect(json).toMatchObject({ _type: 'configuration', mode: 3, url: 'https://w.test/track/owntracks', auth: true, username: 'gl-abc', password: 'pw', monitoring: 1 });
+    expect(json).toMatchObject({ _type: 'configuration', mode: 3, url: 'https://w.test/track/owntracks', auth: true, username: 'lo-abc', password: 'pw', monitoring: 1 });
   });
 
   it('AC9 waypoints contain zones only, with stable keys and hash', () => {
@@ -196,7 +196,7 @@ describe('F14 OwnTracks format helpers', () => {
   });
 
   it('parses location and transition messages', () => {
-    expect(parseOwnTracks({ _type: 'location', lat: 47.1, lon: 8.2, acc: 12, tst: 1_780_000_000, tid: 'GL' }, config)).toEqual({
+    expect(parseOwnTracks({ _type: 'location', lat: 47.1, lon: 8.2, acc: 12, tst: 1_780_000_000, tid: 'LO' }, config)).toEqual({
       fix: { lat: 47.1, lng: 8.2, accuracy: 12, timestamp: 1_780_000_000_000 },
     });
     const tr = parseOwnTracks({ _type: 'transition', event: 'leave', desc: 'Bar', tst: 1_780_000_100, wtst: 1, acc: 20, lat: 47.39, lon: 8.515 }, config);

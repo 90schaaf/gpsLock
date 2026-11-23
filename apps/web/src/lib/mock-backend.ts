@@ -15,20 +15,20 @@ import {
   type CheckinPurpose,
   type CheckinRecord,
   type Fix,
-  type GpsLockConfig,
-  type GpsLockState,
-} from '@gps-lock/core';
+  type LockationConfig,
+  type LockationState,
+} from '@lockation/core';
 import { ApiError, type Backend, type PairingResult } from './backend.js';
 
 export interface DemoStore {
   config: unknown;
-  state?: GpsLockState;
+  state?: LockationState;
   history: CheckinRecord[];
   log: { at: string; title: string; description: string }[];
   role: 'wearer' | 'keyholder';
 }
 
-const KEY = 'gps-lock-demo-v1';
+const KEY = 'lockation-demo-v1';
 
 export interface StorageLike {
   getItem(k: string): string | null;
@@ -36,7 +36,7 @@ export interface StorageLike {
   removeItem(k: string): void;
 }
 
-export function demoConfig(center = { lat: 47.3769, lng: 8.5417 }): GpsLockConfig {
+export function demoConfig(center = { lat: 47.3769, lng: 8.5417 }): LockationConfig {
   const off = (dLat: number, dLng: number) => ({ lat: center.lat + dLat, lng: center.lng + dLng });
   return parseConfigOrDefault({
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
@@ -112,7 +112,7 @@ export class MockBackend implements Backend {
     return { s, config, state };
   }
 
-  private view(s: DemoStore, config: GpsLockConfig, state: GpsLockState) {
+  private view(s: DemoStore, config: LockationConfig, state: LockationState) {
     return buildSessionView({ role: s.role, isSelfLock: false, config, state, history: s.history, now: this.now() });
   }
 
@@ -148,10 +148,10 @@ export class MockBackend implements Backend {
     return { config: parseConfigOrDefault(s.config), role: 'keyholder' as const, sessionId: null };
   }
 
-  async configSave(config: GpsLockConfig) {
+  async configSave(config: LockationConfig) {
     const parsed = parseConfig(config);
     if (!parsed.ok) throw new ApiError(400, 'invalid_config', 'The configuration is invalid.', parsed.issues);
-    if (!disclaimerAccepted(parsed.config)) throw new ApiError(400, 'disclaimer_required', 'Please accept the GPS Lock disclaimer before saving.');
+    if (!disclaimerAccepted(parsed.config)) throw new ApiError(400, 'disclaimer_required', 'Please accept the Lockation disclaimer before saving.');
     const s = this.load();
     // Restart the demo session with the new configuration.
     this.save({ ...s, config: parsed.config, state: undefined, history: [], log: [] });
@@ -164,7 +164,7 @@ export class MockBackend implements Backend {
   async pairTracking(): Promise<PairingResult> {
     const { s, config, state } = this.ctx();
     if (s.role !== 'wearer') throw new ApiError(403, 'not_wearer', 'Only the wearer can set up background tracking.');
-    const opts = { url: 'https://gps-lock.example.workers.dev/track/owntracks', username: 'gldemo', password: 'demo-password' };
+    const opts = { url: 'https://lockation.example.workers.dev/track/owntracks', username: 'lodemo', password: 'demo-password' };
     s.state = { ...state, tracking: { ...state.tracking, deviceUser: opts.username, pairedAt: this.now().toISOString() } };
     this.save(s);
     return { link: owntracksConfigLink(opts), ...opts, view: this.view(s, config, s.state) };

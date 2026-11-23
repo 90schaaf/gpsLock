@@ -1,5 +1,5 @@
 {
-  "name": "gps-lock",
+  "name": "lockation",
   "private": true,
   "license": "MIT",
   "version": "0.1.0",
@@ -10,11 +10,11 @@
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build -w @gps-lock/core && npm run build -w @gps-lock/web && npm run docs:build && node scripts/assemble-pages.mjs",
+    "build": "npm run build -w @lockation/core && npm run build -w @lockation/web && npm run docs:build && node scripts/assemble-pages.mjs",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "dev:web": "npm run dev -w @gps-lock/web",
-    "dev:worker": "npm run dev -w @gps-lock/worker",
+    "dev:web": "npm run dev -w @lockation/web",
+    "dev:worker": "npm run dev -w @lockation/worker",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs"
   },

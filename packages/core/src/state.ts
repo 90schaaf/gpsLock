@@ -1,11 +1,11 @@
-/** Engine state, stored in Chaster session data under `gpsLock`. */
+/** Engine state, stored in Chaster session data under `lockation`. */
 import { z } from 'zod';
-import type { GpsLockConfig } from './config.js';
+import type { LockationConfig } from './config.js';
 import { adjustForQuietHours, MINUTE } from './time.js';
 
 const iso = z.string();
 
-export const GpsLockStateSchema = z.object({
+export const LockationStateSchema = z.object({
   v: z.literal(1).default(1),
   startedAt: iso,
   lastAttemptAt: iso.optional(),
@@ -60,10 +60,10 @@ export const GpsLockStateSchema = z.object({
   acceptedCount: z.number().default(0),
 });
 
-export type GpsLockState = z.infer<typeof GpsLockStateSchema>;
+export type LockationState = z.infer<typeof LockationStateSchema>;
 
-export function initialState(config: GpsLockConfig, startedAt: Date): GpsLockState {
-  const state = GpsLockStateSchema.parse({ startedAt: startedAt.toISOString() });
+export function initialState(config: LockationConfig, startedAt: Date): LockationState {
+  const state = LockationStateSchema.parse({ startedAt: startedAt.toISOString() });
   state.hunt.startedAt = startedAt.toISOString();
   if (config.rules.required.enabled) {
     state.required.nextDeadline = computeDeadline(config, startedAt).toISOString();
@@ -75,20 +75,20 @@ export function initialState(config: GpsLockConfig, startedAt: Date): GpsLockSta
 }
 
 /** Parse stored state; returns a fresh state when missing or corrupt. */
-export function loadState(raw: unknown, config: GpsLockConfig, fallbackStart: Date): GpsLockState {
-  const res = GpsLockStateSchema.safeParse(raw);
+export function loadState(raw: unknown, config: LockationConfig, fallbackStart: Date): LockationState {
+  const res = LockationStateSchema.safeParse(raw);
   return res.success ? res.data : initialState(config, fallbackStart);
 }
 
-export function computeDeadline(config: GpsLockConfig, from: Date): Date {
+export function computeDeadline(config: LockationConfig, from: Date): Date {
   const r = config.rules.required;
   return adjustForQuietHours(new Date(from.getTime() + r.intervalMinutes * MINUTE), r.quietHours, config.timezone);
 }
 
-export function effectivePrivacy(config: GpsLockConfig, state: GpsLockState) {
+export function effectivePrivacy(config: LockationConfig, state: LockationState) {
   return state.privacyOverride ?? config.privacy.coordinates;
 }
 
-export function cloneState(s: GpsLockState): GpsLockState {
-  return JSON.parse(JSON.stringify(s)) as GpsLockState;
+export function cloneState(s: LockationState): LockationState {
+  return JSON.parse(JSON.stringify(s)) as LockationState;
 }

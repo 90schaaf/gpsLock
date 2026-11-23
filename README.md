@@ -1,13 +1,13 @@
-# GPS Lock – a GPS based Chaster extension (beta)
+# Lockation – a GPS based Chaster extension (beta)
 
-GPS Lock changes a [Chaster](https://chaster.app) lock based on the wearer's location:
+Lockation changes a [Chaster](https://chaster.app) lock based on the wearer's location:
 **required check-ins, forbidden zones, reward zones, travel goals, scavenger hunts, curfews and optional background tracking (OwnTracks) – optionally as live tracking only, without manual check-ins**, with
 consequences such as add/remove time, freeze, pillory, tasks, verification pictures and commands
 of other extensions. It works on iPhone and Android in the browser (no app needed).
 
-- 📖 **User guide:** [90schaaf.github.io/gpsLock/guide](https://90schaaf.github.io/gpsLock/guide/) (source: [`docs/guide`](docs/guide))
-- 🛠 **Technical docs:** [90schaaf.github.io/gpsLock/technical](https://90schaaf.github.io/gpsLock/technical/) (source: [`docs/technical`](docs/technical))
-- 🧪 **Demo:** [90schaaf.github.io/gpsLock/app/?demo](https://90schaaf.github.io/gpsLock/app/?demo)
+- 📖 **User guide:** [90schaaf.github.io/lockation/guide](https://90schaaf.github.io/lockation/guide/) (source: [`docs/guide`](docs/guide))
+- 🛠 **Technical docs:** [90schaaf.github.io/lockation/technical](https://90schaaf.github.io/lockation/technical/) (source: [`docs/technical`](docs/technical))
+- 🧪 **Demo:** [90schaaf.github.io/lockation/app/?demo](https://90schaaf.github.io/lockation/app/?demo)
 - 📐 **Specifications:** [`specifications/`](specifications)
 
 ## Architecture
@@ -39,12 +39,12 @@ npm run dev:web          # http://localhost:5173/?demo  (runs fully in the brows
 
 Full step-by-step guide: [`docs/technical/setup.md`](docs/technical/setup.md).
 
-1. **Chaster developer portal** – get Extensions API access, create an application, a **developer token** and an extension (slug `gps-lock`).
+1. **Chaster developer portal** – get Extensions API access, create an application, a **developer token** and an extension (slug `lockation`).
 2. **Cloudflare Worker**
    ```bash
    cd apps/worker
    npx wrangler login
-   npx wrangler kv namespace create GPS_LOCK_KV     # put the id into wrangler.toml
+   npx wrangler kv namespace create LOCKATION_KV     # put the id into wrangler.toml
    # edit ALLOWED_ORIGINS in wrangler.toml → https://90schaaf.github.io
    npx wrangler secret put CHASTER_TOKEN
    npx wrangler secret put WEBHOOK_USERNAME
@@ -52,14 +52,14 @@ Full step-by-step guide: [`docs/technical/setup.md`](docs/technical/setup.md).
    npx wrangler deploy
    ```
 3. **GitHub Pages** – Settings → Pages → Source *GitHub Actions*; add the repository variable
-   `VITE_API_BASE=https://gps-lock.<subdomain>.workers.dev`; push to `main`.
+   `VITE_API_BASE=https://lockation.<subdomain>.workers.dev`; push to `main`.
 4. **Wire the extension** in the developer portal:
 
    | Setting | Value |
    |---|---|
-   | Main page | `https://90schaaf.github.io/gpsLock/app/index.html` |
-   | Configuration page | `https://90schaaf.github.io/gpsLock/app/config.html` |
-   | Webhook URL | `https://gps-lock.<subdomain>.workers.dev/webhook` + username/password |
+   | Main page | `https://90schaaf.github.io/lockation/app/index.html` |
+   | Configuration page | `https://90schaaf.github.io/lockation/app/config.html` |
+   | Webhook URL | `https://lockation.<subdomain>.workers.dev/webhook` + username/password |
    | Browser capabilities | `geolocation` |
    | Modes | Unlimited |
    | Webhook events | `extension_session.created`, `.updated`, `.deleted` |
@@ -83,7 +83,7 @@ Full step-by-step guide: [`docs/technical/setup.md`](docs/technical/setup.md).
 
 ## Disclaimer
 
-GPS Lock is **beta software, provided "as is" without warranty**, and is used entirely at the user's own risk. It is a community
+Lockation is **beta software, provided "as is" without warranty**, and is used entirely at the user's own risk. It is a community
 extension and not affiliated with Chaster. Keyholders must accept the [user disclaimer](docs/guide/disclaimer.md) before saving a
 configuration (enforced by the config page and the worker). If you deploy your own instance, you are responsible for operating it.
 

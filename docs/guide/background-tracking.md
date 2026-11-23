@@ -1,13 +1,13 @@
 # Background tracking
 
-Normally GPS Lock only knows where you are when you tap **Check in**. If your keyholder enables
+Normally Lockation only knows where you are when you tap **Check in**. If your keyholder enables
 **background tracking**, your phone reports its location automatically with the free app
 **OwnTracks**. The lock then reacts on its own, for example the moment you enter a forbidden
 zone or leave home during a curfew.
 
 ::: info Why a separate app?
 Browsers (Safari, Chrome) don't let web pages use the location in the background. OwnTracks is
-a well-known open-source app built exactly for this. It only sends your location to GPS Lock, and it
+a well-known open-source app built exactly for this. It only sends your location to Lockation, and it
 uses the phone's battery-friendly location services.
 :::
 
@@ -15,13 +15,13 @@ uses the phone's battery-friendly location services.
 
 1. Install OwnTracks: [iPhone (App Store)](https://apps.apple.com/app/owntracks/id692424691) ·
    [Android (Google Play)](https://play.google.com/store/apps/details?id=org.owntracks.android).
-2. Open your lock in Chaster → *GPS Lock* → **📡 Set up background tracking**.
+2. Open your lock in Chaster → *Lockation* → **📡 Set up background tracking**.
 3. Tap **Open in OwnTracks**. OwnTracks imports the connection settings. Confirm the import if it asks.
    Opening the page on a computer? Scan the QR code with your phone's camera instead.
 4. Give OwnTracks location access:
    - **iPhone:** Settings → OwnTracks → Location → **Always**, *Precise Location* on, and *Background App Refresh* on.
    - **Android:** App info → OwnTracks → Permissions → Location → **Allow all the time**; Battery → **Unrestricted**.
-5. Back in GPS Lock the card shows **connected** after the first location arrives. OwnTracks also receives
+5. Back in Lockation the card shows **connected** after the first location arrives. OwnTracks also receives
    your lock's zones, so it can report entering and leaving them precisely.
 
 The credentials are shown only once. If you lose them or change phones, tap **Set up again**. This creates new
@@ -41,14 +41,14 @@ username and password shown.
 | Travel goals | Counts your real route, not only the straight line between check-ins. |
 | Scavenger hunt | Walking into the current checkpoint completes it automatically. Background updates are never wrong guesses. |
 
-**Missing signal:** if GPS Lock receives no location for the configured time (phone off, app stopped,
+**Missing signal:** if Lockation receives no location for the configured time (phone off, app stopped,
 permission removed, tracking never set up), the *missing signal* consequences apply – just like a missed check-in.
 The default is **20 minutes** (minimum 15). That only works if the phone reports often: a phone lying still – especially an
 iPhone in OwnTracks' battery-saving *Significant* mode – may stay silent for much longer. Keyholders should test it with the
 wearer's phone and raise the value (e.g. 3–6 h) or ask the wearer to use OwnTracks' *Move* mode if penalties appear while the
 phone is simply not moving.
 
-GPS edge cases: GPS Lock only treats you as having left a zone once you are clearly outside (accuracy taken into account),
+GPS edge cases: Lockation only treats you as having left a zone once you are clearly outside (accuracy taken into account),
 so a jumpy GPS at the edge of a zone doesn't trigger anything.
 
 ## Live tracking only

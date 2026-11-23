@@ -1,5 +1,5 @@
 /** Browser geolocation wrapper with user friendly error messages (F10 AC3). */
-import type { Fix } from '@gps-lock/core';
+import type { Fix } from '@lockation/core';
 
 export class GeoError extends Error {
   constructor(

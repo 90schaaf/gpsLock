@@ -10,8 +10,8 @@
 | 5 | Beta: deploy, register in the Chaster developer portal, testers, feedback loop | Tester lock completes a check-in end to end |
 
 Backlog after the beta: polygons, keyholder approval queue, i18n, background
-reminders via push notifications, publishing a GPS Lock manifest so other
-extensions can react to `gps-lock.checked-in` events.
+reminders via push notifications, publishing a Lockation manifest so other
+extensions can react to `lockation.checked-in` events.
 
 ## Iteration 6 – Background tracking (F14, F15)
 

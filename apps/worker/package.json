@@ -1,5 +1,5 @@
 {
-  "name": "@gps-lock/worker",
+  "name": "@lockation/worker",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@gps-lock/core": "0.1.0",
+    "@lockation/core": "0.1.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {

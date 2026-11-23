@@ -93,7 +93,7 @@ describe('F10 session + check-in flow', () => {
     expect(body.record.outcome).toBe('accepted');
     expect(body.record.zones).toEqual(['Home']);
     const s = fake.sessions.get('s1')!;
-    expect((s.data as any).gpsLock.required.nextDeadline).toBe('2026-06-01T16:00:00.000Z');
+    expect((s.data as any).lockation.required.nextDeadline).toBe('2026-06-01T16:00:00.000Z');
     expect((s as any).metadata.homeActions[0].slug).toBe('checkin');
     expect(fake.calls.some((c) => c.path.endsWith('/logs/custom'))).toBe(true);
     expect(body.view.history).toHaveLength(1);
@@ -200,7 +200,7 @@ describe('webhooks', () => {
   it('created initialises state and metadata', async () => {
     const s = fake.addSession('s2', config);
     await post('/webhook', { payload: { event: 'extension_session.created', data: { session: s } } }, { Authorization: `Basic ${btoa('hook:secret')}` });
-    expect((fake.sessions.get('s2')!.data as any).gpsLock.v).toBe(1);
+    expect((fake.sessions.get('s2')!.data as any).lockation.v).toBe(1);
     expect((fake.sessions.get('s2') as any).metadata).toBeDefined();
   });
 });

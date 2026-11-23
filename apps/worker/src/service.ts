@@ -21,16 +21,16 @@ import {
   type CheckinRecord,
   type EvalResult,
   type Fix,
-  type GpsLockConfig,
-  type GpsLockState,
+  type LockationConfig,
+  type LockationState,
   type SessionView,
-} from '@gps-lock/core';
+} from '@lockation/core';
 import { applyAll } from './apply.js';
 import { sessionIdOf, type ChasterClient, type ChasterSession } from './chaster.js';
 import { DeviceStore, HistoryStore } from './store.js';
 import { HttpError } from './types.js';
 
-export const STATE_KEY = 'gpsLock';
+export const STATE_KEY = 'lockation';
 
 export interface ServiceDeps {
   client: ChasterClient;
@@ -45,12 +45,12 @@ interface Resolved {
   role: 'wearer' | 'keyholder';
   session: ChasterSession;
   sessionId: string;
-  config: GpsLockConfig;
-  state: GpsLockState;
+  config: LockationConfig;
+  state: LockationState;
   isSelfLock: boolean;
 }
 
-export class GpsLockService {
+export class LockationService {
   private client: ChasterClient;
   private history: HistoryStore;
   private devices?: DeviceStore;
@@ -68,7 +68,7 @@ export class GpsLockService {
   }
 
   // ---------- helpers ----------
-  private stateFor(session: ChasterSession, config: GpsLockConfig): GpsLockState {
+  private stateFor(session: ChasterSession, config: LockationConfig): LockationState {
     const start = new Date(session.lock?.startDate ?? session.createdAt ?? this.now().toISOString());
     return loadState(session.data?.[STATE_KEY], config, start);
   }
@@ -88,7 +88,7 @@ export class GpsLockService {
     };
   }
 
-  private async persist(r: Pick<Resolved, 'session' | 'sessionId' | 'config'>, state: GpsLockState) {
+  private async persist(r: Pick<Resolved, 'session' | 'sessionId' | 'config'>, state: LockationState) {
     await this.client.setData(r.sessionId, { ...(r.session.data ?? {}), [STATE_KEY]: state });
     try {
       await this.client.setMetadata(r.sessionId, computeMetadata(r.config, state, this.now()));
@@ -97,7 +97,7 @@ export class GpsLockService {
     }
   }
 
-  private async view(r: Resolved, state: GpsLockState): Promise<SessionView> {
+  private async view(r: Resolved, state: LockationState): Promise<SessionView> {
     const history = await this.history.list(r.sessionId);
     return buildSessionView({ role: r.role, isSelfLock: r.isSelfLock, config: r.config, state, history, now: this.now() });
   }
@@ -129,7 +129,7 @@ export class GpsLockService {
 
   async downgradePrivacy(mainToken: string): Promise<SessionView> {
     const r = await this.resolve(mainToken);
-    const state: GpsLockState = { ...r.state, privacyOverride: 'zone_only' };
+    const state: LockationState = { ...r.state, privacyOverride: 'zone_only' };
     if (state.lastAccepted) {
       state.lastAccepted = {
         ...state.lastAccepted,
@@ -140,7 +140,7 @@ export class GpsLockService {
     await this.persist(r, state);
     await this.history.redact(r.sessionId);
     await this.client
-      .customLog(r.sessionId, { title: 'GPS Lock privacy', description: 'Exact coordinates are no longer shared for this lock.', icon: 'user-secret' })
+      .customLog(r.sessionId, { title: 'Lockation privacy', description: 'Exact coordinates are no longer shared for this lock.', icon: 'user-secret' })
       .catch(() => undefined);
     return this.view(r, state);
   }
@@ -163,7 +163,7 @@ export class GpsLockService {
     const parsed = parseConfig(input);
     if (!parsed.ok) throw new HttpError(400, 'invalid_config', 'The configuration is invalid.', parsed.issues);
     if (!disclaimerAccepted(parsed.config)) {
-      throw new HttpError(400, 'disclaimer_required', 'Please accept the GPS Lock disclaimer before saving.');
+      throw new HttpError(400, 'disclaimer_required', 'Please accept the Lockation disclaimer before saving.');
     }
     const current = await this.client.getConfiguration(configToken);
     if (current.sessionId) {
@@ -238,13 +238,13 @@ export class GpsLockService {
     if (!r.config.tracking.enabled) throw new HttpError(409, 'tracking_disabled', 'Background tracking is not enabled for this lock.');
     const now = this.now();
     const creds = await this.requireDevices().create(r.sessionId, now);
-    const state: GpsLockState = {
+    const state: LockationState = {
       ...r.state,
       tracking: { ...r.state.tracking, deviceUser: creds.username, pairedAt: now.toISOString(), waypointsHash: undefined },
     };
     await this.persist(r, state);
     await this.client
-      .customLog(r.sessionId, { title: 'GPS Lock tracking', description: 'Background tracking was set up (OwnTracks).', icon: 'satellite-dish' })
+      .customLog(r.sessionId, { title: 'Lockation tracking', description: 'Background tracking was set up (OwnTracks).', icon: 'satellite-dish' })
       .catch(() => undefined);
     const opts = { url: endpointUrl, username: creds.username, password: creds.password };
     return { link: owntracksConfigLink(opts), ...opts, view: await this.view(r, state) };
@@ -254,10 +254,10 @@ export class GpsLockService {
     const r = await this.resolve(mainToken);
     if (r.role !== 'wearer') throw new HttpError(403, 'not_wearer', 'Only the wearer can stop background tracking.');
     await this.requireDevices().removeForSession(r.sessionId);
-    const state: GpsLockState = { ...r.state, tracking: { ...r.state.tracking, deviceUser: undefined, pairedAt: undefined } };
+    const state: LockationState = { ...r.state, tracking: { ...r.state.tracking, deviceUser: undefined, pairedAt: undefined } };
     await this.persist(r, state);
     await this.client
-      .customLog(r.sessionId, { title: 'GPS Lock tracking', description: 'Background tracking was stopped by the wearer.', icon: 'satellite-dish' })
+      .customLog(r.sessionId, { title: 'Lockation tracking', description: 'Background tracking was stopped by the wearer.', icon: 'satellite-dish' })
       .catch(() => undefined);
     return this.view(r, state);
   }

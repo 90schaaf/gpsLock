@@ -1,5 +1,5 @@
 /** Backend abstraction: real Cloudflare Worker or in-browser demo (F13). */
-import type { CheckinPurpose, CheckinRecord, ConfigIssue, Fix, GpsLockConfig, SessionView } from '@gps-lock/core';
+import type { CheckinPurpose, CheckinRecord, ConfigIssue, Fix, LockationConfig, SessionView } from '@lockation/core';
 
 export interface CommandInfo {
   id: string;
@@ -13,7 +13,7 @@ export interface CommandInfo {
 }
 
 export interface ConfigLoad {
-  config: GpsLockConfig;
+  config: LockationConfig;
   role: 'wearer' | 'keyholder';
   sessionId: string | null;
   invalidStoredConfig?: ConfigIssue[];
@@ -33,7 +33,7 @@ export interface Backend {
   checkin(fix: Fix, purpose: CheckinPurpose): Promise<{ record: CheckinRecord; view: SessionView }>;
   downgradePrivacy(): Promise<SessionView>;
   configGet(): Promise<ConfigLoad>;
-  configSave(config: GpsLockConfig): Promise<void>;
+  configSave(config: LockationConfig): Promise<void>;
   capabilities(): Promise<{ commands: CommandInfo[]; live: boolean }>;
   pairTracking(): Promise<PairingResult>;
   unpairTracking(): Promise<SessionView>;
@@ -64,7 +64,7 @@ export class HttpBackend implements Backend {
     try {
       res = await this.fetchImpl(`${this.base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     } catch {
-      throw new ApiError(0, 'network', 'Cannot reach the GPS Lock server. Check your internet connection.');
+      throw new ApiError(0, 'network', 'Cannot reach the Lockation server. Check your internet connection.');
     }
     const json = (await res.json().catch(() => ({}))) as { error?: { code: string; message: string; details?: unknown } };
     if (!res.ok) throw new ApiError(res.status, json.error?.code ?? 'error', json.error?.message ?? `Request failed (${res.status})`, json.error?.details);
@@ -93,7 +93,7 @@ export class HttpBackend implements Backend {
   async configGet() {
     return this.post<ConfigLoad>('/api/config/get', this.cfg());
   }
-  async configSave(config: GpsLockConfig) {
+  async configSave(config: LockationConfig) {
     await this.post('/api/config/save', { ...this.cfg(), config });
   }
   async pairTracking() {

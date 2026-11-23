@@ -1,8 +1,8 @@
 /** View models sent to the browser, Chaster metadata (F12) and privacy helpers (F9). */
-import type { GpsLockConfig } from './config.js';
+import type { LockationConfig } from './config.js';
 import { describeConsequence, type Consequence } from './consequences.js';
 import type { CheckinRecord, PlannedConsequence } from './engine.js';
-import { effectivePrivacy, type GpsLockState } from './state.js';
+import { effectivePrivacy, type LockationState } from './state.js';
 import { formatLocalTime, MINUTE } from './time.js';
 
 export type Role = 'wearer' | 'keyholder';
@@ -57,7 +57,7 @@ export interface SessionView {
 
 const list = (cs: Consequence[]) => (cs.length ? cs.map(describeConsequence).join(', ') : 'nothing');
 
-export function summarizeRules(config: GpsLockConfig): RuleSummary[] {
+export function summarizeRules(config: LockationConfig): RuleSummary[] {
   const names = new Map(config.zones.map((z) => [z.id, z.name]));
   const zoneNames = (ids: string[]) => ids.map((i) => names.get(i) ?? i).join(', ');
   const out: RuleSummary[] = [];
@@ -151,8 +151,8 @@ export function fmtMinutes(min: number): string {
 export interface BuildViewInput {
   role: Role;
   isSelfLock: boolean;
-  config: GpsLockConfig;
-  state: GpsLockState;
+  config: LockationConfig;
+  state: LockationState;
   history: CheckinRecord[];
   now: Date;
 }
@@ -253,7 +253,7 @@ export interface ChasterMetadata {
   homeActions: { slug: string; title: string; description: string; icon: string; badge?: string }[];
 }
 
-export function computeMetadata(config: GpsLockConfig, state: GpsLockState, now: Date): ChasterMetadata {
+export function computeMetadata(config: LockationConfig, state: LockationState, now: Date): ChasterMetadata {
   const reasons: string[] = [];
   const h = config.rules.hunt;
   if (h.enabled && h.blockUnlockUntilComplete && state.hunt.status === 'active') {
@@ -296,7 +296,7 @@ export function buildLogEntry(
   if (kind === 'tick' && !events.length) return undefined;
   const title =
     kind === 'tick'
-      ? 'GPS Lock'
+      ? 'Lockation'
       : record?.outcome === 'rejected'
         ? 'GPS check-in rejected'
         : record?.zones.length

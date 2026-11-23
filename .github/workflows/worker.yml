@@ -14,7 +14,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm test -w @gps-lock/core -w @gps-lock/worker
+      - run: npm test -w @lockation/core -w @lockation/worker
       - name: Deploy
         if: ${{ env.CLOUDFLARE_API_TOKEN != '' }}
         working-directory: apps/worker

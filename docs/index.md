@@ -1,7 +1,7 @@
 ---
 layout: home
 hero:
-  name: GPS Lock
+  name: Lockation
   text: Let your location shape the lock.
   tagline: A beta extension for Chaster. Zones, required check-ins, forbidden places, rewards, travel goals and scavenger hunts – on iPhone and Android.
   actions:

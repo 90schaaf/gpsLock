@@ -33,7 +33,7 @@ const post = (path: string, body: unknown, headers: Record<string, string> = {})
   );
 
 const basic = (u: string, p: string) => ({ Authorization: `Basic ${btoa(`${u}:${p}`)}` });
-const loc = (p: { lat: number; lng: number }, at: Date, acc = 10) => ({ _type: 'location', lat: p.lat, lon: p.lng, acc, tst: Math.floor(at.getTime() / 1000), tid: 'GL' });
+const loc = (p: { lat: number; lng: number }, at: Date, acc = 10) => ({ _type: 'location', lat: p.lat, lon: p.lng, acc, tst: Math.floor(at.getTime() / 1000), tid: 'LO' });
 
 async function pair() {
   const r = await post('/api/tracking/pair', { mainToken: 'wearer-token' });

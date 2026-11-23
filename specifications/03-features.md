@@ -166,7 +166,7 @@ the browser with localStorage persistence. It lets a user simulate a position (c
 
 ## F14 – Background tracking (OwnTracks)
 
-Background location is impossible for web pages, so GPS Lock accepts positions from the
+Background location is impossible for web pages, so Lockation accepts positions from the
 open source app **OwnTracks** (iOS and Android) in its HTTP mode. Decision (2026-11-23): use OwnTracks first;
 our own companion app is a later option.
 
@@ -175,7 +175,7 @@ Config `tracking: {enabled, heartbeatMinutes (15–10080, default 20; min. 15 = 
 **Pairing.** The wearer taps *Set up background tracking* on the main page. The worker creates
 device credentials (random username and password; KV stores only `sha256(password)`) bound to the session
 and returns an OwnTracks provisioning link `owntracks:///config?inline=<base64 .otrc>` with
-`{_type:"configuration", mode:3, url:"<worker>/track/owntracks", auth:true, username, password, deviceId:"gpslock", tid:"GL", monitoring:1, locatorDisplacement:100, locatorInterval:300}`.
+`{_type:"configuration", mode:3, url:"<worker>/track/owntracks", auth:true, username, password, deviceId:"lockation", tid:"LO", monitoring:1, locatorDisplacement:100, locatorInterval:300}`.
 Pairing again revokes the previous device. *Stop background tracking* deletes the device. The heartbeat keeps running, so stopping while
 tracking is required has consequences.
 
@@ -250,7 +250,7 @@ in the engine) without consequences or history. 3. Tracked positions reset the r
 
 ## F18 – Disclaimer and safety notice
 
-Decision (2026-11-23): users (keyholders and wearers) must be told clearly that GPS Lock is beta software used at their own risk.
+Decision (2026-11-23): users (keyholders and wearers) must be told clearly that Lockation is beta software used at their own risk.
 
 - **Disclaimer page** `docs/guide/disclaimer.md` (version 1): beta / no warranty, own responsibility and limitation of liability
   "as far as permitted by law", safety first (Chaster emergency unlock, never follow a rule into danger, traffic and laws),
@@ -258,7 +258,7 @@ Decision (2026-11-23): users (keyholders and wearers) must be told clearly that 
 - Linked from: guide sidebar, footer of every docs page, footer of the check-in and config pages, the wearer's rule summary,
   the Handlebars configuration description and the extension description in the Chaster developer portal, README.
 - **Keyholder confirmation:** config `disclaimer?: {version, acceptedAt}`. The config page shows the tick box
-  *"I have read the disclaimer and use GPS Lock at my own risk"*; saving is refused while it is not ticked – in the page
+  *"I have read the disclaimer and use Lockation at my own risk"*; saving is refused while it is not ticked – in the page
   (Chaster save → `save_failed`), in the worker (`400 disclaimer_required`) and in the demo backend.
   Reading stored configs without it keeps working. Bumping `DISCLAIMER_VERSION` asks keyholders again on their next save.
 

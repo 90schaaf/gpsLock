@@ -2,10 +2,10 @@
  * The rule engine. Pure functions: (config, state, input, context) → result.
  * No I/O; the worker / demo backend apply the planned consequences.
  */
-import type { GpsLockConfig, Zone } from './config.js';
+import type { LockationConfig, Zone } from './config.js';
 import { type Consequence, describeConsequence, scaleConsequence } from './consequences.js';
 import { distanceBand, haversineM, isInside, roundCoord } from './geo.js';
-import { cloneState, computeDeadline, effectivePrivacy, type GpsLockState } from './state.js';
+import { cloneState, computeDeadline, effectivePrivacy, type LockationState } from './state.js';
 import { dayKey, isInQuietHours, MINUTE } from './time.js';
 
 export interface Fix {
@@ -56,7 +56,7 @@ export interface CheckinRecord {
 }
 
 export interface EvalResult {
-  state: GpsLockState;
+  state: LockationState;
   consequences: PlannedConsequence[];
   events: string[];
 }
@@ -106,12 +106,12 @@ class Planner {
 
 const msSince = (iso: string | undefined, now: Date) => (iso ? now.getTime() - Date.parse(iso) : Infinity);
 
-function zonesById(config: GpsLockConfig): Map<string, Zone> {
+function zonesById(config: LockationConfig): Map<string, Zone> {
   return new Map(config.zones.map((z) => [z.id, z]));
 }
 
 /** F8 – timestamp, accuracy and rate checks for manual check-ins. Returns a reject reason or undefined. */
-export function preCheck(config: GpsLockConfig, state: GpsLockState, fix: Fix, now: Date): RejectReason | undefined {
+export function preCheck(config: LockationConfig, state: LockationState, fix: Fix, now: Date): RejectReason | undefined {
   const ac = config.antiCheat;
   if (state.lastAccepted && msSince(state.lastAccepted.at, now) < ac.minIntervalSeconds * 1000) return 'rate_limited';
   const age = now.getTime() - fix.timestamp;
@@ -122,7 +122,7 @@ export function preCheck(config: GpsLockConfig, state: GpsLockState, fix: Fix, n
 }
 
 /** F14 – checks for background positions (queued positions are allowed, rate limit is not applied). */
-export function preCheckTracked(config: GpsLockConfig, state: GpsLockState, fix: Fix, now: Date): RejectReason | undefined {
+export function preCheckTracked(config: LockationConfig, state: LockationState, fix: Fix, now: Date): RejectReason | undefined {
   if (state.lastAccepted && fix.timestamp < Date.parse(state.lastAccepted.at)) return 'out_of_order';
   const age = now.getTime() - fix.timestamp;
   if (age > config.tracking.maxDelayMinutes * MINUTE) return 'stale_fix';
@@ -132,7 +132,7 @@ export function preCheckTracked(config: GpsLockConfig, state: GpsLockState, fix:
 }
 
 /** F8 – speed plausibility relative to the last accepted fix. Returns km/h (0 when not computable). */
-export function impliedSpeedKmh(state: GpsLockState, fix: Fix): number {
+export function impliedSpeedKmh(state: LockationState, fix: Fix): number {
   const prev = state.lastAccepted;
   if (!prev) return 0;
   const dt = Math.max(1, (fix.timestamp - Date.parse(prev.at)) / 1000);
@@ -140,7 +140,7 @@ export function impliedSpeedKmh(state: GpsLockState, fix: Fix): number {
   return (d / dt) * 3.6;
 }
 
-function newRecord(config: GpsLockConfig, state: GpsLockState, id: string, at: Date, fix: Fix | undefined, purpose: CheckinPurpose, events: string[]): CheckinRecord {
+function newRecord(config: LockationConfig, state: LockationState, id: string, at: Date, fix: Fix | undefined, purpose: CheckinPurpose, events: string[]): CheckinRecord {
   const record: CheckinRecord = {
     id,
     at: at.toISOString(),
@@ -158,20 +158,20 @@ function newRecord(config: GpsLockConfig, state: GpsLockState, id: string, at: D
   return record;
 }
 
-function storeLastAccepted(config: GpsLockConfig, state: GpsLockState, fix: Fix, now: Date) {
+function storeLastAccepted(config: LockationConfig, state: LockationState, fix: Fix, now: Date) {
   const exact = effectivePrivacy(config, state) === 'exact';
   const p = exact ? { lat: fix.lat, lng: fix.lng } : { lat: roundCoord(fix.lat), lng: roundCoord(fix.lng) };
   state.lastAccepted = { ...p, accuracy: Math.round(fix.accuracy), at: new Date(Math.min(fix.timestamp, now.getTime())).toISOString() };
 }
 
 /** F16 – manual check-ins disabled, location only via background tracking. */
-export function isLiveOnly(config: GpsLockConfig): boolean {
+export function isLiveOnly(config: LockationConfig): boolean {
   return config.tracking.enabled && config.tracking.liveOnly;
 }
 
 export function evaluateCheckin(
-  config: GpsLockConfig,
-  prevState: GpsLockState,
+  config: LockationConfig,
+  prevState: LockationState,
   fix: Fix,
   ctx: EvalContext,
   purpose: CheckinPurpose = 'general',
@@ -241,7 +241,7 @@ export function evaluateCheckin(
 }
 
 /** F14 – evaluate a background observation (OwnTracks location or transition). */
-export function evaluateTracked(config: GpsLockConfig, prevState: GpsLockState, input: TrackedInput, ctx: EvalContext): TrackedResult {
+export function evaluateTracked(config: LockationConfig, prevState: LockationState, input: TrackedInput, ctx: EvalContext): TrackedResult {
   const state = cloneState(prevState);
   const plan = new Planner(ctx);
   const now = ctx.now;
@@ -314,7 +314,7 @@ interface LeftZone {
 }
 
 /** Evaluate all location rules for an accepted observation at time `at`. */
-function runRules(config: GpsLockConfig, state: GpsLockState, fix: Fix | undefined, at: Date, ctx: EvalContext, plan: Planner, record: CheckinRecord, o: RuleOpts) {
+function runRules(config: LockationConfig, state: LockationState, fix: Fix | undefined, at: Date, ctx: EvalContext, plan: Planner, record: CheckinRecord, o: RuleOpts) {
   const rctx: EvalContext = { ...ctx, now: at };
   const zones = zonesById(config);
   const inside = new Set(fix ? config.zones.filter((z) => isInside(fix, z, config.matchMode)).map((z) => z.id) : []);
@@ -336,7 +336,7 @@ function runRules(config: GpsLockConfig, state: GpsLockState, fix: Fix | undefin
  * F14 – presence with hysteresis. Entering needs `inside`; leaving needs the position to be
  * clearly outside (distance − accuracy > radius) or an explicit leave transition.
  */
-function updatePresence(config: GpsLockConfig, state: GpsLockState, fix: Fix | undefined, inside: Set<string>, at: Date, forced?: RuleOpts['forced']): LeftZone[] {
+function updatePresence(config: LockationConfig, state: LockationState, fix: Fix | undefined, inside: Set<string>, at: Date, forced?: RuleOpts['forced']): LeftZone[] {
   const atIso = at.toISOString();
   for (const id of inside) {
     const p = state.presence[id];
@@ -370,7 +370,7 @@ function finalizeRecord(record: CheckinRecord, list: PlannedConsequence[]) {
 }
 
 // ---------- F6 hunt ----------
-function evalHunt(config: GpsLockConfig, state: GpsLockState, fix: Fix, ctx: EvalContext, plan: Planner, purpose: CheckinPurpose) {
+function evalHunt(config: LockationConfig, state: LockationState, fix: Fix, ctx: EvalContext, plan: Planner, purpose: CheckinPurpose) {
   const hunt = config.rules.hunt;
   if (!hunt.enabled || state.hunt.status !== 'active') return;
   const target = hunt.checkpoints[state.hunt.index];
@@ -402,7 +402,7 @@ function evalHunt(config: GpsLockConfig, state: GpsLockState, fix: Fix, ctx: Eva
 }
 
 // ---------- F2 required ----------
-function evalRequired(config: GpsLockConfig, state: GpsLockState, inside: Set<string>, zones: Map<string, Zone>, ctx: EvalContext, plan: Planner, source: ObservationSource) {
+function evalRequired(config: LockationConfig, state: LockationState, inside: Set<string>, zones: Map<string, Zone>, ctx: EvalContext, plan: Planner, source: ObservationSource) {
   const r = config.rules.required;
   if (!r.enabled) return;
   const valid = r.zoneIds.length === 0 || r.zoneIds.some((id) => inside.has(id));
@@ -427,7 +427,7 @@ function evalRequired(config: GpsLockConfig, state: GpsLockState, inside: Set<st
 }
 
 // ---------- F3 forbidden ----------
-function evalForbidden(config: GpsLockConfig, state: GpsLockState, inside: Set<string>, left: LeftZone[], zones: Map<string, Zone>, ctx: EvalContext, plan: Planner, source: ObservationSource) {
+function evalForbidden(config: LockationConfig, state: LockationState, inside: Set<string>, left: LeftZone[], zones: Map<string, Zone>, ctx: EvalContext, plan: Planner, source: ObservationSource) {
   const f = config.rules.forbidden;
   if (!f.enabled) return;
   const confirm = config.tracking.entryConfirmMinutes * MINUTE;
@@ -454,7 +454,7 @@ function evalForbidden(config: GpsLockConfig, state: GpsLockState, inside: Set<s
 }
 
 // ---------- F4 reward ----------
-function evalReward(config: GpsLockConfig, state: GpsLockState, inside: Set<string>, left: LeftZone[], zones: Map<string, Zone>, ctx: EvalContext, plan: Planner, source: ObservationSource) {
+function evalReward(config: LockationConfig, state: LockationState, inside: Set<string>, left: LeftZone[], zones: Map<string, Zone>, ctx: EvalContext, plan: Planner, source: ObservationSource) {
   const r = config.rules.reward;
   if (!r.enabled) return;
   const today = dayKey(ctx.now, config.timezone);
@@ -494,7 +494,7 @@ function evalReward(config: GpsLockConfig, state: GpsLockState, inside: Set<stri
 }
 
 // ---------- F15 curfew ----------
-function evalCurfew(config: GpsLockConfig, state: GpsLockState, inside: Set<string>, ctx: EvalContext, plan: Planner) {
+function evalCurfew(config: LockationConfig, state: LockationState, inside: Set<string>, ctx: EvalContext, plan: Planner) {
   const c = config.rules.curfew;
   if (!c.enabled || !c.zoneIds.length) return;
   if (!isInQuietHours(ctx.now, { start: c.start, end: c.end }, config.timezone)) return;
@@ -507,7 +507,7 @@ function evalCurfew(config: GpsLockConfig, state: GpsLockState, inside: Set<stri
 }
 
 // ---------- F5 travel ----------
-function evalTravel(config: GpsLockConfig, state: GpsLockState, fix: Fix, ctx: EvalContext, plan: Planner) {
+function evalTravel(config: LockationConfig, state: LockationState, fix: Fix, ctx: EvalContext, plan: Planner) {
   const t = config.rules.travel;
   if (!t.enabled || !state.lastAccepted) return;
   const today = dayKey(ctx.now, config.timezone);
@@ -531,7 +531,7 @@ function evalTravel(config: GpsLockConfig, state: GpsLockState, fix: Fix, ctx: E
 }
 
 /** Track timed freezes so the tick can unfreeze them. */
-function trackFreeze(state: GpsLockState, list: PlannedConsequence[], now: Date) {
+function trackFreeze(state: LockationState, list: PlannedConsequence[], now: Date) {
   for (const p of list) {
     const c = p.consequence;
     if (c.type === 'freeze' && c.durationMinutes) {
@@ -546,7 +546,7 @@ function trackFreeze(state: GpsLockState, list: PlannedConsequence[], now: Date)
 export const MAX_MISSED_PER_TICK = 10;
 
 /** Cron evaluation: deadlines, heartbeat, timed freezes, hunt timeout. */
-export function evaluateTick(config: GpsLockConfig, prevState: GpsLockState, ctx: EvalContext): EvalResult {
+export function evaluateTick(config: LockationConfig, prevState: LockationState, ctx: EvalContext): EvalResult {
   const state = cloneState(prevState);
   const plan = new Planner(ctx);
   const now = ctx.now;

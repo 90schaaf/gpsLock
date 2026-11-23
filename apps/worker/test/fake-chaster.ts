@@ -33,7 +33,7 @@ export class FakeChaster {
   addSession(id: string, config: unknown, opts: { keyholder?: boolean; status?: string; start?: string } = {}) {
     const s: ChasterSession = {
       sessionId: id,
-      slug: 'gps-lock',
+      slug: 'lockation',
       config,
       data: {},
       lock: { _id: `lock-${id}`, status: opts.status ?? 'locked', keyholder: opts.keyholder === false ? null : { username: 'kh' }, startDate: opts.start ?? '2026-06-01T10:00:00.000Z' },
@@ -62,7 +62,7 @@ export class FakeChaster {
         const t = this.configTokens.get(decodeURIComponent(m[1]!));
         if (!t) return this.res(404, { message: 'Configuration not found' });
         if (method === 'PUT') t.config = body.config;
-        return this.res(200, { ...t, user: 'u1', extensionSlug: 'gps-lock', createdAt: '' });
+        return this.res(200, { ...t, user: 'u1', extensionSlug: 'lockation', createdAt: '' });
       }
       if (path === '/api/extensions/sessions/search') {
         const all = [...this.sessions.values()].filter((s) => s.lock.status === 'locked');
@@ -110,7 +110,7 @@ export function makeEnv(kv = new MemoryKV()): Env {
     CHASTER_TOKEN: 'dev-token',
     CHASTER_API_BASE: 'https://api.chaster.test',
     ALLOWED_ORIGINS: 'https://user.github.io',
-    EXTENSION_SLUG: 'gps-lock',
+    EXTENSION_SLUG: 'lockation',
     WEBHOOK_USERNAME: 'hook',
     WEBHOOK_PASSWORD: 'secret',
   };

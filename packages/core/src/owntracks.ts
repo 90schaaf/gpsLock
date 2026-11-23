@@ -2,7 +2,7 @@
  * F14 – OwnTracks integration helpers (pure, shared by worker and demo).
  * Formats: https://owntracks.org/booklet/tech/json/ and https://owntracks.org/booklet/tech/http/
  */
-import type { GpsLockConfig } from './config.js';
+import type { LockationConfig } from './config.js';
 import type { TrackedInput } from './engine.js';
 
 /** FNV-1a 32 bit hash. */
@@ -30,8 +30,8 @@ export function owntracksConfiguration(o: OwnTracksConfigOptions) {
     auth: true,
     username: o.username,
     password: o.password,
-    deviceId: 'gpslock',
-    tid: 'GL',
+    deviceId: 'lockation',
+    tid: 'LO',
     monitoring: 1,
     locatorDisplacement: 100,
     locatorInterval: 300,
@@ -54,7 +54,7 @@ export function owntracksConfigLink(o: OwnTracksConfigOptions): string {
 }
 
 /** Zones as OwnTracks waypoints. Hunt checkpoints are never included (F14 AC9). */
-export function owntracksWaypoints(config: GpsLockConfig) {
+export function owntracksWaypoints(config: LockationConfig) {
   const waypoints = config.zones.map((z) => ({
     _type: 'waypoint',
     desc: z.name,
@@ -87,7 +87,7 @@ const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : u
  * Convert an OwnTracks message to a tracked observation.
  * Returns undefined for message types we ignore (waypoint, card, lwt, status, …).
  */
-export function parseOwnTracks(body: unknown, config: GpsLockConfig): TrackedInput | undefined {
+export function parseOwnTracks(body: unknown, config: LockationConfig): TrackedInput | undefined {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
   const m = body as OwnTracksMessage;
   const lat = num(m.lat);

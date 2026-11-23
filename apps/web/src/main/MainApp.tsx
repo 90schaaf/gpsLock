@@ -1,4 +1,4 @@
-import type { CheckinPurpose, CheckinRecord, Fix, SessionView } from '@gps-lock/core';
+import type { CheckinPurpose, CheckinRecord, Fix, SessionView } from '@lockation/core';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { LeafletMap, ZONE_COLORS, type MapCircle, type MapPoint } from '../components/LeafletMap.js';
 import { ApiError, type Backend } from '../lib/backend.js';
@@ -120,7 +120,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
   if (!view) {
     return (
       <div class="container">
-        <header class="top"><h1>📍 GPS Lock</h1></header>
+        <header class="top"><h1>📍 Lockation</h1></header>
         {error ? <ErrorCard error={error} /> : <div class="card muted">Loading…</div>}
         {error && !backend.demo && (
           <div class="card small">
@@ -152,7 +152,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
       )}
       <div class="container">
         <header class="top">
-          <h1>📍 GPS Lock</h1>
+          <h1>📍 Lockation</h1>
           <span class="badge accent">{isWearer ? 'Wearer' : 'Keyholder'}</span>
           <span class={`badge ${view.privacy === 'exact' ? 'warn' : ''}`} title="Coordinate sharing">
             {view.privacy === 'exact' ? 'Exact location shared' : 'Zones only'}
@@ -195,7 +195,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
 
         <TrackingCard view={view} backend={backend} onView={setView} onError={(message) => setError({ message })} />
 
-        {view.freezeUntil && <div class="notice">❄️ Frozen by GPS Lock until {fmtTime(view.freezeUntil, view.timezone)}.</div>}
+        {view.freezeUntil && <div class="notice">❄️ Frozen by Lockation until {fmtTime(view.freezeUntil, view.timezone)}.</div>}
 
         {isWearer && (
           <div class="stack">
@@ -253,7 +253,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
           <h2>📜 Rules of this lock</h2>
           {view.rules.length === 0 && <p class="muted">No GPS rules are enabled.</p>}
           <p class="small muted" data-testid="rules-disclaimer" style={{ margin: 0 }}>
-            GPS Lock is beta software and GPS can be wrong. Your safety comes first – never follow a rule into danger. Use at your own risk, see the{' '}
+            Lockation is beta software and GPS can be wrong. Your safety comes first – never follow a rule into danger. Use at your own risk, see the{' '}
             <a href="../guide/disclaimer.html" target="_blank" rel="noopener">disclaimer</a>.
           </p>
           {view.rules.map((r) => (
@@ -317,7 +317,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
         </div>
 
         <footer class="small muted">
-          GPS Lock beta – use at your own risk · <a href="../guide/" target="_blank" rel="noopener">User guide</a> ·{' '}
+          Lockation beta – use at your own risk · <a href="../guide/" target="_blank" rel="noopener">User guide</a> ·{' '}
           <a href="../guide/disclaimer.html" target="_blank" rel="noopener">Disclaimer</a>
         </footer>
       </div>

@@ -54,8 +54,8 @@ npm workspaces, TypeScript strict mode, ESM everywhere.
 
 | Data | Where | Why |
 |------|-------|-----|
-| Lock configuration (`GpsLockConfig`) | Chaster extension `config` | Chaster owns it and shows it to the wearer before they accept a shared lock |
-| Engine state (`GpsLockState`) | Chaster session `data` | Authoritative and per session; no consistency issues with KV; deleted together with the session |
+| Lock configuration (`LockationConfig`) | Chaster extension `config` | Chaster owns it and shows it to the wearer before they accept a shared lock |
+| Engine state (`LockationState`) | Chaster session `data` | Authoritative and per session; no consistency issues with KV; deleted together with the session |
 | Check-in history (last 200) | Workers KV `HISTORY:<sessionId>` | Too large for session data; purged on `extension_session.deleted` |
 | Cron cursor | Workers KV `CRON:cursor` | Batching across invocations (subrequest limit) |
 

@@ -18,7 +18,7 @@ required → forbidden → reward → travel. One check-in can trigger several r
 ## Forbidden zones
 
 A check-in inside a forbidden zone runs its consequences. Within the **cooldown** the same zone is not
-penalised again. Because GPS Lock only knows your position at check-in time, forbidden zones
+penalised again. Because Lockation only knows your position at check-in time, forbidden zones
 are best combined with a required check-in *anywhere*.
 
 ## Reward zones
@@ -71,4 +71,4 @@ fulfilled by being in the zone, and hunt checkpoints are found by walking into t
 
 ## Required check-ins and unlocking
 
-While a required check-in is overdue, GPS Lock also tells Chaster to block unlocking until the next valid check-in.
+While a required check-in is overdue, Lockation also tells Chaster to block unlocking until the next valid check-in.

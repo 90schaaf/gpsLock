@@ -1,6 +1,6 @@
 # Technical overview
 
-GPS Lock consists of three deployable parts:
+Lockation consists of three deployable parts:
 
 | Part | Tech | Hosted on | Purpose |
 |------|------|-----------|---------|
@@ -25,7 +25,7 @@ public, so it cannot hold the token. The Worker is the smallest secure backend: 
 ## Where state lives
 
 - Lock configuration → Chaster extension config (Chaster shows it to the wearer).
-- Engine state (deadlines, hunt progress, …) → Chaster session `data.gpsLock`.
+- Engine state (deadlines, hunt progress, …) → Chaster session `data.lockation`.
 - Check-in history (last 200) → Workers KV, purged when the session is deleted.
 
 The full specification is in the repository under `specifications/`.

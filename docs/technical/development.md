@@ -44,6 +44,6 @@ reference them, e.g. `F6 scavenger hunt › AC2 wrong hunt check-in adds time`.
 ## Building the Pages artifact locally
 
 ```bash
-PAGES_BASE=/gpsLock/app/ DOCS_BASE=/gpsLock/ VITE_API_BASE=https://… npm run build
+PAGES_BASE=/lockation/app/ DOCS_BASE=/lockation/ VITE_API_BASE=https://… npm run build
 # → pages-dist/
 ```

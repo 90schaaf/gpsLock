@@ -4,7 +4,7 @@ Status: **accepted** (refined with the product owner on 2026-11-23)
 
 ## 1. Intent
 
-*GPS Lock* is a Chaster partner extension that makes a chastity lock react to the
+*Lockation* is a Chaster partner extension that makes a chastity lock react to the
 wearer's physical location. The keyholder (or the wearer, for self-locks) defines
 zones on a map and attaches rules and consequences to them. The wearer proves their
 location by checking in from their phone (iPhone or Android) through the extension

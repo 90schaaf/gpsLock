@@ -1,7 +1,7 @@
 /** Cloudflare Worker entry: HTTP API, Chaster webhooks and cron. */
 import { z } from 'zod';
 import { ChasterClient, sessionIdOf, type ChasterSession, type FetchLike } from './chaster.js';
-import { GpsLockService } from './service.js';
+import { LockationService } from './service.js';
 import { DeviceStore, HistoryStore, parseBasicAuth, safeEqual } from './store.js';
 import { HttpError, type Env, type ExecutionContextLike } from './types.js';
 
@@ -33,7 +33,7 @@ export interface Overrides {
 
 export function createService(env: Env, o: Overrides = {}) {
   const client = new ChasterClient(env.CHASTER_TOKEN, env.CHASTER_API_BASE ?? 'https://api.chaster.app', o.fetch);
-  return { client, service: new GpsLockService({ client, history: new HistoryStore(env.KV), devices: new DeviceStore(env.KV), now: o.now, rng: o.rng, newId: o.newId }) };
+  return { client, service: new LockationService({ client, history: new HistoryStore(env.KV), devices: new DeviceStore(env.KV), now: o.now, rng: o.rng, newId: o.newId }) };
 }
 
 function corsHeaders(env: Env, origin: string | null): Record<string, string> {
@@ -72,7 +72,7 @@ function checkBasicAuth(env: Env, req: Request): boolean {
   return safeEqual(decoded, `${env.WEBHOOK_USERNAME}:${env.WEBHOOK_PASSWORD}`);
 }
 
-export async function handleWebhook(service: GpsLockService, body: unknown): Promise<void> {
+export async function handleWebhook(service: LockationService, body: unknown): Promise<void> {
   const evt = (body && typeof body === 'object' && 'payload' in body ? (body as { payload: unknown }).payload : body) as {
     event?: string;
     data?: { session?: ChasterSession & { sessionId?: string } };
@@ -175,7 +175,7 @@ export async function runCron(env: Env, o: Overrides = {}, budget = 40): Promise
     return baseFetch(i, init);
   };
   const { client, service } = createService(env, { ...o, fetch: counting });
-  const slug = env.EXTENSION_SLUG ?? 'gps-lock';
+  const slug = env.EXTENSION_SLUG ?? 'lockation';
   let cursor = (await env.KV.get('CRON:cursor')) || null;
   let processed = 0;
   let changed = 0;

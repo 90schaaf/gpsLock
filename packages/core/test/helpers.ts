@@ -4,9 +4,9 @@ import {
   parseConfig,
   type CheckinPurpose,
   type Fix,
-  type GpsLockConfig,
-  type GpsLockConfigInput,
-  type GpsLockState,
+  type LockationConfig,
+  type LockationConfigInput,
+  type LockationState,
 } from '../src/index.js';
 
 export const HOME = { lat: 47.3769, lng: 8.5417 }; // Zürich HB
@@ -22,7 +22,7 @@ export function north(p: { lat: number; lng: number }, m: number) {
   return { lat: p.lat + m / 111_195, lng: p.lng };
 }
 
-export function cfg(input: GpsLockConfigInput): GpsLockConfig {
+export function cfg(input: LockationConfigInput): LockationConfig {
   const res = parseConfig({ timezone: 'Europe/Zurich', ...input });
   if (!res.ok) throw new Error(JSON.stringify(res.issues));
   return res.config;
@@ -36,10 +36,10 @@ export const minutes = (d: Date, m: number) => new Date(d.getTime() + m * 60_000
 
 /** Run a sequence of check-ins, returning the last result and the state. */
 export class Sim {
-  state: GpsLockState;
+  state: LockationState;
   n = 0;
   constructor(
-    public config: GpsLockConfig,
+    public config: LockationConfig,
     start = T0,
   ) {
     this.state = initialState(config, start);

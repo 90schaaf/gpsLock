@@ -1,4 +1,4 @@
-import { DISCLAIMER_VERSION, disclaimerAccepted, MAX_PLACES, MIN_RADIUS_M, MAX_RADIUS_M, parseConfig, type ConfigIssue, type GpsLockConfig } from '@gps-lock/core';
+import { DISCLAIMER_VERSION, disclaimerAccepted, MAX_PLACES, MIN_RADIUS_M, MAX_RADIUS_M, parseConfig, type ConfigIssue, type LockationConfig } from '@lockation/core';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { LeafletMap, ZONE_COLORS, type MapCircle } from '../components/LeafletMap.js';
 import { ApiError, type Backend, type CommandInfo } from '../lib/backend.js';
@@ -40,7 +40,7 @@ export function travelExample(stepKm: number, maxKmPerCheckin: number): string {
 }
 
 export function ConfigApp({ backend, bridge }: { backend: Backend; bridge: ConfigBridge }) {
-  const [config, setConfig] = useState<GpsLockConfig>();
+  const [config, setConfig] = useState<LockationConfig>();
   const [role, setRole] = useState<string>();
   const [running, setRunning] = useState(false);
   const [loadError, setLoadError] = useState<string>();
@@ -51,7 +51,7 @@ export function ConfigApp({ backend, bridge }: { backend: Backend; bridge: Confi
   const [selected, setSelected] = useState<string>();
   const [fitKey, setFitKey] = useState('init');
   const embedded = useMemo(isEmbedded, []);
-  const configRef = useRef<GpsLockConfig>();
+  const configRef = useRef<LockationConfig>();
   configRef.current = config;
 
   useEffect(() => {
@@ -113,9 +113,9 @@ export function ConfigApp({ backend, bridge }: { backend: Backend; bridge: Confi
   }
   if (!config) return <div class="container"><div class="card muted">Loading configuration…</div></div>;
 
-  const edit = (fn: (d: GpsLockConfig) => void) =>
+  const edit = (fn: (d: LockationConfig) => void) =>
     setConfig((c) => {
-      const d = JSON.parse(JSON.stringify(c)) as GpsLockConfig;
+      const d = JSON.parse(JSON.stringify(c)) as LockationConfig;
       fn(d);
       return d;
     });
@@ -174,7 +174,7 @@ export function ConfigApp({ backend, bridge }: { backend: Backend; bridge: Confi
   return (
     <div class="container">
       <header class="top">
-        <h1>📍 GPS Lock – configuration</h1>
+        <h1>📍 Lockation – configuration</h1>
         {role && <span class="badge accent">{role}</span>}
         {running && <span class="badge warn">lock running</span>}
         {backend.demo && <span class="badge">demo</span>}
@@ -416,7 +416,7 @@ export function ConfigApp({ backend, bridge }: { backend: Backend; bridge: Confi
       {tab === 'anticheat' && (
         <div class="card stack">
           <h2>Anti-cheat</h2>
-          <p class="small muted">Browser GPS can be faked. These checks make cheating harder but GPS Lock remains a trust-assisted game.</p>
+          <p class="small muted">Browser GPS can be faked. These checks make cheating harder but Lockation remains a trust-assisted game.</p>
           <div class="grid2">
             <NumberField label="Required accuracy" suffix="m" min={10} max={500} value={config.antiCheat.maxAccuracyM} onChange={(v) => edit((d) => { d.antiCheat.maxAccuracyM = v ?? 100; })} />
             <NumberField label="Max position age" suffix="seconds" min={10} value={config.antiCheat.maxFixAgeSeconds} onChange={(v) => edit((d) => { d.antiCheat.maxFixAgeSeconds = v ?? 120; })} />
@@ -477,8 +477,8 @@ export function ConfigApp({ backend, bridge }: { backend: Backend; bridge: Confi
             }}
           />
           <span>
-            I have read the <a href="../guide/disclaimer.html" target="_blank" rel="noopener">disclaimer</a> and use GPS Lock at my own risk.
-            GPS Lock is beta software without any warranty; safety always comes first.
+            I have read the <a href="../guide/disclaimer.html" target="_blank" rel="noopener">disclaimer</a> and use Lockation at my own risk.
+            Lockation is beta software without any warranty; safety always comes first.
           </span>
         </label>
       </div>
@@ -494,7 +494,7 @@ export function ConfigApp({ backend, bridge }: { backend: Backend; bridge: Confi
       )}
       {embedded && !backend.demo && saveMsg && <p class="small">{saveMsg}</p>}
       <footer class="small muted">
-        <a href="../guide/configuration.html" target="_blank" rel="noopener">How to configure GPS Lock</a> ·{' '}
+        <a href="../guide/configuration.html" target="_blank" rel="noopener">How to configure Lockation</a> ·{' '}
         <a href="../guide/disclaimer.html" target="_blank" rel="noopener">Disclaimer</a> · Beta – use at your own risk
       </footer>
     </div>

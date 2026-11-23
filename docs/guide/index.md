@@ -1,25 +1,25 @@
-# What is GPS Lock?
+# What is Lockation?
 
-GPS Lock is an extension for [Chaster](https://chaster.app) that connects your lock to
+Lockation is an extension for [Chaster](https://chaster.app) that connects your lock to
 **where you are**. A keyholder (or you, on a self-lock) draws zones on a map and decides
 what happens when you are – or are not – in those zones.
 
 ::: warning Beta
-GPS Lock is in beta. Expect rough edges and please report problems to the extension author.
+Lockation is in beta. Expect rough edges and please report problems to the extension author.
 :::
 
 ## How it works in one minute
 
 1. **The keyholder configures** zones and rules when creating the lock (see [Configuring a lock](./configuration)).
-2. **You check in** by opening the lock in Chaster → *GPS Lock* → **Check in now**. Your phone
+2. **You check in** by opening the lock in Chaster → *Lockation* → **Check in now**. Your phone
    sends one GPS position. See [Checking in](./checking-in).
-3. **GPS Lock evaluates the rules** and applies the consequences right away – for example
+3. **Lockation evaluates the rules** and applies the consequences right away – for example
    adding time, freezing the lock, or assigning a task. Everything shows up in the lock history.
 4. **Deadlines are enforced even if you never open the page.** A missed required check-in is
    penalised automatically by the server.
 
-::: tip GPS Lock does not track you
-A web page cannot follow you in the background. GPS Lock only sees your position at the moment
+::: tip Lockation does not track you
+A web page cannot follow you in the background. Lockation only sees your position at the moment
 **you** tap *Check in*, unless your keyholder enables optional [background tracking](./background-tracking) with the OwnTracks app.
 :::
 

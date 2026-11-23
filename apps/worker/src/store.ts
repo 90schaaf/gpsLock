@@ -1,6 +1,6 @@
 /** KV-backed check-in history (F9) and helpers. */
-import type { CheckinRecord } from '@gps-lock/core';
-import { redactRecord } from '@gps-lock/core';
+import type { CheckinRecord } from '@lockation/core';
+import { redactRecord } from '@lockation/core';
 import type { KVLike } from './types.js';
 
 export const HISTORY_LIMIT = 200;

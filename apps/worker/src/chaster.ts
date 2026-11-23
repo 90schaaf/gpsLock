@@ -1,5 +1,5 @@
 /** Thin client for the Chaster Extensions API. All calls use the secret developer token. */
-import type { ChasterMetadata } from '@gps-lock/core';
+import type { ChasterMetadata } from '@lockation/core';
 import { HttpError } from './types.js';
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;

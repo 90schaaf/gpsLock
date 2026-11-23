@@ -12,7 +12,7 @@ The zone may be too small for your GPS accuracy. Ask your keyholder to enlarge i
 **I missed a check-in because I was asleep.**
 Ask your keyholder to configure *quiet hours*.
 
-**Does GPS Lock drain my battery?**
+**Does Lockation drain my battery?**
 No. It only uses GPS for a few seconds when you tap *Check in*.
 
 **Can my keyholder see where I am right now?**
@@ -21,5 +21,5 @@ No. Only at your check-ins, and only the coordinates if *exact* sharing is enabl
 **A consequence shows "failed".**
 The extension it needs is probably not enabled on the lock (e.g. Pillory, Tasks, Verification Picture). The other consequences were still applied.
 
-**Can GPS Lock control Find the key / Jigsaw / Reward store / Typing lines?**
+**Can Lockation control Find the key / Jigsaw / Reward store / Typing lines?**
 Not yet – Chaster does not offer commands for these extensions yet. Once it does, they appear in the configuration automatically.

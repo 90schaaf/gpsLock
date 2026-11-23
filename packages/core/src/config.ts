@@ -129,7 +129,7 @@ export const PrivacySchema = z
   .default({});
 export type CoordinatePrivacy = 'zone_only' | 'exact';
 
-export const GpsLockConfigSchema = z
+export const LockationConfigSchema = z
   .object({
     version: z.literal(1).default(1),
     timezone: z.string().min(1).max(64).default('UTC'),
@@ -204,15 +204,15 @@ export const GpsLockConfigSchema = z
     });
   });
 
-export type GpsLockConfig = z.infer<typeof GpsLockConfigSchema>;
+export type LockationConfig = z.infer<typeof LockationConfigSchema>;
 
 /** Bump when the disclaimer text changes materially – keyholders must accept again on the next save. */
 export const DISCLAIMER_VERSION = 1;
 
-export function disclaimerAccepted(config: Pick<GpsLockConfig, 'disclaimer'>): boolean {
+export function disclaimerAccepted(config: Pick<LockationConfig, 'disclaimer'>): boolean {
   return (config.disclaimer?.version ?? 0) >= DISCLAIMER_VERSION;
 }
-export type GpsLockConfigInput = z.input<typeof GpsLockConfigSchema>;
+export type LockationConfigInput = z.input<typeof LockationConfigSchema>;
 
 export function isValidTimezone(tz: string): boolean {
   try {
@@ -223,8 +223,8 @@ export function isValidTimezone(tz: string): boolean {
   }
 }
 
-export function defaultConfig(timezone = 'UTC'): GpsLockConfig {
-  return GpsLockConfigSchema.parse({ timezone });
+export function defaultConfig(timezone = 'UTC'): LockationConfig {
+  return LockationConfigSchema.parse({ timezone });
 }
 
 export interface ConfigIssue {
@@ -232,11 +232,11 @@ export interface ConfigIssue {
   message: string;
 }
 
-export type ParseConfigResult = { ok: true; config: GpsLockConfig } | { ok: false; issues: ConfigIssue[] };
+export type ParseConfigResult = { ok: true; config: LockationConfig } | { ok: false; issues: ConfigIssue[] };
 
 /** Parse unknown input (from Chaster or the config page) into a full config. */
 export function parseConfig(input: unknown): ParseConfigResult {
-  const res = GpsLockConfigSchema.safeParse(input ?? {});
+  const res = LockationConfigSchema.safeParse(input ?? {});
   if (res.success) return { ok: true, config: res.data };
   return {
     ok: false,
@@ -245,14 +245,14 @@ export function parseConfig(input: unknown): ParseConfigResult {
 }
 
 /** Lenient variant for stored configs: falls back to defaults instead of failing hard. */
-export function parseConfigOrDefault(input: unknown): GpsLockConfig {
+export function parseConfigOrDefault(input: unknown): LockationConfig {
   const res = parseConfig(input);
   return res.ok ? res.config : defaultConfig();
 }
 
-export function enabledRules(cfg: GpsLockConfig): string[] {
+export function enabledRules(cfg: LockationConfig): string[] {
   return [
-    ...(Object.keys(cfg.rules) as (keyof GpsLockConfig['rules'])[]).filter((k) => cfg.rules[k].enabled),
+    ...(Object.keys(cfg.rules) as (keyof LockationConfig['rules'])[]).filter((k) => cfg.rules[k].enabled),
     ...(cfg.tracking.enabled ? ['tracking'] : []),
   ];
 }

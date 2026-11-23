@@ -1,5 +1,5 @@
 /** F14 – background tracking status and OwnTracks pairing. */
-import type { SessionView } from '@gps-lock/core';
+import type { SessionView } from '@lockation/core';
 import qrcode from 'qrcode-generator';
 import { useMemo, useState } from 'preact/hooks';
 import type { Backend, PairingResult } from '../lib/backend.js';

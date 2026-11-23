@@ -1,6 +1,6 @@
 # Configuring a lock
 
-When you add **GPS Lock** to a lock (self-lock or shared lock), Chaster opens the GPS Lock
+When you add **Lockation** to a lock (self-lock or shared lock), Chaster opens the Lockation
 configuration page. Configure everything and press Chaster's **Save** button.
 
 The configuration can be edited later while the lock is running (as far as Chaster allows the keyholder to edit extensions).
@@ -38,7 +38,7 @@ Choose a type and press **Add**:
 | Consequence | Notes |
 |-------------|-------|
 | ➕ Add time / ➖ Remove time | In minutes. Travel goals multiply this by the number of steps. |
-| ❄️ Freeze | Optional duration – GPS Lock unfreezes automatically afterwards. Without a duration the lock stays frozen until an *Unfreeze* consequence (e.g. on the next successful check-in). |
+| ❄️ Freeze | Optional duration – Lockation unfreezes automatically afterwards. Without a duration the lock stays frozen until an *Unfreeze* consequence (e.g. on the next successful check-in). |
 | 🔥 Unfreeze | Great as "on successful check-in". |
 | 🪵 Pillory | 5 minutes to 24 hours, with a reason. Requires the Pillory extension on the lock. |
 | ✅ Assign task | Requires the Tasks extension on the lock. |
@@ -65,14 +65,14 @@ offer commands yet – as soon as they do, they will appear in the command list 
 
 ## 5. Privacy 🔒
 
-- **Zones only** (recommended): GPS Lock stores which zones the wearer was in – no coordinates.
+- **Zones only** (recommended): Lockation stores which zones the wearer was in – no coordinates.
 - **Exact**: the keyholder can see each check-in on a map.
 
 The wearer sees this before accepting the lock and can always switch to *zones only*. Read more in [Privacy & fairness](./privacy).
 
 ## Disclaimer ✅
 
-Before the first save the keyholder must tick **"I have read the disclaimer and use GPS Lock at my own risk"** at the bottom of the
+Before the first save the keyholder must tick **"I have read the disclaimer and use Lockation at my own risk"** at the bottom of the
 page. Without it, saving fails. The confirmation is stored with the lock's configuration; if the [disclaimer](./disclaimer) changes
 materially, you are asked again.
 

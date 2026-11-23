@@ -1,4 +1,4 @@
-import { ConsequenceSchema, PLANNED_EXTENSIONS, type Consequence, type Zone } from '@gps-lock/core';
+import { ConsequenceSchema, PLANNED_EXTENSIONS, type Consequence, type Zone } from '@lockation/core';
 import { useState } from 'preact/hooks';
 import type { CommandInfo } from '../lib/backend.js';
 
@@ -66,7 +66,7 @@ export function defaultConsequence(type: Consequence['type']): Consequence {
     case 'verification_picture':
       return { type };
     case 'pillory':
-      return { type, durationMinutes: 30, reason: 'GPS Lock rule broken' };
+      return { type, durationMinutes: 30, reason: 'Lockation rule broken' };
     case 'task':
       return { type, task: 'Describe the task', points: 0, verificationRequired: false };
     case 'log':

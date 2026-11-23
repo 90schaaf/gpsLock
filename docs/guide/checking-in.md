@@ -1,6 +1,6 @@
 # Checking in
 
-## Open GPS Lock
+## Open Lockation
 
 In Chaster open your running lock. You will find **GPS check-in** in the lock's action list
 (it shows the next deadline and a **!** badge when overdue), or open the extension from the

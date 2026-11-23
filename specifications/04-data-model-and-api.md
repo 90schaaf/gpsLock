@@ -3,7 +3,7 @@
 The source of truth for the types is `packages/core/src/config.ts` and `state.ts` (zod schemas).
 This document describes the shape.
 
-## GpsLockConfig (stored as Chaster extension `config`)
+## LockationConfig (stored as Chaster extension `config`)
 
 ```ts
 {
@@ -29,7 +29,7 @@ This document describes the shape.
 }
 ```
 
-## GpsLockState (stored in Chaster session `data.gpsLock`)
+## LockationState (stored in Chaster session `data.lockation`)
 
 ```ts
 {
