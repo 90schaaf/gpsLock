@@ -279,6 +279,10 @@ AC: 1. Save without accepted disclaimer → refused (page, worker 400 `disclaime
   (location within `heartbeatMinutes`) | `no_signal`. Previously "connected" was shown right after pairing.
 - **Access control:** `/api/session` and all main-page endpoints accept only the roles `wearer` and `keyholder`
   (`403 not_allowed` otherwise).
+  The configuration endpoints (`/api/config/get`, `/api/config/save`, `/api/capabilities` with a configuration token) apply
+  the same check (to verify in the end-to-end test that Chaster uses only these role names while a lock is being created).
+- **Lock history keeps zone names** (decided 2026-11-23): custom log entries continue to name zones ("Entered *Bar*");
+  wearer and keyholder accept that the Chaster lock history may show them.
 
 AC: 1. A role other than wearer/keyholder gets 403 without any zone or position data. 2. Status is `waiting` after pairing and
 `connected` after the first location; a location from an earlier pairing doesn't count. 3. Keyholder sees `lastPosition` only

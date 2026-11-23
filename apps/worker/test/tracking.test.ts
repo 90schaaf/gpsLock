@@ -179,3 +179,15 @@ describe('security: only wearer and keyholder', () => {
     expect(v.tracking.status).toBe('connected');
   });
 });
+
+describe('security: configuration page roles', () => {
+  it('refuses config endpoints for other roles', async () => {
+    fake.configTokens.set('cfg-other', { config: {}, role: 'viewer' as any, sessionId: 's1' });
+    for (const path of ['/api/config/get', '/api/capabilities']) {
+      const r = await post(path, { configToken: 'cfg-other' });
+      expect(r.status).toBe(403);
+    }
+    const save = await post('/api/config/save', { configToken: 'cfg-other', config: { disclaimer: { version: 1, acceptedAt: 'x' } } });
+    expect(save.status).toBe(403);
+  });
+});
