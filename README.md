@@ -14,7 +14,7 @@ of other extensions. It works on iPhone and Android in the browser (no app neede
 
 ```
 Chaster (iframe) ──▶ GitHub Pages: apps/web  ──fetch──▶ Cloudflare Worker: apps/worker ──▶ api.chaster.app
-                                                         ▲ webhooks (Basic auth)   cron */5 min, KV history
+                                                         ▲ webhooks (Basic auth)   cron every min, D1 storage
 ```
 
 | Path | What |
@@ -44,11 +44,13 @@ Full step-by-step guide: [`docs/technical/setup.md`](docs/technical/setup.md).
    ```bash
    cd apps/worker
    npx wrangler login
-   npx wrangler kv namespace create LOCKATION_KV     # put the id into wrangler.toml
+   npx wrangler d1 create lockation                  # put the database_id into wrangler.toml
+   npx wrangler d1 migrations apply lockation --remote
    # edit ALLOWED_ORIGINS in wrangler.toml → https://90schaaf.github.io
    npx wrangler secret put CHASTER_TOKEN
    npx wrangler secret put WEBHOOK_USERNAME
    npx wrangler secret put WEBHOOK_PASSWORD
+   npx wrangler secret put NTFY_TOKEN                # optional: push notifications via ntfy
    npx wrangler deploy
    ```
 3. **GitHub Pages** – Settings → Pages → Source *GitHub Actions*; add the repository variable

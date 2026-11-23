@@ -3,7 +3,7 @@
 Normally Lockation only knows where you are when you tap **Check in**. If your keyholder enables
 **background tracking**, your phone reports its location automatically with the free app
 **OwnTracks**. The lock then reacts on its own, for example the moment you enter a forbidden
-zone or leave home during a curfew.
+zone or leave home during a "must stay inside" window.
 
 ::: info Why a separate app?
 Browsers (Safari, Chrome) don't let web pages use the location in the background. OwnTracks is
@@ -28,7 +28,9 @@ uses the phone's battery-friendly location services.
    - **no signal** – the last location is older than that.
 
    It turns **connected** only after the first location arrives. OwnTracks also receives
-   your lock's zones, so it can report entering and leaving them precisely.
+   your lock's zones (and the hunt checkpoints you can see), so it can report entering and leaving them precisely.
+6. Keep the OwnTracks **mode** the card tells you (*Move* or *Significant*). Lockation sets it when you connect and
+   changes it remotely if the keyholder changes the setting.
 
 The credentials are shown only once. If you lose them or change phones, tap **Set up again**. This creates new
 credentials, and the old phone stops working.
@@ -41,18 +43,22 @@ username and password shown.
 | Rule | Behaviour with tracking |
 |------|-------------------------|
 | Required check-in | A background location inside a required zone counts as a check-in (if the keyholder allowed it). |
-| Forbidden zones | Triggered after you have been inside for a few minutes (set by the keyholder) – also when the visit is only noticed when you leave. |
+| Forbidden zones | A timeline: warning after 2 min, first penalty after 10 min, then every 5 min while you stay (adjustable) – see [Rules explained](./rules#forbidden-zones). |
 | Reward zones | Can require a **minimum stay**, e.g. 45 minutes at the gym. |
-| Curfew | Between e.g. 22:00 and 06:00 you must stay inside the curfew zone. |
+| "Must stay inside" windows | Between e.g. 22:00 and 06:00 you must stay inside one of the required zones with an active window. |
 | Travel goals | Counts your real route, not only the straight line between check-ins. |
-| Scavenger hunt | Walking into the current checkpoint completes it automatically. Background updates are never wrong guesses. |
+| Scavenger hunt | Walking into a checkpoint completes it automatically; visible checkpoints are reported by OwnTracks the moment you arrive. Background updates are never wrong guesses. |
 
 **Missing signal:** if Lockation receives no location for the configured time (phone off, app stopped,
 permission removed, tracking never set up), the *missing signal* consequences apply – just like a missed check-in.
 The default is **20 minutes** (minimum 15). That only works if the phone reports often: a phone lying still – especially an
 iPhone in OwnTracks' battery-saving *Significant* mode – may stay silent for much longer. Keyholders should test it with the
-wearer's phone and raise the value (e.g. 3–6 h) or ask the wearer to use OwnTracks' *Move* mode if penalties appear while the
+wearer's phone and raise the value (e.g. 3–6 h), use **Move** mode, or set **quiet hours** if penalties appear while the
 phone is simply not moving.
+
+- **Quiet hours** (optional, e.g. 23:00–07:00): no missing-signal penalties or warnings at night. After the quiet hours the
+  phone gets one full period to report.
+- **Warning** (optional): N minutes before a missing-signal penalty you get a [notification](./notifications).
 
 GPS edge cases: Lockation only treats you as having left a zone once you are clearly outside (accuracy taken into account),
 so a jumpy GPS at the edge of a zone doesn't trigger anything.
@@ -75,5 +81,10 @@ OwnTracks. If the lock requires tracking, the missing-signal rule may then apply
 
 ## Battery
 
-OwnTracks in its default *Significant* mode uses very little battery: it wakes up on major location changes and on zone
-entries and exits. In *Move* mode it reports more often and uses more battery.
+| Mode | Reports | Battery |
+|---|---|---|
+| **Significant** | on major location changes and zone entries/exits | very low |
+| **Move** | every few minutes / ~100 m while moving | higher |
+
+The keyholder chooses the mode (*Tracking → OwnTracks mode*). *Auto* (default) uses **Move** when the missing-signal time is
+under 60 minutes or forbidden zones are used – their minute-by-minute timeline needs frequent reports – otherwise **Significant**.

@@ -35,12 +35,16 @@ extensions can react to `lockation.checked-in` events.
 
 ### Zone matching per zone (decided 2026-11-23, implement later)
 
+> **Status: implemented 2026-11-23** (config/state v2, worker v2, web UI).
+
 - `Zone.matchMode?: "lenient" | "strict"` and `Checkpoint.matchMode?` override the lock-wide `matchMode`, which stays the default (existing configs unchanged).
 - All `isInside` callers use `zone.matchMode ?? config.matchMode`; leaving a zone keeps the hysteresis rule (`distance − accuracy > radius`) regardless of mode.
 - Config editor: *Lenient / Strict* selector per zone and checkpoint; adding a zone to the forbidden rule suggests *strict* unless the keyholder already chose a mode.
 - Update docs (configuration, rules), zod schema, tests (per-zone override, fallback, forbidden default suggestion).
 
 ### Zone roles in the zone overview (requested 2026-11-23, implement later)
+
+> **Status: implemented 2026-11-23** (config/state v2, worker v2, web UI).
 
 - **Decided (2026-11-23):** a zone has roles from this set: **required and/or reward**, **or forbidden**, **or neutral**.
   - Allowed combinations: `required`, `reward`, `required + reward`, `forbidden`, `neutral` (no role).
@@ -56,6 +60,8 @@ extensions can react to `lockation.checked-in` events.
 - Could be combined with *Zone matching per zone* (the forbidden role suggests strict matching).
 
 ### Forbidden zones: per-zone cooldown and extra punishment (requested 2026-11-23, implement later)
+
+> **Status: implemented 2026-11-23** (config/state v2, worker v2, web UI).
 
 - **Per-zone escalation with warnings (decided 2026-11-23)** – replaces the single cooldown. Defaults, adjustable per zone:
   - `firstPenaltyAfterMinutes` = **10**: the first penalty applies after 10 min inside; `firstWarningAfterMinutes` = **2**:
@@ -100,6 +106,8 @@ extensions can react to `lockation.checked-in` events.
 
 ### Required zones: per-zone interval/grace, extra punishment, time windows (requested 2026-11-23, implement later)
 
+> **Status: implemented 2026-11-23** (config/state v2, worker v2, web UI).
+
 - **Per-zone interval and grace period**, falling back to the rule-level values.
   - **Decided (2026-11-23): grace period default 5 min** (was 15); interval default stays 4 h (minimum 15 min).
   - **Decided (2026-11-23): each zone separately (AND).** Each required zone gets its own requirement and deadline
@@ -121,6 +129,8 @@ extensions can react to `lockation.checked-in` events.
 - Related: *Zone roles* (only required zones listed) and *Forbidden per-zone settings* use the same per-zone expandable editor.
 
 ### Hunt: show all targets to the wearer (requested 2026-11-23, implement later)
+
+> **Status: implemented 2026-11-23** (config/state v2, worker v2, web UI).
 
 Goal: an option that lets the wearer see **all** hunt checkpoints, and make that the default reveal.
 
@@ -160,6 +170,8 @@ Goal: an option that lets the wearer see **all** hunt checkpoints, and make that
   value; finding a later checkpoint out of order does nothing; docs (rules, configuration, checking-in) updated.
 
 ### Curfew merged into zone time windows (change request 2026-11-23, specify now, implement later)
+
+> **Status: implemented 2026-11-23** (config/state v2, worker v2, web UI).
 
 Decisions: windows are set **per zone**; for a required zone a window means **"must stay inside"** (old curfew behaviour).
 The standalone *Curfew* rule (F15) is removed and replaced by time windows on required and forbidden zones.
@@ -217,6 +229,8 @@ cooldown and extra punishment*, *Zone roles*.
 
 ### Warning before a missing-signal penalty (requested 2026-11-23, implement later)
 
+> **Status: implemented 2026-11-23** (config/state v2, worker v2, web UI).
+
 - Option `tracking.warnBeforeMinutes?: number` (e.g. 30): when no location has arrived and the heartbeat deadline is that close,
   the wearer gets a warning ("No location from your phone for 2 h 30 min – open OwnTracks, otherwise +1 h in 30 min").
   At most one warning per heartbeat period.
@@ -269,6 +283,8 @@ cooldown and extra punishment*, *Zone roles*.
     triggers a `setConfiguration` push once.
 
 ### F17 – Reachability safety check for zones and checkpoints (requested 2026-11-23, implement later)
+
+> **Status: implemented 2026-11-23** (config/state v2, worker v2, web UI).
 
 Goal: protect the wearer from being sent to places that are dangerous or impossible to reach. Every zone and hunt checkpoint
 is checked when it is placed; each point flagged as *out of reach* must be **confirmed individually** by the keyholder as
@@ -336,6 +352,8 @@ per point, ack cleared when reasons change, save blocked, service failure → no
 
 ### Keyholder notifications (decided 2026-11-23: part of the beta)
 
+> **Status: implemented 2026-11-23** (config/state v2, worker v2, web UI).
+
 - The keyholder can subscribe to push notifications via **ntfy**, like the wearer's warnings: *Set up notifications* on the
   keyholder view of the main page → worker creates a separate secret topic (`KV NTFY_KH:<sessionId>`), subscribe link + QR code;
   *Stop notifications* deletes it; the delete webhook removes it with the session.
@@ -356,6 +374,8 @@ per point, ack cleared when reasons change, save blocked, service failure → no
 
 ### Storage: move from KV to Cloudflare D1 (decided 2026-11-23, beta)
 
+> **Status: implemented 2026-11-23** (config/state v2, worker v2, web UI).
+
 - Reason: Workers KV on the free tier allows ~1,000 writes/day; the 5-min cron cursor alone uses ~290, the planned 1-min timer
   would add ~1,440. D1 (SQLite) free tier allows ~100k row writes/day (verify current limits in the Cloudflare dashboard).
 - Tables (proposal): `history(session_id, id, at, record_json)` (last 200 per session), `devices(username, session_id, hash)`,
@@ -368,6 +388,8 @@ per point, ack cleared when reasons change, save blocked, service failure → no
   due-escalation query, cleanup on session delete.
 
 ### ntfy with an account token (decided 2026-11-23, beta)
+
+> **Status: implemented 2026-11-23** (config/state v2, worker v2, web UI).
 
 - ntfy.sh limits anonymous senders per IP and Cloudflare Workers share IPs → the Worker authenticates with an access token of a
   (free) ntfy.sh account: secret `NTFY_TOKEN` (`wrangler secret put NTFY_TOKEN`), header `Authorization: Bearer <token>`.
@@ -384,6 +406,8 @@ per point, ack cleared when reasons change, save blocked, service failure → no
 
 ### Reward zones per zone (decided 2026-11-23)
 
+> **Status: implemented 2026-11-23** (config/state v2, worker v2, web UI).
+
 - Per reward zone, falling back to the rule values: `cooldownMinutes`, `maxPerDay`, `dwellMinutes` (minimum stay) and an extra
   reward list on top of the common `onEnter` (`when` scheduling as for forbidden repeats is not needed).
 - Shape: `rules.reward.zones: Record<zoneId, { cooldownMinutes?, maxPerDay?, dwellMinutes?, onEnter? }>`; daily count per zone
@@ -391,6 +415,8 @@ per point, ack cleared when reasons change, save blocked, service failure → no
 - Same expandable per-zone editor as required/forbidden. Tests: per-zone limits independent, overall cap, fallback, dwell per zone.
 
 ### Configuration changes during a running lock (decided 2026-11-23, beta)
+
+> **Status: implemented 2026-11-23** (config/state v2, worker v2, web UI).
 
 - Changes apply immediately (as today), but Lockation makes them visible to the wearer:
   - The worker compares the old and new configuration on save (`configSave` with a running session) and writes a summary to the

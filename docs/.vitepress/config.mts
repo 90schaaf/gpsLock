@@ -25,6 +25,7 @@ export default defineConfig({
             { text: 'What is Lockation?', link: '/guide/' },
             { text: 'Checking in', link: '/guide/checking-in' },
             { text: 'Background tracking', link: '/guide/background-tracking' },
+            { text: 'Notifications', link: '/guide/notifications' },
             { text: 'Configuring a lock', link: '/guide/configuration' },
             { text: 'Rules explained', link: '/guide/rules' },
             { text: 'Privacy & fairness', link: '/guide/privacy' },

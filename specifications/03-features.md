@@ -217,7 +217,7 @@ AC: 1. Pairing returns a valid provisioning link (base64 JSON with mode 3 and th
 
 ## F15 – Curfew (needs F14)
 
-> **Planned change (2026-11-23):** curfew will be merged into per-zone time windows of required ("must stay inside") and forbidden zones and then removed as a separate rule – see backlog *Curfew merged into zone time windows* in `05-iterations.md`.
+> **Superseded (implemented 2026-11-23):** curfew was merged into per-zone time windows of required ("must stay inside") and forbidden zones and removed as a separate rule; v1 curfew configs are migrated – see backlog *Curfew merged into zone time windows* in `05-iterations.md`.
 
 Config `rules.curfew: {enabled, zoneIds[], start "HH:MM", end "HH:MM", cooldownMinutes (default 60), onOutside[]}`.
 During the window (lock timezone, may cross midnight), any accepted observation (tracked or manual) that is not inside any curfew zone
@@ -287,3 +287,23 @@ AC: 1. Save without accepted disclaimer → refused (page, worker 400 `disclaime
 AC: 1. A role other than wearer/keyholder gets 403 without any zone or position data. 2. Status is `waiting` after pairing and
 `connected` after the first location; a location from an earlier pairing doesn't count. 3. Keyholder sees `lastPosition` only
 with exact sharing; the wearer always (approximate in zone-only mode).
+
+## F20 – Configuration v2 (2026-11-23)
+
+Implements the backlog items marked *implemented* in `05-iterations.md`. Summary:
+
+- **Zones** carry roles (`required` and/or `reward`, or `forbidden`, or none = neutral), an optional match mode and per-zone
+  settings for each role. Rule tabs list only zones of their role; per-zone values override the rule values.
+- **Required**: one deadline per zone (`combine: each`; v1 locks keep `any`), optional "anywhere" deadline, grace default 5 min,
+  optional warning before deadlines, per-zone extra lists, **stay windows** (former curfew, F15) with weekday filter.
+- **Forbidden**: escalation timeline (warning 2′, penalty 10′, every 5′, warning 1′ after each penalty; all per zone, warnings
+  can be off), re-entry within the repeat time continues the visit, time windows, per-zone extra punishment, consequence
+  scheduling `when: every | everyNth | nth`. Without tracking: immediate penalty, repeated at most every 5 min.
+- **Reward**: per-zone cooldown, daily cap, minimum stay, extra reward; the rule cap is overall.
+- **Hunt**: reveal `all` (default; no wrong guesses), order `sequence | any`, visible checkpoints synced to OwnTracks.
+- **Tracking**: OwnTracks mode `auto | move | significant` (pushed with `setConfiguration`), missing-signal quiet hours and warning.
+- **Notifications** via ntfy for the wearer (warnings, rules changed) and the keyholder (switchable events).
+- **Live-only random verification pictures** (`antiCheat.liveVerificationEveryHours`).
+- **Reachability check** (F17) with per-point confirmation stored as `reachabilityAck`.
+- **Storage** on D1; 1-minute cron for due sessions.
+- **Migration**: `migrateConfig` (v1 → v2, behaviour preserving) and `migrateState`; covered by the v1 test suite.

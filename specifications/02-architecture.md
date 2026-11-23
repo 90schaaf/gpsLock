@@ -24,8 +24,8 @@
  │  POST /api/config/save    configToken + config → validate + PUT      │
  │  POST /api/capabilities   configToken|mainToken → available commands │
  │  POST /webhook            Chaster webhooks (Basic auth)              │
- │  cron */5 * * * *         deadlines, timed unfreeze, hunt timeouts   │
- │  KV: HISTORY (check-in log), CRON cursor                             │
+ │  cron * * * * *           due sessions; full sweep every 5th minute  │
+ │  D1: history, devices, ntfy topics, due index, sent, cron cursor     │
  └──────────┬───────────────────────────────────────────────────────────┘
             │ Bearer DEVELOPER_TOKEN
             ▼
@@ -56,8 +56,8 @@ npm workspaces, TypeScript strict mode, ESM everywhere.
 |------|-------|-----|
 | Lock configuration (`LockationConfig`) | Chaster extension `config` | Chaster owns it and shows it to the wearer before they accept a shared lock |
 | Engine state (`LockationState`) | Chaster session `data` | Authoritative and per session; no consistency issues with KV; deleted together with the session |
-| Check-in history (last 200) | Workers KV `HISTORY:<sessionId>` | Too large for session data; purged on `extension_session.deleted` |
-| Cron cursor | Workers KV `CRON:cursor` | Batching across invocations (subrequest limit) |
+| Check-in history (last 200) | D1 table `history` (v2; was KV) | Too large for session data; purged on `extension_session.deleted` |
+| Cron cursor | D1 table `kv` (`cron:cursor`) | Batching across invocations (subrequest limit) |
 
 ## 4. Security
 

@@ -19,6 +19,8 @@
   Lockation gets "not allowed" – no zones, positions or history. The keyholder sees the wearer's last reported position on the
   map **only with exact sharing**; in *zones only* mode just the names of the zones the wearer is currently in.
   The wearer's live position on the own map is computed in the wearer's browser and is not sent to the server by itself.
+- **Notifications** (optional, [ntfy](./notifications)): texts contain zone names and consequences, never coordinates; ntfy.sh can read the text.
+- **Safety check** in the configuration page: zone and checkpoint coordinates (not the wearer's positions) are looked up at OpenStreetMap (Overpass, Nominatim).
 - Address search in the configuration page uses OpenStreetMap Nominatim; map tiles come from OpenStreetMap (OpenStreetMap
   sees which map area is loaded, not your GPS position).
 

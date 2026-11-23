@@ -34,10 +34,16 @@ The remaining extension settings (URLs) are filled in step 5, once the worker an
 ```bash
 cd apps/worker
 npx wrangler login
-npx wrangler kv namespace create LOCKATION_KV
+npx wrangler d1 create lockation
 ```
 
-Copy the printed `id` into `apps/worker/wrangler.toml` (`[[kv_namespaces]]`), and set:
+Copy the printed `database_id` into `apps/worker/wrangler.toml` (`[[d1_databases]]`) and create the tables:
+
+```bash
+npx wrangler d1 migrations apply lockation --remote
+```
+
+Then set:
 
 ```toml
 [vars]
@@ -51,6 +57,7 @@ Set the secrets (you will be prompted for the values):
 npx wrangler secret put CHASTER_TOKEN      # developer token from step 2
 npx wrangler secret put WEBHOOK_USERNAME   # choose any, e.g. chaster
 npx wrangler secret put WEBHOOK_PASSWORD   # choose a long random string
+npx wrangler secret put NTFY_TOKEN         # optional: ntfy.sh access token, enables notifications
 npx wrangler deploy
 ```
 
@@ -59,7 +66,16 @@ Check: `curl <worker>/health` → `{"ok":true,...}`.
 The OwnTracks endpoint for background tracking is `<worker>/track/owntracks`. It is derived from the request URL;
 if you use a custom domain, set `PUBLIC_URL` in `[vars]`. No extra setup is needed – wearers pair their phone from the check-in page.
 
-The cron trigger (`*/5 * * * *`) is created automatically from `wrangler.toml`.
+The cron trigger (`* * * * *`) is created automatically from `wrangler.toml`: every minute it handles only locks that are due
+(forbidden-zone warnings and penalties, deadlines), every 5th minute it sweeps all locks.
+
+**Notifications (ntfy)** – create a free account at [ntfy.sh](https://ntfy.sh), generate an **access token** (Account → Access
+tokens) and store it with `npx wrangler secret put NTFY_TOKEN`. Without the token notifications are disabled and the setup
+buttons are hidden. To use your own ntfy server set `NTFY_BASE` in `[vars]`. `APP_URL` (in `[vars]`) is the click target of
+notifications.
+
+**Upgrading from KV (earlier versions):** the worker now uses D1 instead of KV. Create the D1 database as above; the old KV
+namespace can be deleted (`npx wrangler kv namespace delete --namespace-id <id>`), its data is not migrated.
 
 ## 4. Publish the app and docs on GitHub Pages
 
@@ -99,7 +115,7 @@ In the developer portal, open your extension and set:
 **Configuration description** (Handlebars, shown on the lock so the wearer knows the rules before accepting):
 
 ```handlebars
-{{#if rules.required.enabled}}GPS check-in every {{rules.required.intervalMinutes}} min. {{/if}}{{#if rules.forbidden.enabled}}Forbidden zones. {{/if}}{{#if rules.reward.enabled}}Reward zones. {{/if}}{{#if rules.travel.enabled}}Travel goals ({{rules.travel.stepKm}} km). {{/if}}{{#if rules.hunt.enabled}}Scavenger hunt ({{rules.hunt.checkpoints.length}} checkpoints). {{/if}}{{#if tracking.enabled}}Background tracking with OwnTracks required{{#if tracking.liveOnly}} (live tracking only, no manual check-ins){{/if}}. {{/if}}{{#if rules.curfew.enabled}}Curfew {{rules.curfew.start}}–{{rules.curfew.end}}. {{/if}}Location sharing: {{privacy.coordinates}}. Beta – use at your own risk, safety first.
+{{#if rules.required.enabled}}Required zones / check-ins (default every {{rules.required.intervalMinutes}} min). {{/if}}{{#if rules.forbidden.enabled}}Forbidden zones (penalty after {{rules.forbidden.firstPenaltyAfterMinutes}} min inside, then every {{rules.forbidden.repeatEveryMinutes}} min). {{/if}}{{#if rules.reward.enabled}}Reward zones. {{/if}}{{#if rules.travel.enabled}}Travel goals ({{rules.travel.stepKm}} km). {{/if}}{{#if rules.hunt.enabled}}Scavenger hunt ({{rules.hunt.checkpoints.length}} checkpoints). {{/if}}{{#if tracking.enabled}}Background tracking with OwnTracks required{{#if tracking.liveOnly}} (live tracking only, no manual check-ins){{/if}}. {{/if}}Location sharing: {{privacy.coordinates}}. Beta – use at your own risk, safety first.
 ```
 
 **Extension description** (shown in Chaster's extension list) – include the disclaimer, e.g.:
@@ -123,6 +139,8 @@ Troubleshooting:
 - *"The backend URL is not configured"* → `VITE_API_BASE` variable missing; re-run the Pages workflow.
 - CORS errors → `ALLOWED_ORIGINS` must be exactly `https://90schaaf.github.io` (no path, no slash).
 - 401 from the worker → wrong developer token secret.
+- `D1_ERROR: no such table` → run `npx wrangler d1 migrations apply lockation --remote`.
+- No notifications → `NTFY_TOKEN` secret missing (the setup button is then hidden).
 - Webhook deliveries failing → check the delivery log in the developer portal; credentials must match.
 - Location never requested inside Chaster → geolocation browser capability not enabled; the page offers *Open in new tab* as fallback.
 
