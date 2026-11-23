@@ -116,3 +116,27 @@ code { overflow-wrap: anywhere; }
 /* Text inputs next to fixed-width fields share the row instead of forcing it wider than the frame. */
 .zone-list li > input:not([type='number']), .row > input.grow { width: auto; flex: 1 1 120px; }
 .zone-list li > input[type='number'], .row > input[type='number'] { flex: none; }
+
+/* v2 editors: role chips, time windows, per-zone details. Everything wraps inside the 618 px frame. */
+.row.nowrap { flex-wrap: nowrap; }
+.row.nowrap > input, .row.nowrap > select { flex: 1 1 0; width: auto; min-width: 0; }
+.row.nowrap > input.num, input.num { flex: none; width: 80px; }
+.full { flex-basis: 100%; min-width: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.chip { padding: 3px 10px; font-size: 0.8rem; border-radius: 999px; }
+.chip.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+select.chip-select { width: auto; max-width: 100%; font-size: 0.8rem; padding: 3px 8px; border-radius: 999px; }
+.window-row { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); }
+.window-row input[type='time'] { background: var(--card); }
+details.zone-details { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; min-width: 0; }
+details.zone-details > summary { cursor: pointer; overflow-wrap: anywhere; }
+details.zone-details[open] > summary { margin-bottom: 8px; }
+.slots li { border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.mono { font-variant-numeric: tabular-nums; font-weight: 600; }
+.hunt-list li { display: flex; gap: 8px; align-items: flex-start; }
+.hunt-list .cp-num { flex: none; width: 1.6em; height: 1.6em; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #9b59b6; color: #fff; font-size: 0.8rem; }
+.hunt-list .cp-found .cp-num { background: var(--muted); }
+.hunt-list .cp-upcoming .cp-num { background: transparent; color: var(--text); border: 1px dashed var(--muted); }
+.leaflet-tooltip.map-label { background: #9b59b6; color: #fff; border: 0; border-radius: 999px; padding: 1px 7px; font-weight: 700; box-shadow: none; }
+.leaflet-tooltip.map-label::before { display: none; }
+.notice-card { border-left: 4px solid var(--warn); }

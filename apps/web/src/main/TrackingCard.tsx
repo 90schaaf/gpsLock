@@ -21,6 +21,8 @@ const STATUS: Record<TrackingStatus, { label: string; cls: string }> = {
   no_signal: { label: 'no signal', cls: 'bad' },
 };
 
+const MODE_NAME = { move: 'Move', significant: 'Significant' } as const;
+
 const ago = (iso?: string) => {
   if (!iso) return 'never';
   const m = Math.round((Date.now() - Date.parse(iso)) / 60_000);
@@ -88,6 +90,12 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
         {t.missedCount > 0 && ` · missed ${t.missedCount}×`}
       </div>
       {view.presentZones.length > 0 && <div class="small">Currently in: {view.presentZones.join(', ')}</div>}
+      {t.mode && isWearer && (
+        <div class="small" data-testid="tracking-mode">
+          Keep OwnTracks in <strong>{MODE_NAME[t.mode]}</strong> mode
+          {t.mode === 'move' ? ' (frequent reports – this lock needs them; uses more battery).' : ' (battery saving).'}
+        </div>
+      )}
 
       {isWearer && !pairing && (
         <>
@@ -129,7 +137,7 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
             <ul>
               <li>URL: <code>{pairing.url}</code></li>
               <li>Authentication on, username <code>{pairing.username}</code>, password <code>{pairing.password}</code></li>
-              <li>Monitoring mode: <strong>Significant</strong> (or Move for more updates)</li>
+              <li>Monitoring mode: <strong>{MODE_NAME[t.mode ?? 'significant']}</strong></li>
             </ul>
             <button onClick={() => navigator.clipboard?.writeText(`${pairing.url}\n${pairing.username}\n${pairing.password}`)}>Copy settings</button>
           </details>
