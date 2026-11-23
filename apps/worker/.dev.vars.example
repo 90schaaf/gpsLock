@@ -1,3 +1,4 @@
 CHASTER_TOKEN=your-developer-token
 WEBHOOK_USERNAME=chaster
 WEBHOOK_PASSWORD=change-me
+NTFY_TOKEN=

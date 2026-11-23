@@ -1,21 +1,26 @@
-/** Application service: orchestrates Chaster API, core engine and storage. */
+/** Application service: orchestrates Chaster API, core engine, storage and notifications. */
 import {
   buildLogEntry,
   buildSessionView,
   computeMetadata,
+  diffConfig,
   disclaimerAccepted,
   evaluateCheckin,
-  isLiveOnly,
   evaluateTick,
   evaluateTracked,
-  owntracksConfigLink,
-  owntracksWaypoints,
-  parseOwnTracks,
   initialState,
+  isLiveOnly,
   KNOWN_COMMANDS,
   loadState,
+  nextDueAt,
+  type Notice,
+  owntracksConfigLink,
+  owntracksMonitoring,
+  owntracksSetMonitoring,
+  owntracksWaypoints,
   parseConfig,
   parseConfigOrDefault,
+  parseOwnTracks,
   tickIsNoop,
   type CheckinPurpose,
   type CheckinRecord,
@@ -27,79 +32,113 @@ import {
 } from '@lockation/core';
 import { applyAll } from './apply.js';
 import { sessionIdOf, type ChasterClient, type ChasterSession } from './chaster.js';
-import { DeviceStore, HistoryStore } from './store.js';
+import { deliverNotices, type Ntfy } from './notify.js';
+import type { Audience, Store } from './store.js';
 import { HttpError } from './types.js';
 
 export const STATE_KEY = 'lockation';
 
 export interface ServiceDeps {
   client: ChasterClient;
-  history: HistoryStore;
-  devices?: DeviceStore;
+  store: Store;
+  ntfy?: Ntfy;
+  /** Check-in page URL (notification click target). */
+  appUrl?: string;
   now?: () => Date;
   rng?: () => number;
   newId?: () => string;
 }
 
-interface Resolved {
-  role: 'wearer' | 'keyholder';
+interface Ctx {
   session: ChasterSession;
   sessionId: string;
   config: LockationConfig;
-  state: LockationState;
   isSelfLock: boolean;
+}
+
+interface Resolved extends Ctx {
+  role: 'wearer' | 'keyholder';
+  state: LockationState;
 }
 
 export class LockationService {
   private client: ChasterClient;
-  private history: HistoryStore;
-  private devices?: DeviceStore;
+  private store: Store;
+  private ntfy?: Ntfy;
+  private appUrl?: string;
   private now: () => Date;
   private rng: () => number;
   private newId: () => string;
 
   constructor(deps: ServiceDeps) {
     this.client = deps.client;
-    this.history = deps.history;
-    this.devices = deps.devices;
+    this.store = deps.store;
+    this.ntfy = deps.ntfy;
+    this.appUrl = deps.appUrl;
     this.now = deps.now ?? (() => new Date());
     this.rng = deps.rng ?? Math.random;
     this.newId = deps.newId ?? (() => crypto.randomUUID());
   }
 
   // ---------- helpers ----------
-  private stateFor(session: ChasterSession, config: LockationConfig): LockationState {
+  private ctxOf(session: ChasterSession): Ctx & { state: LockationState } {
+    const config = parseConfigOrDefault(session.config);
     const start = new Date(session.lock?.startDate ?? session.createdAt ?? this.now().toISOString());
-    return loadState(session.data?.[STATE_KEY], config, start);
+    return {
+      session,
+      sessionId: sessionIdOf(session),
+      config,
+      isSelfLock: !session.lock?.keyholder,
+      state: loadState(session.data?.[STATE_KEY], config, start, this.now()),
+    };
   }
 
   private async resolve(mainToken: string): Promise<Resolved> {
     if (!mainToken) throw new HttpError(401, 'missing_token', 'mainToken is required');
     const auth = await this.client.authSession(mainToken);
-    const session = auth.session;
-    const config = parseConfigOrDefault(session.config);
-    return {
-      role: auth.role,
-      session,
-      sessionId: sessionIdOf(session),
-      config,
-      state: this.stateFor(session, config),
-      isSelfLock: !session.lock?.keyholder,
-    };
+    // Security: only the wearer and the keyholder of this lock may see zones, locations and history.
+    if (auth.role !== 'wearer' && auth.role !== 'keyholder') {
+      throw new HttpError(403, 'not_allowed', 'Only the wearer and the keyholder of this lock can open Lockation.');
+    }
+    return { role: auth.role, ...this.ctxOf(auth.session) };
   }
 
-  private async persist(r: Pick<Resolved, 'session' | 'sessionId' | 'config'>, state: LockationState) {
-    await this.client.setData(r.sessionId, { ...(r.session.data ?? {}), [STATE_KEY]: state });
+  private async persist(c: Ctx, state: LockationState) {
+    await this.client.setData(c.sessionId, { ...(c.session.data ?? {}), [STATE_KEY]: state });
+    c.session.data = { ...(c.session.data ?? {}), [STATE_KEY]: state };
+    await this.store.setDue(c.sessionId, nextDueAt(c.config, state, this.now()));
     try {
-      await this.client.setMetadata(r.sessionId, computeMetadata(r.config, state, this.now()));
+      await this.client.setMetadata(c.sessionId, computeMetadata(c.config, state, this.now()));
     } catch {
       /* metadata is cosmetic – never fail the request because of it */
     }
   }
 
+  /** Apply, log, persist and notify the result of one evaluation. */
+  private async finish(c: Ctx, result: EvalResult & { record?: CheckinRecord }, kind: 'checkin' | 'tick', opts: { history?: boolean } = {}) {
+    let applied: { ok: boolean; error?: string }[] = [];
+    if (result.consequences.length) applied = await applyAll(this.client, c.sessionId, result.consequences);
+    if (result.record) result.record.consequences = result.record.consequences.map((x, i) => ({ ...x, ok: applied[i]?.ok, error: applied[i]?.error }));
+    const log = buildLogEntry(kind, result.events, result.consequences, result.record);
+    if (log) await this.client.customLog(c.sessionId, log).catch(() => undefined);
+    await this.persist(c, result.state);
+    if (result.record && opts.history !== false) await this.store.appendHistory(c.sessionId, result.record);
+    await this.notify(c, result.notices);
+  }
+
+  private notify(c: Ctx, notices: Notice[]) {
+    return deliverNotices({ ntfy: this.ntfy, store: this.store, sessionId: c.sessionId, config: c.config, isSelfLock: c.isSelfLock, notices, now: this.now(), click: this.appUrl });
+  }
+
+  private audience(r: Resolved): Audience {
+    return r.isSelfLock ? 'wearer' : r.role;
+  }
+
   private async view(r: Resolved, state: LockationState): Promise<SessionView> {
-    const history = await this.history.list(r.sessionId);
-    return buildSessionView({ role: r.role, isSelfLock: r.isSelfLock, config: r.config, state, history, now: this.now() });
+    const history = await this.store.listHistory(r.sessionId);
+    const view = buildSessionView({ role: r.role, isSelfLock: r.isSelfLock, config: r.config, state, history, now: this.now() });
+    view.notifications = { available: !!this.ntfy, subscribed: !!(this.ntfy && (await this.store.topic(r.sessionId, this.audience(r)))) };
+    return view;
   }
 
   // ---------- main page ----------
@@ -115,15 +154,8 @@ export class LockationService {
     if (isLiveOnly(r.config)) {
       throw new HttpError(403, 'manual_disabled', 'Manual check-ins are disabled for this lock – only live tracking (OwnTracks) counts.');
     }
-    const now = this.now();
-    const result = evaluateCheckin(r.config, r.state, fix, { now, sessionId: r.sessionId, evalId: this.newId(), rng: this.rng }, purpose);
-    const applied = await applyAll(this.client, r.sessionId, result.consequences);
-    result.record.consequences = result.record.consequences.map((c, i) => ({ ...c, ok: applied[i]?.ok, error: applied[i]?.error }));
-
-    const log = buildLogEntry('checkin', result.events, result.consequences, result.record);
-    if (log) await this.client.customLog(r.sessionId, log).catch(() => undefined);
-    await this.persist(r, result.state);
-    await this.history.append(r.sessionId, result.record);
+    const result = evaluateCheckin(r.config, r.state, fix, { now: this.now(), sessionId: r.sessionId, evalId: this.newId(), rng: this.rng }, purpose);
+    await this.finish(r, result, 'checkin');
     return { record: result.record, view: await this.view(r, result.state) };
   }
 
@@ -138,17 +170,53 @@ export class LockationService {
       };
     }
     await this.persist(r, state);
-    await this.history.redact(r.sessionId);
+    await this.store.redactHistory(r.sessionId);
     await this.client
       .customLog(r.sessionId, { title: 'Lockation privacy', description: 'Exact coordinates are no longer shared for this lock.', icon: 'user-secret' })
       .catch(() => undefined);
     return this.view(r, state);
   }
 
+  /** Wearer saw the "rules changed" summary. */
+  async ackRulesChanged(mainToken: string): Promise<SessionView> {
+    const r = await this.resolve(mainToken);
+    if (r.role !== 'wearer') throw new HttpError(403, 'not_wearer', 'Only the wearer can acknowledge rule changes.');
+    const state: LockationState = { ...r.state, rulesChanged: undefined };
+    await this.persist(r, state);
+    return this.view(r, state);
+  }
+
+  // ---------- notifications (ntfy) ----------
+  async setupNotifications(mainToken: string) {
+    const r = await this.resolve(mainToken);
+    if (!this.ntfy) throw new HttpError(503, 'notifications_unavailable', 'Notifications are not configured on this server.');
+    const audience = this.audience(r);
+    const topic = await this.store.createTopic(r.sessionId, audience, this.now());
+    await this.ntfy
+      .send(topic, { title: 'Lockation', message: audience === 'wearer' ? 'Warnings for your lock will arrive here.' : 'Notifications about your wearer\'s lock will arrive here.', click: this.appUrl })
+      .catch(() => undefined);
+    return { topic, ...this.ntfy.links(topic), view: await this.view(r, r.state) };
+  }
+
+  async stopNotifications(mainToken: string): Promise<SessionView> {
+    const r = await this.resolve(mainToken);
+    await this.store.removeTopic(r.sessionId, this.audience(r));
+    return this.view(r, r.state);
+  }
+
   // ---------- configuration page ----------
+  /** Loads the configuration for a token; only the wearer or keyholder may use the configuration page (F19). */
+  private async configuration(configToken: string) {
+    const c = await this.client.getConfiguration(configToken);
+    if (c.role !== 'wearer' && c.role !== 'keyholder') {
+      throw new HttpError(403, 'not_allowed', 'Only the wearer and the keyholder of this lock can configure Lockation.');
+    }
+    return c;
+  }
+
   async configGet(configToken: string) {
     if (!configToken) throw new HttpError(401, 'missing_token', 'configToken is required');
-    const c = await this.client.getConfiguration(configToken);
+    const c = await this.configuration(configToken);
     const parsed = parseConfig(c.config);
     return {
       config: parsed.ok ? parsed.config : parseConfigOrDefault(undefined),
@@ -165,22 +233,39 @@ export class LockationService {
     if (!disclaimerAccepted(parsed.config)) {
       throw new HttpError(400, 'disclaimer_required', 'Please accept the Lockation disclaimer before saving.');
     }
-    const current = await this.client.getConfiguration(configToken);
+    const current = await this.configuration(configToken);
+    const before = parseConfigOrDefault(current.config);
     if (current.sessionId) {
       // F9 AC3: privacy cannot be upgraded while a session is running.
-      const before = parseConfigOrDefault(current.config);
       if (before.privacy.coordinates === 'zone_only' && parsed.config.privacy.coordinates === 'exact') {
         throw new HttpError(403, 'privacy_upgrade', 'Coordinate sharing cannot be enabled while the lock is running.');
       }
     }
     await this.client.putConfiguration(configToken, parsed.config);
+    if (current.sessionId) await this.announceChanges(current.sessionId, before, parsed.config).catch((e) => console.error('change notice failed', e));
     return { ok: true as const, config: parsed.config };
+  }
+
+  /** Mid-lock configuration change: history entry, wearer notification and "rules changed" notice. */
+  private async announceChanges(sessionId: string, before: LockationConfig, after: LockationConfig) {
+    const summary = diffConfig(before, after);
+    if (!summary.length) return;
+    const session = await this.client.getSession(sessionId);
+    if (session.lock?.status && session.lock.status !== 'locked') return;
+    const c = this.ctxOf({ ...session, config: after });
+    const now = this.now();
+    const state: LockationState = { ...c.state, rulesChanged: { at: now.toISOString(), summary } };
+    await this.persist(c, state);
+    await this.client.customLog(sessionId, { title: 'Lockation rules changed', description: summary.join('\n').slice(0, 2000), icon: 'edit' }).catch(() => undefined);
+    await this.notify(c, [
+      { audience: 'wearer', title: 'Lockation rules changed', message: summary.slice(0, 8).join('\n'), priority: 'default', key: `rules:${now.toISOString()}` },
+    ]);
   }
 
   async capabilities(opts: { mainToken?: string; configToken?: string }) {
     let sessionId: string | null = null;
     if (opts.mainToken) sessionId = (await this.resolve(opts.mainToken)).sessionId;
-    else if (opts.configToken) sessionId = (await this.client.getConfiguration(opts.configToken)).sessionId;
+    else if (opts.configToken) sessionId = (await this.configuration(opts.configToken)).sessionId;
     const known = KNOWN_COMMANDS.map((k) => ({ id: k.id, extension: k.extension, title: k.title, description: k.description, exampleInput: k.exampleInput, available: true, source: 'known' as const }));
     if (!sessionId) return { commands: known, live: false };
     try {
@@ -197,120 +282,140 @@ export class LockationService {
   }
 
   // ---------- cron / webhooks ----------
-  /** Evaluate deadlines for one session; returns true when something was applied. */
+  /** Evaluate deadlines, warnings and escalations for one session; returns true when consequences were applied. */
   async tickSession(session: ChasterSession): Promise<boolean> {
-    const sessionId = sessionIdOf(session);
-    const config = parseConfigOrDefault(session.config);
+    const c = this.ctxOf(session);
     const hadState = !!session.data?.[STATE_KEY];
-    const state = this.stateFor(session, config);
-    const result: EvalResult = evaluateTick(config, state, { now: this.now(), sessionId, evalId: `tick-${this.now().toISOString()}` });
-    if (tickIsNoop(result) && hadState && JSON.stringify(result.state) === JSON.stringify(state)) return false;
-    await applyAll(this.client, sessionId, result.consequences);
-    const log = buildLogEntry('tick', result.events, result.consequences);
-    if (log) await this.client.customLog(sessionId, log).catch(() => undefined);
-    await this.persist({ session, sessionId, config }, result.state);
+    const now = this.now();
+    const result: EvalResult = evaluateTick(c.config, c.state, { now, sessionId: c.sessionId, evalId: `tick-${now.toISOString()}`, rng: this.rng });
+    if (tickIsNoop(result) && hadState && JSON.stringify(result.state) === JSON.stringify(c.state)) {
+      await this.store.setDue(c.sessionId, nextDueAt(c.config, c.state, now));
+      return false;
+    }
+    await this.finish(c, result, 'tick');
     return result.consequences.length > 0;
   }
 
+  /** Tick one session by id (1-minute cron). Removes the due entry when the session is gone. */
+  async tickSessionById(sessionId: string): Promise<boolean> {
+    try {
+      const s = await this.client.getSession(sessionId);
+      if (s.lock?.status && s.lock.status !== 'locked') {
+        await this.store.setDue(sessionId, undefined);
+        return false;
+      }
+      return await this.tickSession(s);
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 404) {
+        await this.store.setDue(sessionId, undefined);
+        return false;
+      }
+      throw e;
+    }
+  }
+
   async initSession(session: ChasterSession) {
-    const sessionId = sessionIdOf(session);
-    const config = parseConfigOrDefault(session.config);
+    const c = this.ctxOf(session);
     if (session.data?.[STATE_KEY]) return;
     const start = new Date(session.lock?.startDate ?? session.createdAt ?? this.now().toISOString());
-    await this.persist({ session, sessionId, config }, initialState(config, start));
+    await this.persist(c, initialState(c.config, start));
   }
 
   async onSessionDeleted(sessionId: string) {
-    await this.history.purge(sessionId);
-    await this.devices?.removeForSession(sessionId);
+    await this.store.purgeSession(sessionId);
   }
 
   // ---------- F14 background tracking ----------
-  private requireDevices(): DeviceStore {
-    if (!this.devices) throw new HttpError(500, 'not_configured', 'Device store missing.');
-    return this.devices;
-  }
-
   async pairTracking(mainToken: string, endpointUrl: string) {
     const r = await this.resolve(mainToken);
     if (r.role !== 'wearer') throw new HttpError(403, 'not_wearer', 'Only the wearer can set up background tracking.');
     if (r.session.lock?.status && r.session.lock.status !== 'locked') throw new HttpError(409, 'not_locked', 'The lock is not running.');
     if (!r.config.tracking.enabled) throw new HttpError(409, 'tracking_disabled', 'Background tracking is not enabled for this lock.');
     const now = this.now();
-    const creds = await this.requireDevices().create(r.sessionId, now);
+    const creds = await this.store.createDevice(r.sessionId, now);
+    const monitoring = owntracksMonitoring(r.config);
     const state: LockationState = {
       ...r.state,
-      tracking: { ...r.state.tracking, deviceUser: creds.username, pairedAt: now.toISOString(), waypointsHash: undefined },
+      tracking: { ...r.state.tracking, deviceUser: creds.username, pairedAt: now.toISOString(), waypointsHash: undefined, monitoring },
     };
     await this.persist(r, state);
     await this.client
       .customLog(r.sessionId, { title: 'Lockation tracking', description: 'Background tracking was set up (OwnTracks).', icon: 'satellite-dish' })
       .catch(() => undefined);
+    await this.notify(r, [{ audience: 'keyholder', kind: 'tracking', title: 'Lockation: tracking set up', message: 'The wearer set up background tracking (waiting for the first location).', priority: 'default', key: `tracking:paired:${now.toISOString()}` }]);
     const opts = { url: endpointUrl, username: creds.username, password: creds.password };
-    return { link: owntracksConfigLink(opts), ...opts, view: await this.view(r, state) };
+    return { link: owntracksConfigLink({ ...opts, monitoring }), ...opts, view: await this.view(r, state) };
   }
 
   async unpairTracking(mainToken: string): Promise<SessionView> {
     const r = await this.resolve(mainToken);
     if (r.role !== 'wearer') throw new HttpError(403, 'not_wearer', 'Only the wearer can stop background tracking.');
-    await this.requireDevices().removeForSession(r.sessionId);
+    await this.store.removeDevice(r.sessionId);
     const state: LockationState = { ...r.state, tracking: { ...r.state.tracking, deviceUser: undefined, pairedAt: undefined } };
     await this.persist(r, state);
     await this.client
       .customLog(r.sessionId, { title: 'Lockation tracking', description: 'Background tracking was stopped by the wearer.', icon: 'satellite-dish' })
       .catch(() => undefined);
+    const now = this.now();
+    await this.notify(r, [{ audience: 'keyholder', kind: 'tracking', title: 'Lockation: tracking stopped', message: 'The wearer stopped background tracking.', priority: 'high', key: `tracking:stopped:${now.toISOString()}` }]);
     return this.view(r, state);
   }
 
   /** Handle one OwnTracks HTTP POST. Returns the JSON array to send back to the app. */
   async ingestOwnTracks(username: string, password: string, body: unknown): Promise<unknown[]> {
-    const devices = this.requireDevices();
-    const dev = await devices.verify(username, password);
+    const dev = await this.store.verifyDevice(username, password);
     if (!dev) throw new HttpError(401, 'unauthorized', 'Unknown device.');
     let session: ChasterSession;
     try {
       session = await this.client.getSession(dev.sessionId);
     } catch (e) {
       if (e instanceof HttpError && e.status === 404) {
-        await devices.removeForSession(dev.sessionId);
+        await this.store.removeDevice(dev.sessionId);
         throw new HttpError(401, 'unauthorized', 'Session ended.');
       }
       throw e;
     }
     if (session.lock?.status && session.lock.status !== 'locked') return [];
-    const sessionId = sessionIdOf(session);
-    const config = parseConfigOrDefault(session.config);
-    let state = this.stateFor(session, config);
+    const c = this.ctxOf(session);
+    let state = c.state;
     if (state.tracking.deviceUser !== username) {
-      await devices.removeForSession(sessionId);
+      await this.store.removeDevice(c.sessionId);
       throw new HttpError(401, 'unauthorized', 'Device was revoked.');
     }
-    if (!config.tracking.enabled) return [];
+    if (!c.config.tracking.enabled) return [];
 
     const messages = Array.isArray(body) ? body : [body];
-    const response: unknown[] = [];
+    const notices: Notice[] = [];
     for (const m of messages) {
-      const input = parseOwnTracks(m, config);
+      const input = parseOwnTracks(m, c.config);
       if (!input) continue;
-      const result = evaluateTracked(config, state, input, { now: this.now(), sessionId, evalId: this.newId(), rng: this.rng });
+      const result = evaluateTracked(c.config, state, input, { now: this.now(), sessionId: c.sessionId, evalId: this.newId(), rng: this.rng });
       state = result.state;
       if (result.consequences.length) {
-        const applied = await applyAll(this.client, sessionId, result.consequences);
-        result.record.consequences = result.record.consequences.map((c, i) => ({ ...c, ok: applied[i]?.ok, error: applied[i]?.error }));
-        const log = buildLogEntry('checkin', result.events, result.consequences, result.record);
-        if (log) {
-          await this.client.customLog(sessionId, { ...log, title: log.title.replace('GPS check-in', 'GPS background update') }).catch(() => undefined);
-        }
+        const applied = await applyAll(this.client, c.sessionId, result.consequences);
+        result.record.consequences = result.record.consequences.map((x, i) => ({ ...x, ok: applied[i]?.ok, error: applied[i]?.error }));
       }
-      if (result.notable) await this.history.append(sessionId, result.record);
+      if (result.consequences.length || result.notices.some((n) => n.audience === 'wearer')) {
+        const log = buildLogEntry('checkin', result.events, result.consequences, result.record);
+        if (log) await this.client.customLog(c.sessionId, log).catch(() => undefined);
+      }
+      if (result.notable) await this.store.appendHistory(c.sessionId, result.record);
+      notices.push(...result.notices);
     }
-    const wp = owntracksWaypoints(config);
+
+    const response: unknown[] = [];
+    const wp = owntracksWaypoints(c.config, state);
     if (wp.hash !== state.tracking.waypointsHash) {
       response.push(wp.command);
       state = { ...state, tracking: { ...state.tracking, waypointsHash: wp.hash } };
     }
-    await this.persist({ session, sessionId, config }, state);
+    const monitoring = owntracksMonitoring(c.config);
+    if (state.tracking.monitoring !== monitoring) {
+      response.push(owntracksSetMonitoring(monitoring));
+      state = { ...state, tracking: { ...state.tracking, monitoring } };
+    }
+    await this.persist(c, state);
+    await this.notify(c, notices);
     return response;
   }
-
 }

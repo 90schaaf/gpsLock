@@ -1,13 +1,17 @@
 /** Minimal Cloudflare runtime types (kept local to avoid a hard dependency on workers-types). */
-export interface KVLike {
-  get(key: string, type: 'json'): Promise<unknown>;
-  get(key: string): Promise<string | null>;
-  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
-  delete(key: string): Promise<void>;
+/** Subset of the Cloudflare D1 binding we use. */
+export interface D1Statement {
+  bind(...values: unknown[]): D1Statement;
+  run(): Promise<unknown>;
+  all<T = unknown>(): Promise<{ results: T[] }>;
+  first<T = unknown>(): Promise<T | null>;
+}
+export interface D1Like {
+  prepare(sql: string): D1Statement;
 }
 
 export interface Env {
-  KV: KVLike;
+  DB: D1Like;
   CHASTER_TOKEN: string;
   CHASTER_API_BASE?: string;
   ALLOWED_ORIGINS?: string;
@@ -16,6 +20,11 @@ export interface Env {
   WEBHOOK_PASSWORD?: string;
   /** Public URL of this worker (optional; defaults to the request origin). */
   PUBLIC_URL?: string;
+  /** ntfy server (default https://ntfy.sh) and access token; without a token notifications are disabled. */
+  NTFY_BASE?: string;
+  NTFY_TOKEN?: string;
+  /** URL of the check-in page, used as click target in notifications. */
+  APP_URL?: string;
 }
 
 export interface ExecutionContextLike {

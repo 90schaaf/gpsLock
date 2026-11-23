@@ -4,9 +4,9 @@ compatibility_date = "2025-09-01"
 workers_dev = true
 preview_urls = false
 
-# Every 5 minutes: missed check-ins, timed unfreeze, hunt timeouts (F2/F6/F7)
+# Every minute: due sessions only (forbidden-zone warnings/penalties, deadlines); every 5th minute a full sweep
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]
 
 [vars]
 CHASTER_API_BASE = "https://api.chaster.app"
@@ -14,13 +14,19 @@ CHASTER_API_BASE = "https://api.chaster.app"
 ALLOWED_ORIGINS = "https://90schaaf.github.io,http://localhost:5173"
 # The slug of your extension in the Chaster developer portal
 EXTENSION_SLUG = "lockation"
+# Check-in page, used as click target in notifications
+APP_URL = "https://90schaaf.github.io/lockation/app/index.html"
 
-# Create with: npx wrangler kv namespace create LOCKATION_KV  → paste the id here
-[[kv_namespaces]]
-binding = "KV"
-id = "4a0eac95f1024f4fa9399f2b22a11454"
+# Create with: npx wrangler d1 create lockation  → paste the database_id here,
+# then: npx wrangler d1 migrations apply lockation --remote
+[[d1_databases]]
+binding = "DB"
+database_name = "lockation"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
 
 # Secrets (never commit!):
 #   npx wrangler secret put CHASTER_TOKEN       (developer token from the Chaster developer portal)
 #   npx wrangler secret put WEBHOOK_USERNAME
 #   npx wrangler secret put WEBHOOK_PASSWORD
+#   npx wrangler secret put NTFY_TOKEN          (ntfy.sh access token – enables notifications)

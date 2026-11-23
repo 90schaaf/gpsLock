@@ -1,30 +1,63 @@
 # Rules explained
 
-All rules are evaluated at every **accepted** check-in, in this order: scavenger hunt →
-required → forbidden → reward → travel. One check-in can trigger several rules.
+Every zone has a **role**: *required* and/or *reward*, **or** *forbidden*, **or** *neutral* (no role). The role decides which
+rule a zone belongs to; each rule has its own tab with settings for the whole rule and, per zone, settings that override them.
 
-## Required check-in
+All rules are evaluated at every **accepted** check-in or background update, in this order: scavenger hunt → required →
+"must stay inside" windows → forbidden → reward → travel. One location can trigger several rules. The server also runs every
+minute for time-based things (deadlines, warnings, forbidden-zone penalties while you stay inside).
 
-- The first deadline is *lock start + interval*.
-- A check-in inside one of the required zones (or anywhere, if no zone is selected) is **valid**:
-  the next deadline becomes *now + interval*, and the *successful check-in* consequences run.
-- A check-in **outside** the required zones runs the *outside* consequences. It does **not** reset the deadline.
-- If no valid check-in happens until *deadline + grace period*, the *missed* consequences run
-  automatically (the server checks every 5 minutes). The next deadline is then *old deadline + interval*,
-  so every further missed interval is penalised again (at most 10 at once).
-- **Quiet hours**: a deadline falling inside the quiet window is moved to its end. Example: interval 4 h,
-  last check-in 21:00, quiet 23:00–07:00 → next deadline 07:00.
+## Required zones
+
+- **Each required zone has its own deadline** ("Home every 4 h **and** Work every 8 h"). A check-in at Home doesn't reset Work.
+  The interval and grace period can be set per zone; otherwise the rule defaults apply (interval 4 h, grace **5 min**).
+- Optional **check-in anywhere**: an extra deadline that any accepted location satisfies.
+- The first deadline is *lock start + interval*. A check-in inside the zone resets it to *now + interval* and runs
+  *successful check-in* (rule list + the zone's extra list).
+- A manual check-in **outside all required zones** runs *outside a zone* once. It doesn't reset any deadline.
+- If no valid check-in happens until *deadline + grace*, *missed* runs (rule list + the zone's extra list). The next
+  deadline is *old deadline + interval*, so every further missed interval is penalised again (at most 10 at once).
+  Like forbidden-zone penalties, each *missed* consequence can be scheduled *every time / every n-th / only the n-th time*
+  (also for the missing-signal list).
+- **Quiet hours** move a deadline that falls inside them to their end (interval 4 h, last check-in 21:00, quiet 23:00–07:00 → 07:00).
+- Optional **warning** N minutes before a deadline (with [notifications](./notifications)).
+- While a deadline is overdue, Lockation blocks unlocking until the next valid check-in.
+- Older locks whose required zones shared one deadline ("any of them") keep that behaviour.
+
+### "Must stay inside" windows
+
+A required zone can have **windows** (e.g. 22:00–06:00, optionally only on certain weekdays; a window may cross midnight and
+belongs to the day it starts). During a window every location **outside** all required zones whose window is active applies
+*outside during a window* (at most once per cooldown). Being in *any* of those zones is enough – e.g. "Home or Partner's
+place 22:00–06:00". Needs [background tracking](./background-tracking). This replaces the former *curfew*.
 
 ## Forbidden zones
 
-A check-in inside a forbidden zone runs its consequences. Within the **cooldown** the same zone is not
-penalised again. Because Lockation only knows your position at check-in time, forbidden zones
-are best combined with a required check-in *anywhere*.
+With background tracking, a stay in a forbidden zone follows a **timeline** (defaults, adjustable per zone):
+
+```
+0 min   you enter the zone
+2 min   ⚠ warning: "leave within 8 min or: +1 h"
+10 min  ❌ 1st penalty
+11 min  ⚠ warning: "next penalty in 4 min"
+15 min  ❌ 2nd penalty   … then every 5 min, with a warning 1 min after each penalty
+```
+
+- Warnings can be switched off; they need [notifications](./notifications) and are also written to the lock history.
+- You only count as having left once you're **clearly** outside (accuracy included). Leaving and coming back within 5 min
+  continues the timeline instead of starting at 0.
+- A visit only noticed afterwards (e.g. delayed locations) gets the penalties of the time you were provably inside.
+- Each penalty applies the rule's list plus the zone's **extra punishment**. Every consequence can be scheduled: *every time*,
+  *every n-th time* (e.g. pillory at the 3rd, 6th … penalty) or *only the n-th time* (e.g. freeze at the 4th).
+- **Time windows**: a zone can be forbidden only at certain times (e.g. *Bar* 20:00–02:00). If you are already inside when the
+  window starts, the timeline starts at the window start.
+- **Without background tracking** a check-in inside a forbidden zone is penalised immediately, at most once every 5 min.
 
 ## Reward zones
 
-A check-in inside a reward zone runs the reward. Limits: a **cooldown per zone** and a **maximum number
-of rewards per day** (all reward zones together, counted in the lock's timezone).
+Being in a reward zone runs the reward (rule list + the zone's extra reward). Per zone you can set the **cooldown**, a **maximum
+per day** and a **minimum stay** (with background tracking, e.g. 45 min at the gym). The rule's *maximum per day* is an overall
+cap across all reward zones (lock timezone).
 
 ## Travel goals
 
@@ -45,30 +78,29 @@ Time amounts are multiplied by the number of steps. Movements flagged as implaus
 
 ## Scavenger hunt
 
-- Checkpoints must be found **in order**. Only the current checkpoint matters.
-- Being inside the current checkpoint during *any* check-in completes it (and runs *each checkpoint*).
-  After the last one the hunt is **completed** (*hunt completed* consequences).
-- A **hunt guess** (the *Submit hunt guess here* button) at the wrong place is a **wrong turn**
+- **Order**: *in order* (default) – only the current checkpoint counts; or *any order* – every unfound checkpoint counts and the
+  hunt is completed when all are found.
+- Being inside a checkpoint at any check-in or background update completes it (*each checkpoint*). After the last one the hunt
+  is **completed** (*hunt completed*).
+- **Reveal**:
+  - *Hint + pin all on the map* (default) – all checkpoints are shown with their hints and status (found / current / upcoming).
+    There are **no wrong guesses** in this mode.
+  - *Hint + pin current on the map* – only the current checkpoint (any order: all open ones).
+  - *Hint + hot/cold distance* – after a guess you see a band (< 200 m … > 5 km).
+  - *Hint only*.
+- **Hunt guess** (*Submit hunt guess here*, not in "pin all" mode): a guess at the wrong place is a **wrong turn**
   (*wrong turn* consequences, at most once per cooldown).
-- **Reveal** setting: *hint* – only the text; *distance* – after a guess you see a band
-  (< 200 m, < 500 m, < 1 km, < 5 km, > 5 km); *map* – the next checkpoint is shown on the map.
-- Optional **time limit**: when exceeded, the hunt fails and the *time limit* consequences run once.
-- Optional **block unlocking**: the lock cannot be unlocked until the hunt is completed (or failed).
-
-## Curfew
-
-Requires [background tracking](./background-tracking). Between *start* and *end* (lock timezone, may cross midnight) every
-location outside the curfew zones applies the consequences, at most once per cooldown. Being near the edge of the zone
-doesn't count as outside until you are clearly outside.
+- With background tracking, the checkpoints you can see are synced to OwnTracks, so reaching one is reported immediately.
+- Optional **time limit** (hunt fails, *time limit* runs once) and **block unlocking** until completed.
 
 ## Background tracking
 
-See [Background tracking](./background-tracking). In short: background locations are evaluated like check-ins, forbidden
-zones count after a short confirmation time, reward zones can require a minimum stay, and a missing signal is penalised like a missed check-in.
+See [Background tracking](./background-tracking): background locations are evaluated like check-ins, a missing signal is
+penalised like a missed check-in (optionally not during quiet hours, with a warning before), and with **live tracking only**
+manual check-ins are disabled.
 
-With **live tracking only** the keyholder disables manual check-ins: only background locations count, the required check-in is
-fulfilled by being in the zone, and hunt checkpoints are found by walking into them.
+## Changes during a lock
 
-## Required check-ins and unlocking
-
-While a required check-in is overdue, Lockation also tells Chaster to block unlocking until the next valid check-in.
+If the keyholder changes the rules while the lock is running, the changes apply immediately. Lockation writes a summary to the
+lock history ("Zone *Casino* added; *Home* check-in interval 4 h → 2 h"), notifies the wearer, and shows a **Rules changed**
+note on the check-in page until the wearer confirms it. Hidden hunt checkpoints are never revealed ("hunt checkpoints changed").

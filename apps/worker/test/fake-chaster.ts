@@ -1,17 +1,40 @@
-import type { Env, KVLike } from '../src/types.js';
+import { readdirSync, readFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { fileURLToPath } from 'node:url';
+import type { D1Like, D1Statement, Env } from '../src/types.js';
 import type { ChasterSession } from '../src/chaster.js';
 
-export class MemoryKV implements KVLike {
-  map = new Map<string, string>();
-  async get(key: string, type?: 'json'): Promise<any> {
-    const v = this.map.get(key) ?? null;
-    return type === 'json' && v !== null ? JSON.parse(v) : v;
+/** D1 stand-in on Node's built-in SQLite, running the real migration SQL. */
+export class FakeD1 implements D1Like {
+  db: DatabaseSync;
+  constructor() {
+    this.db = new DatabaseSync(':memory:');
+    const dir = fileURLToPath(new URL('../migrations/', import.meta.url));
+    for (const f of readdirSync(dir).filter((x) => x.endsWith('.sql')).sort()) this.db.exec(readFileSync(dir + f, 'utf8'));
   }
-  async put(key: string, value: string) {
-    this.map.set(key, value);
+  prepare(sql: string): D1Statement {
+    const db = this.db;
+    const make = (args: unknown[]): D1Statement => ({
+      bind: (...values: unknown[]) => make(values),
+      run: async () => db.prepare(sql).run(...(args as never[])),
+      all: async <T,>() => ({ results: db.prepare(sql).all(...(args as never[])) as T[] }),
+      first: async <T,>() => (db.prepare(sql).get(...(args as never[])) as T | undefined) ?? null,
+    });
+    return make([]);
   }
-  async delete(key: string) {
-    this.map.delete(key);
+  rows(table: string): Record<string, unknown>[] {
+    return this.db.prepare(`SELECT * FROM ${table}`).all() as Record<string, unknown>[];
+  }
+}
+
+/** Records ntfy publishes. */
+export class FakeNtfy {
+  sent: { topic: string; title: string; message: string; priority: number }[] = [];
+  get fetch() {
+    return async (_input: string, init?: RequestInit): Promise<Response> => {
+      this.sent.push(JSON.parse(String(init?.body)));
+      return new Response('{}', { status: 200 });
+    };
   }
 }
 
@@ -104,14 +127,20 @@ export class FakeChaster {
   }
 }
 
-export function makeEnv(kv = new MemoryKV()): Env {
+export function makeEnv(db = new FakeD1(), extra: Partial<Env> = {}): Env {
   return {
-    KV: kv,
+    DB: db,
     CHASTER_TOKEN: 'dev-token',
     CHASTER_API_BASE: 'https://api.chaster.test',
     ALLOWED_ORIGINS: 'https://user.github.io',
     EXTENSION_SLUG: 'lockation',
     WEBHOOK_USERNAME: 'hook',
     WEBHOOK_PASSWORD: 'secret',
+    ...extra,
   };
+}
+
+/** History of a session, newest first (like the store). */
+export function historyOf(db: FakeD1, sessionId: string): any[] {
+  return db.rows('history').filter((r) => r.session_id === sessionId).map((r) => JSON.parse(String(r.record))).reverse();
 }

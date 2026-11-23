@@ -57,4 +57,6 @@ warranty disclaimer for anyone who reuses or deploys the code.
 
 ---
 
+Questions or concerns: [github.com/90schaaf/lockation/issues](https://github.com/90schaaf/lockation/issues).
+
 *This text is a good-faith summary, not legal advice. Version 1 – when it changes materially, keyholders are asked to accept it again.*

@@ -5,7 +5,7 @@ export const MAX_TIME_SECONDS = 31_536_000; // one year
 
 const seconds = z.number().int().min(1).max(MAX_TIME_SECONDS);
 
-export const ConsequenceSchema = z.discriminatedUnion('type', [
+const BaseConsequenceSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('add_time'), seconds }),
   z.object({ type: z.literal('remove_time'), seconds }),
   z.object({ type: z.literal('freeze'), durationMinutes: z.number().int().min(1).max(43_200).optional() }),
@@ -32,7 +32,34 @@ export const ConsequenceSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
+/**
+ * When a consequence applies inside a repeating list (e.g. forbidden-zone repeat penalties):
+ * every time (default), every n-th time, or only at the n-th time.
+ */
+export const WhenSchema = z.union([
+  z.object({ every: z.literal(true) }),
+  z.object({ everyNth: z.number().int().min(2).max(1000) }),
+  z.object({ nth: z.number().int().min(1).max(1000) }),
+]);
+export type When = z.infer<typeof WhenSchema>;
+
+export const ConsequenceSchema = BaseConsequenceSchema.and(z.object({ when: WhenSchema.optional() }));
+
 export type Consequence = z.infer<typeof ConsequenceSchema>;
+
+/** Whether a consequence with a `when` schedule applies at occurrence `n` (1-based). */
+export function appliesAt(c: Consequence, n: number): boolean {
+  const w = c.when;
+  if (!w || 'every' in w) return true;
+  if ('everyNth' in w) return n % w.everyNth === 0;
+  return n === w.nth;
+}
+
+export function describeWhen(w: When | undefined): string {
+  if (!w || 'every' in w) return '';
+  if ('everyNth' in w) return ` (every ${w.everyNth}. time)`;
+  return ` (only the ${w.nth}. time)`;
+}
 export type ConsequenceType = Consequence['type'];
 
 export const ConsequenceListSchema = z.array(ConsequenceSchema).max(10).default([]);

@@ -3,7 +3,16 @@
 The source of truth for the types is `packages/core/src/config.ts` and `state.ts` (zod schemas).
 This document describes the shape.
 
-## LockationConfig (stored as Chaster extension `config`)
+## LockationConfig v2 (stored as Chaster extension `config`)
+
+> Since 2026-11-23 the config is **version 2** (zone roles, per-zone settings, no curfew rule). The block below shows the v1 shape
+> for reference; the v2 schema is `packages/core/src/config.ts` (zones: `roles`, `matchMode`, `required`, `forbidden`, `reward`,
+> `reachabilityAck`; rules.required: `anywhere`, `combine`, `warnBeforeMinutes`, `onOutsideDuringWindow`, `windowCooldownMinutes`;
+> rules.forbidden: escalation timings; rules.hunt: `reveal: all`, `order`; tracking: `owntracksMode`, `quietHours`,
+> `warnBeforeMinutes`; `notifications.keyholder`; antiCheat: `liveVerificationEveryHours`). v1 input is migrated by `migrateConfig`.
+> State v2: `required.slots`, `forbidden.visits`, `hunt.found`, `tracking.monitoring/warnedFor`, `rulesChanged`, `nextLiveVerification`.
+
+### v1 shape (historical)
 
 ```ts
 {
@@ -73,6 +82,9 @@ All endpoints: `POST`, JSON, CORS restricted. Errors: `{error: {code, message}}`
 | `/api/capabilities` | `{configToken}` or `{mainToken}` | `{commands:[{id, extension, description, inputSchema}]}` |
 | `/api/tracking/pair` | `{mainToken}` | `{link, url, username, password, view}` (F14) |
 | `/api/tracking/unpair` | `{mainToken}` | `SessionView` |
-| `/track/owntracks` | OwnTracks message (Basic auth) | `[]` or `[setWaypoints cmd]` |
+| `/api/notify/setup` | `{mainToken}` | `{topic, url, deepLink, view}` (503 without ntfy token) |
+| `/api/notify/stop` | `{mainToken}` | `SessionView` |
+| `/api/notice/ack` | `{mainToken}` (wearer) | `SessionView` |
+| `/track/owntracks` | OwnTracks message (Basic auth) | `[]`, `[setWaypoints cmd]` and/or `[setConfiguration cmd]` |
 | `/webhook` | Chaster webhook | `204` |
 | `/health` | GET | `{ok:true, version}` |

@@ -1,5 +1,5 @@
 /** F14 – background tracking status and OwnTracks pairing. */
-import type { SessionView } from '@lockation/core';
+import type { SessionView, TrackingStatus } from '@lockation/core';
 import qrcode from 'qrcode-generator';
 import { useMemo, useState } from 'preact/hooks';
 import type { Backend, PairingResult } from '../lib/backend.js';
@@ -13,6 +13,15 @@ export function qrSvg(text: string): string {
   qr.make();
   return qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
 }
+
+const STATUS: Record<TrackingStatus, { label: string; cls: string }> = {
+  not_set_up: { label: 'not set up', cls: 'warn' },
+  waiting: { label: 'waiting for first location', cls: 'warn' },
+  connected: { label: 'connected', cls: 'ok' },
+  no_signal: { label: 'no signal', cls: 'bad' },
+};
+
+const MODE_NAME = { move: 'Move', significant: 'Significant' } as const;
 
 const ago = (iso?: string) => {
   if (!iso) return 'never';
@@ -62,13 +71,31 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
     <div class="card stack">
       <h2>
         📡 Background tracking
-        {t.paired ? <span class={`badge ${t.overdue ? 'bad' : 'ok'}`}>{t.overdue ? 'no signal' : 'connected'}</span> : <span class="badge warn">not set up</span>}
+        <span class={`badge ${STATUS[t.status].cls}`} data-testid="tracking-status">{STATUS[t.status].label}</span>
       </h2>
+      {t.status === 'waiting' && (
+        <div class="small notice" style={{ margin: 0 }}>
+          Set up, but no location has arrived from your phone yet. Open OwnTracks once and check that location access is set to
+          <strong> "Always"</strong>. The status turns <em>connected</em> with the first location.
+        </div>
+      )}
+      {t.status === 'no_signal' && (
+        <div class="small notice" style={{ margin: 0 }}>
+          No location from your phone for more than {Math.round((t.heartbeatMinutes / 60) * 10) / 10} h. Open OwnTracks and check
+          battery saving, location permission and network.
+        </div>
+      )}
       <div class="small muted">
         Last location: {ago(t.lastSeenAt)} · {t.updates} updates · missing signal after {Math.round(t.heartbeatMinutes / 60 * 10) / 10} h
         {t.missedCount > 0 && ` · missed ${t.missedCount}×`}
       </div>
       {view.presentZones.length > 0 && <div class="small">Currently in: {view.presentZones.join(', ')}</div>}
+      {t.mode && isWearer && (
+        <div class="small" data-testid="tracking-mode">
+          Keep OwnTracks in <strong>{MODE_NAME[t.mode]}</strong> mode
+          {t.mode === 'move' ? ' (frequent reports – this lock needs them; uses more battery).' : ' (battery saving).'}
+        </div>
+      )}
 
       {isWearer && !pairing && (
         <>
@@ -110,7 +137,7 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
             <ul>
               <li>URL: <code>{pairing.url}</code></li>
               <li>Authentication on, username <code>{pairing.username}</code>, password <code>{pairing.password}</code></li>
-              <li>Monitoring mode: <strong>Significant</strong> (or Move for more updates)</li>
+              <li>Monitoring mode: <strong>{MODE_NAME[t.mode ?? 'significant']}</strong></li>
             </ul>
             <button onClick={() => navigator.clipboard?.writeText(`${pairing.url}\n${pairing.username}\n${pairing.password}`)}>Copy settings</button>
           </details>

@@ -11,7 +11,7 @@ wearer. *Accepted check-in* = a check-in that passed anti-cheat.
 
 ## F1 – Zones and geofence matching
 
-Zones are circles `{id, name, lat, lng, radiusM}` with `50 ≤ radiusM ≤ 50 000`.
+Zones are circles `{id, name, lat, lng, radiusM}` with `20 ≤ radiusM ≤ 50 000` (changed from 50 on 2026-11-23); the editor shows a hint for zones below 100 m.
 A lock has at most **20 places in total** (zones + hunt checkpoints, `MAX_PLACES`), matching the iOS limit of 20 monitored regions per app. Validation error: "at most 20 zones and hunt checkpoints in total (currently N)"; the config editor shows "N / 20 places used" and blocks adding more.
 The distance is the haversine distance in metres (Earth radius 6 371 008.8 m).
 
@@ -217,7 +217,7 @@ AC: 1. Pairing returns a valid provisioning link (base64 JSON with mode 3 and th
 
 ## F15 – Curfew (needs F14)
 
-> **Planned change (2026-11-23):** curfew will be merged into per-zone time windows of required ("must stay inside") and forbidden zones and then removed as a separate rule – see backlog *Curfew merged into zone time windows* in `05-iterations.md`.
+> **Superseded (implemented 2026-11-23):** curfew was merged into per-zone time windows of required ("must stay inside") and forbidden zones and removed as a separate rule; v1 curfew configs are migrated – see backlog *Curfew merged into zone time windows* in `05-iterations.md`.
 
 Config `rules.curfew: {enabled, zoneIds[], start "HH:MM", end "HH:MM", cooldownMinutes (default 60), onOutside[]}`.
 During the window (lock timezone, may cross midnight), any accepted observation (tracked or manual) that is not inside any curfew zone
@@ -264,3 +264,46 @@ Decision (2026-11-23): users (keyholders and wearers) must be told clearly that 
 
 AC: 1. Save without accepted disclaimer → refused (page, worker 400 `disclaimer_required`, demo). 2. Save with it → stored.
 3. Old configs without the field still parse. 4. The disclaimer is linked from the docs footer, the app footers and the wearer's rule summary.
+
+## F19 – Mobile layout, live position, real tracking status, access control (2026-11-23)
+
+- **Layout:** designed for Chaster's extension frame, **max. 618 px** wide (down to ~360 px phones). The page never scrolls
+  horizontally (`overflow-x: hidden`, long texts wrap); the config tab bar scrolls horizontally on its own (swipe).
+- **Live position on the map (wearer):** while the page is open, `watchPosition` shows the wearer's live position (purple, with
+  accuracy circle). Starts automatically only if the permission is already granted, otherwise via *Show my current location*;
+  also starts after a check-in. Local only – nothing is sent to the server by itself.
+- **Last reported position:** `SessionView.lastPosition` (from `state.lastAccepted`) – always for the wearer (rounded in
+  zone-only mode, flagged `approximate`), for the keyholder **only with exact sharing**; otherwise the keyholder sees the names of
+  the zones the wearer is currently in.
+- **Tracking status:** `trackingStatus()` → `not_set_up` | `waiting` (paired, no location from this pairing yet) | `connected`
+  (location within `heartbeatMinutes`) | `no_signal`. Previously "connected" was shown right after pairing.
+- **Access control:** `/api/session` and all main-page endpoints accept only the roles `wearer` and `keyholder`
+  (`403 not_allowed` otherwise).
+  The configuration endpoints (`/api/config/get`, `/api/config/save`, `/api/capabilities` with a configuration token) apply
+  the same check (to verify in the end-to-end test that Chaster uses only these role names while a lock is being created).
+- **Lock history keeps zone names** (decided 2026-11-23): custom log entries continue to name zones ("Entered *Bar*");
+  wearer and keyholder accept that the Chaster lock history may show them.
+
+AC: 1. A role other than wearer/keyholder gets 403 without any zone or position data. 2. Status is `waiting` after pairing and
+`connected` after the first location; a location from an earlier pairing doesn't count. 3. Keyholder sees `lastPosition` only
+with exact sharing; the wearer always (approximate in zone-only mode).
+
+## F20 – Configuration v2 (2026-11-23)
+
+Implements the backlog items marked *implemented* in `05-iterations.md`. Summary:
+
+- **Zones** carry roles (`required` and/or `reward`, or `forbidden`, or none = neutral), an optional match mode and per-zone
+  settings for each role. Rule tabs list only zones of their role; per-zone values override the rule values.
+- **Required**: one deadline per zone (`combine: each`; v1 locks keep `any`), optional "anywhere" deadline, grace default 5 min,
+  optional warning before deadlines, per-zone extra lists, **stay windows** (former curfew, F15) with weekday filter.
+- **Forbidden**: escalation timeline (warning 2′, penalty 10′, every 5′, warning 1′ after each penalty; all per zone, warnings
+  can be off), re-entry within the repeat time continues the visit, time windows, per-zone extra punishment, consequence
+  scheduling `when: every | everyNth | nth`. Without tracking: immediate penalty, repeated at most every 5 min.
+- **Reward**: per-zone cooldown, daily cap, minimum stay, extra reward; the rule cap is overall.
+- **Hunt**: reveal `all` (default; no wrong guesses), order `sequence | any`, visible checkpoints synced to OwnTracks.
+- **Tracking**: OwnTracks mode `auto | move | significant` (pushed with `setConfiguration`), missing-signal quiet hours and warning.
+- **Notifications** via ntfy for the wearer (warnings, rules changed) and the keyholder (switchable events).
+- **Live-only random verification pictures** (`antiCheat.liveVerificationEveryHours`).
+- **Reachability check** (F17) with per-point confirmation stored as `reachabilityAck`.
+- **Storage** on D1; 1-minute cron for due sessions.
+- **Migration**: `migrateConfig` (v1 → v2, behaviour preserving) and `migrateState`; covered by the v1 test suite.

@@ -9,26 +9,39 @@ The configuration can be edited later while the lock is running (as far as Chast
 
 - **Tap the map** to add a zone, or **search an address** and pick a result.
 - Drag the coloured handle to move a zone; change name and radius in the list.
-- Radius: 50 m to 50 km. Choose at least **100–150 m** for places indoors – phone GPS is not exact.
+- Radius: 20 m to 50 km. Choose at least **100–150 m** for places indoors – phone GPS is not exact; zones below 100 m show a hint. Small radii (20–80 m) suit outdoor spots such as hunt checkpoints.
 - **Limit:** at most **20 places per lock** – zones and scavenger-hunt checkpoints together. The Zones and Hunt tabs show how many are used. (iPhones watch at most 20 places per app, so all of them can be synced to OwnTracks.)
-- **Zone matching**:
+- **Role** of each zone: *Required* and/or *Reward*, **or** *Forbidden*, **or** *Neutral*. The rule tabs only list the zones
+  with their role. Changing a role removes that zone's settings of the old role (you are asked first).
+- **Zone matching** – per zone (or the lock default):
   - *Lenient* (default): the position must be inside the zone.
-  - *Strict*: the whole accuracy circle must be inside – fairer for forbidden zones, harder for required zones.
-- **Timezone**: used for quiet hours and daily limits. It is set automatically from your browser.
+  - *Strict*: the whole accuracy circle must be inside – fairer for forbidden zones (suggested automatically for them), harder for required zones.
+- **Safety check**: every zone and checkpoint is checked against OpenStreetMap (water, sea, glacier/cliff, military areas,
+  runways/railways, no road or path nearby). A place flagged as *out of reach* must be confirmed individually ("I know – this
+  place is intentionally hard to reach") before you can save. The wearer sees the confirmed note.
+- **Timezone**: used for windows, quiet hours and daily limits. It is set automatically from your browser.
 
-A zone does nothing by itself – it gets its meaning from the rules below.
+A zone does nothing by itself – it gets its meaning from its role and the rules below.
 
 ## 2. Rules
 
-Each tab has an **enabled** switch. See [Rules explained](./rules) for the exact behaviour.
+Each tab has an **enabled** switch and lists its zones; open a zone to override the rule values for it. See
+[Rules explained](./rules) for the exact behaviour.
 
-- ⏱ **Required** – pick the zones (none = anywhere), the interval, grace period and optional quiet hours.
-- ⛔ **Forbidden** – pick the forbidden zones and a cooldown.
-- 🏆 **Reward** – pick reward zones, cooldown and maximum rewards per day.
+- ⏱ **Required** – check-in anywhere (optional), interval, grace period (default 5 min), quiet hours, warning before deadlines,
+  consequences. Per zone: interval check-ins on/off, own interval/grace, **"must stay inside" windows** (former curfew; needs
+  background tracking) and extra consequences.
+- ⛔ **Forbidden** – the timeline (first warning, first penalty, repeat every, repeat warning) and the penalty. Per zone: time
+  windows ("only during"), own timings and an **extra punishment**; each consequence can be scheduled *every time / every n-th /
+  only the n-th*. The tab shows what a 1-hour stay would cost.
+- 🏆 **Reward** – cooldown, overall maximum per day, minimum stay, reward. Per zone: own cooldown, maximum per day, minimum stay and an extra reward.
 - 🚶 **Travel** – *step size* = km per reward; *max per check-in* = the most one check-in can add (stops a train ride from collecting many rewards); *daily cap* = km counted per day. The tab shows a worked example for your values; details in [Rules explained](./rules#travel-goals).
-- 🧭 **Hunt** – switch to the Hunt tab and tap the map to place checkpoints **in order**. Give each a hint.
-- 📡 **Tracking** – enable [background tracking](./background-tracking): how long without a signal counts as missing (and what happens), how long someone must be inside a forbidden zone before it counts, and whether background locations count as required check-ins. Tick **Live tracking only** to disable manual check-ins entirely – the wearer must then keep OwnTracks running. The **curfew** is also configured here.
-- 🏆 **Reward → Minimum stay** – with tracking, require e.g. 45 minutes at the gym.
+- 🧭 **Hunt** – tap the map to place checkpoints **in order** and give each a hint. Choose *in order* or *any order* and the
+  reveal mode (default *hint + pin all on the map*, which has no wrong guesses).
+- 📡 **Tracking** – enable [background tracking](./background-tracking): missing-signal time and consequences, optional
+  **quiet hours** (no missing-signal penalties at night) and a **warning** before the penalty, **OwnTracks mode** (*Auto* /
+  *Move* / *Significant*), whether background locations count as required check-ins, and **Live tracking only**.
+- 🔔 **Notifications** – which events the keyholder gets as push notifications (see [Notifications](./notifications)).
 
 ## 3. Consequences
 
@@ -78,14 +91,17 @@ materially, you are asked again.
 
 ## Example setups
 
-**"Stay home tonight"** – Zone *Home* (150 m). Required check-in in *Home* every 2 h, grace 10 min,
-quiet hours 00:00–07:00. Missed: add 2 h + freeze until next check-in. Success: unfreeze.
+**"Stay home tonight"** – Zone *Home* (150 m, required). With background tracking: *must stay inside* 22:00–06:00, outside
+during the window: add 2 h (cooldown 1 h). Without tracking: required check-in in *Home* every 2 h, grace 10 min, quiet hours
+00:00–07:00; missed: add 2 h + freeze, success: unfreeze.
 
 **"Gym motivation"** – Zone *Gym*. Reward zone, max 1 per day: remove 3 h.
 
-**"Stay away from the bar"** – Required check-in *anywhere* every 3 h (missed: add 1 h) + forbidden zone *Bar*: add 4 h and pillory 1 h.
+**"Stay away from the bar"** – Background tracking + forbidden zone *Bar* (strict) only 20:00–02:00: warning after 2 min,
+add 1 h after 10 min and every 5 min, extra punishment pillory 30 min *every 3rd time*.
 
 **"Always tracked"** – Background tracking with *Live tracking only*, missing signal after 2 h: add 2 h + freeze.
 Required zone *Home* every 6 h (missed: add 1 h + freeze, success: unfreeze). Forbidden zone *Bar*.
 
-**"City hunt"** – 5 checkpoints with hints, reveal *distance*, block unlocking until completed, each checkpoint removes 30 min, wrong guess adds 15 min, time limit 6 h (timeout: add 1 day).
+**"City hunt"** – 5 checkpoints with hints, *any order*, reveal *pin all*, block unlocking until completed, each checkpoint
+removes 30 min, time limit 6 h (timeout: add 1 day).

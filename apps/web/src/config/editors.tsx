@@ -1,8 +1,20 @@
-import { ConsequenceSchema, PLANNED_EXTENSIONS, type Consequence, type Zone } from '@lockation/core';
+import { ConsequenceSchema, MAX_WINDOWS, PLANNED_EXTENSIONS, WEEKDAYS, type Consequence, type TimeWindow, type Weekday, type When } from '@lockation/core';
 import { useState } from 'preact/hooks';
 import type { CommandInfo } from '../lib/backend.js';
 
-export function NumberField(props: { label: string; value: number | undefined; onChange: (v: number | undefined) => void; min?: number; max?: number; step?: number; optional?: boolean; suffix?: string; hint?: string }) {
+export function NumberField(props: {
+  label: string;
+  value: number | undefined;
+  onChange: (v: number | undefined) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  optional?: boolean;
+  suffix?: string;
+  hint?: string;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
   return (
     <label class="field">
       {props.label}
@@ -14,7 +26,8 @@ export function NumberField(props: { label: string; value: number | undefined; o
         min={props.min}
         max={props.max}
         step={props.step ?? 1}
-        placeholder={props.optional ? 'off' : undefined}
+        disabled={props.disabled}
+        placeholder={props.placeholder ?? (props.optional ? 'off' : undefined)}
         onInput={(e) => {
           const raw = (e.target as HTMLInputElement).value;
           props.onChange(raw === '' ? (props.optional ? undefined : 0) : Number(raw));
@@ -25,20 +38,146 @@ export function NumberField(props: { label: string; value: number | undefined; o
   );
 }
 
-export function ZonePicker({ zones, value, onChange }: { zones: Zone[]; value: string[]; onChange: (ids: string[]) => void }) {
-  if (!zones.length) return <p class="small muted">Add zones on the map first.</p>;
+/** Per-zone override: empty = inherit the rule value (shown as placeholder). */
+export function OverrideField(props: {
+  label: string;
+  value: number | undefined;
+  inherited: number;
+  onChange: (v: number | undefined) => void;
+  min?: number;
+  max?: number;
+  suffix?: string;
+  format?: (n: number) => string;
+}) {
   return (
-    <div class="row">
-      {zones.map((z) => (
-        <label class="check" key={z.id}>
+    <NumberField
+      label={props.label}
+      suffix={props.suffix}
+      optional
+      min={props.min}
+      max={props.max}
+      value={props.value}
+      placeholder={`default: ${props.format ? props.format(props.inherited) : props.inherited}`}
+      onChange={props.onChange}
+    />
+  );
+}
+
+/**
+ * A minutes value that can be switched off (`null`). With `inherited` set, a third state "default" (`undefined`)
+ * inherits the rule value (per-zone override).
+ */
+export function NullableMinutesField(props: {
+  label: string;
+  value: number | null | undefined;
+  onChange: (v: number | null | undefined) => void;
+  min?: number;
+  max?: number;
+  fallback: number;
+  inherited?: { value: number | null; format: (v: number | null) => string };
+}) {
+  const mode = props.value === undefined ? (props.inherited ? 'inherit' : 'value') : props.value === null ? 'off' : 'value';
+  return (
+    <label class="field">
+      {props.label}
+      <span class="row nowrap">
+        <select
+          class="grow"
+          value={mode}
+          onChange={(e) => {
+            const m = (e.target as HTMLSelectElement).value;
+            props.onChange(m === 'inherit' ? undefined : m === 'off' ? null : (props.value ?? props.fallback));
+          }}
+        >
+          {props.inherited && <option value="inherit">Default ({props.inherited.format(props.inherited.value)})</option>}
+          <option value="off">Off</option>
+          <option value="value">After … minutes</option>
+        </select>
+        {mode === 'value' && (
           <input
-            type="checkbox"
-            checked={value.includes(z.id)}
-            onChange={(e) => onChange((e.target as HTMLInputElement).checked ? [...value, z.id] : value.filter((v) => v !== z.id))}
+            type="number"
+            class="num"
+            inputMode="decimal"
+            aria-label={`${props.label} (minutes)`}
+            min={props.min}
+            max={props.max}
+            value={props.value ?? props.fallback}
+            onInput={(e) => {
+              const raw = (e.target as HTMLInputElement).value;
+              props.onChange(raw === '' ? props.fallback : Number(raw));
+            }}
           />
-          {z.name}
-        </label>
+        )}
+      </span>
+    </label>
+  );
+}
+
+/** Optional daily time range (quiet hours). */
+export function TimeRange({ value, onChange, label }: { value: { start: string; end: string } | undefined; onChange: (v: { start: string; end: string } | undefined) => void; label: string }) {
+  return (
+    <div class="stack">
+      <label class="check">
+        <input type="checkbox" checked={!!value} onChange={(e) => onChange((e.target as HTMLInputElement).checked ? { start: '23:00', end: '07:00' } : undefined)} />
+        {label}
+      </label>
+      {value && (
+        <div class="row nowrap">
+          <input type="time" aria-label="from" value={value.start} onInput={(e) => onChange({ ...value, start: (e.target as HTMLInputElement).value })} />
+          –
+          <input type="time" aria-label="until" value={value.end} onInput={(e) => onChange({ ...value, end: (e.target as HTMLInputElement).value })} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+const DAY_LABEL: Record<Weekday, string> = { mon: 'Mo', tue: 'Tu', wed: 'We', thu: 'Th', fri: 'Fr', sat: 'Sa', sun: 'Su' };
+
+/** Time window rows: from, to, weekday chips (none = every day), add/remove. */
+export function WindowsEditor({ value, onChange, addLabel = 'Add time window' }: { value: TimeWindow[]; onChange: (v: TimeWindow[]) => void; addLabel?: string }) {
+  const set = (i: number, w: TimeWindow) => onChange(value.map((x, j) => (j === i ? w : x)));
+  return (
+    <div class="stack" data-testid="windows-editor">
+      {value.map((w, i) => (
+        <div class="window-row" key={i}>
+          <div class="row nowrap">
+            <input type="time" aria-label="from" value={w.start} onInput={(e) => set(i, { ...w, start: (e.target as HTMLInputElement).value })} />
+            –
+            <input type="time" aria-label="until" value={w.end} onInput={(e) => set(i, { ...w, end: (e.target as HTMLInputElement).value })} />
+            <button type="button" class="link danger" aria-label="remove window" onClick={() => onChange(value.filter((_, j) => j !== i))}>
+              ✕
+            </button>
+          </div>
+          <div class="chips" role="group" aria-label="weekdays">
+            {WEEKDAYS.map((d) => {
+              const on = !!w.days?.includes(d);
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  class={`chip${on ? ' active' : ''}`}
+                  aria-pressed={on}
+                  onClick={() => {
+                    const days = WEEKDAYS.filter((x) => (x === d ? !on : !!w.days?.includes(x)));
+                    set(i, days.length ? { ...w, days } : { start: w.start, end: w.end });
+                  }}
+                >
+                  {DAY_LABEL[d]}
+                </button>
+              );
+            })}
+            {!w.days?.length && <span class="small muted">every day</span>}
+          </div>
+        </div>
       ))}
+      {value.length < MAX_WINDOWS && (
+        <div>
+          <button type="button" onClick={() => onChange([...value, { start: '20:00', end: '23:00' }])}>
+            ➕ {addLabel}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -80,7 +219,20 @@ function minutesOf(seconds: number) {
   return Math.round(seconds / 60);
 }
 
-export function ConsequenceEditor({ label, value, onChange, commands }: { label: string; value: Consequence[]; onChange: (v: Consequence[]) => void; commands: CommandInfo[] }) {
+export function ConsequenceEditor({
+  label,
+  value,
+  onChange,
+  commands,
+  repeating,
+}: {
+  label: string;
+  value: Consequence[];
+  onChange: (v: Consequence[]) => void;
+  commands: CommandInfo[];
+  /** The list applies repeatedly (e.g. "penalty", "missed check-in"): shows a "when" selector per row. */
+  repeating?: string;
+}) {
   const [adding, setAdding] = useState<Consequence['type']>('add_time');
   const set = (i: number, c: Consequence) => onChange(value.map((v, j) => (j === i ? c : v)));
   return (
@@ -89,14 +241,17 @@ export function ConsequenceEditor({ label, value, onChange, commands }: { label:
       {value.length === 0 && <div class="small muted">Nothing happens.</div>}
       {value.map((c, i) => (
         <div class="cons-item" key={i}>
-          <ConsequenceFields c={c} onChange={(n) => set(i, n)} commands={commands} />
+          <div class="stack">
+            <ConsequenceFields c={c} onChange={(n) => set(i, n)} commands={commands} />
+            {repeating && <WhenSelect value={c.when} noun={repeating} onChange={(when) => set(i, withWhen(c, when))} />}
+          </div>
           <button class="link danger" aria-label="remove" onClick={() => onChange(value.filter((_, j) => j !== i))}>
             ✕
           </button>
         </div>
       ))}
       {value.length < 10 && (
-        <div class="row">
+        <div class="row nowrap">
           <select class="grow" value={adding} onChange={(e) => setAdding((e.target as HTMLSelectElement).value as Consequence['type'])}>
             {TYPES.map((t) => (
               <option key={t.type} value={t.type}>
@@ -106,6 +261,48 @@ export function ConsequenceEditor({ label, value, onChange, commands }: { label:
           </select>
           <button onClick={() => onChange([...value, defaultConsequence(adding)])}>Add</button>
         </div>
+      )}
+    </div>
+  );
+}
+
+export function withWhen(c: Consequence, when: When | undefined): Consequence {
+  const { when: _old, ...rest } = c;
+  return (when ? { ...rest, when } : rest) as Consequence;
+}
+
+/** "every time / every n-th time / only the n-th time" for consequences in repeating lists. */
+export function WhenSelect({ value, onChange, noun }: { value: When | undefined; onChange: (w: When | undefined) => void; noun: string }) {
+  const mode = !value || 'every' in value ? 'every' : 'everyNth' in value ? 'everyNth' : 'nth';
+  const n = value && 'everyNth' in value ? value.everyNth : value && 'nth' in value ? value.nth : 2;
+  return (
+    <div class="row nowrap small" data-testid="when-select">
+      <select
+        class="grow"
+        aria-label="when"
+        value={mode}
+        onChange={(e) => {
+          const m = (e.target as HTMLSelectElement).value;
+          onChange(m === 'every' ? undefined : m === 'everyNth' ? { everyNth: Math.max(2, n) } : { nth: n });
+        }}
+      >
+        <option value="every">at every {noun}</option>
+        <option value="everyNth">at every n-th {noun}</option>
+        <option value="nth">only at the n-th {noun}</option>
+      </select>
+      {mode !== 'every' && (
+        <input
+          type="number"
+          class="num"
+          aria-label="n"
+          min={mode === 'everyNth' ? 2 : 1}
+          max={1000}
+          value={n}
+          onInput={(e) => {
+            const v = Math.round(Number((e.target as HTMLInputElement).value) || 0);
+            onChange(mode === 'everyNth' ? { everyNth: Math.min(1000, Math.max(2, v)) } : { nth: Math.min(1000, Math.max(1, v)) });
+          }}
+        />
       )}
     </div>
   );

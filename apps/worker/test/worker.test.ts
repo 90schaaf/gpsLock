@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { handleRequest, runCron, type Overrides } from '../src/index.js';
-import { FakeChaster, MemoryKV, makeEnv } from './fake-chaster.js';
+import { FakeChaster, FakeD1, historyOf, makeEnv } from './fake-chaster.js';
 
 const HOME = { lat: 47.3769, lng: 8.5417 };
 const BAR = { lat: 47.39, lng: 8.515 };
@@ -29,7 +29,7 @@ const config = {
 };
 
 let fake: FakeChaster;
-let kv: MemoryKV;
+let db: FakeD1;
 let env: ReturnType<typeof makeEnv>;
 let now: Date;
 let ids = 0;
@@ -47,8 +47,8 @@ const fix = (p: { lat: number; lng: number }, accuracy = 10) => ({ ...p, accurac
 
 beforeEach(() => {
   fake = new FakeChaster();
-  kv = new MemoryKV();
-  env = makeEnv(kv);
+  db = new FakeD1();
+  env = makeEnv(db);
   now = NOW;
   fake.addSession('s1', config);
   fake.mainTokens.set('wearer-token', { role: 'wearer', sessionId: 's1' });
@@ -93,7 +93,7 @@ describe('F10 session + check-in flow', () => {
     expect(body.record.outcome).toBe('accepted');
     expect(body.record.zones).toEqual(['Home']);
     const s = fake.sessions.get('s1')!;
-    expect((s.data as any).lockation.required.nextDeadline).toBe('2026-06-01T16:00:00.000Z');
+    expect(Object.values((s.data as any).lockation.required.slots as Record<string, any>)[0].nextDeadline).toBe('2026-06-01T16:00:00.000Z');
     expect((s as any).metadata.homeActions[0].slug).toBe('checkin');
     expect(fake.calls.some((c) => c.path.endsWith('/logs/custom'))).toBe(true);
     expect(body.view.history).toHaveLength(1);
@@ -108,7 +108,7 @@ describe('F10 session + check-in flow', () => {
     expect(calls.map((c) => [c.path.replace('/api/extensions/sessions/s1', ''), c.body])).toEqual([
       ['/action', { action: { name: 'pillory', params: { duration: 1800, reason: 'Bar!' } } }],
       ['/tasks/assign', { task: { task: 'Write an apology', points: 0, verificationRequired: false }, actor: 'extension' }],
-      ['/actions/penalty.increment', { actor: 'extension', input: { habit: 'bar' }, idempotencyKey: expect.stringContaining('s1:id') }],
+      ['/actions/penalty.increment', { actor: 'extension', input: { habit: 'bar' }, idempotencyKey: expect.stringContaining('s1:forbidden:bar:') }],
       ['/action', { action: { name: 'freeze' } }],
     ]);
     expect(body.record.consequences.map((c: any) => c.ok)).toEqual([false, true, true, true]);
@@ -133,7 +133,7 @@ describe('F9 privacy', () => {
     const v: any = await (await post('/api/privacy', { mainToken: 'wearer-token', coordinates: 'zone_only' })).json();
     expect(v.privacy).toBe('zone_only');
     expect(v.privacyLocked).toBe(true);
-    const stored = JSON.parse(kv.map.get('HISTORY:s1')!);
+    const stored = historyOf(db, 's1');
     expect(stored[0].lat).toBeUndefined();
   });
 
@@ -148,7 +148,7 @@ describe('F9 privacy', () => {
     const auth = { Authorization: `Basic ${btoa('hook:secret')}` };
     const r = await post('/webhook', { event: 'extension_session.deleted', data: { session: { sessionId: 's1' } } }, auth);
     expect(r.status).toBe(204);
-    expect(kv.map.has('HISTORY:s1')).toBe(false);
+    expect(historyOf(db, 's1').length > 0).toBe(false);
   });
 });
 
@@ -157,7 +157,7 @@ describe('F11 configuration endpoints', () => {
 
   it('get returns defaults for an empty config', async () => {
     const v: any = await (await post('/api/config/get', { configToken: 'cfg' })).json();
-    expect(v.config.version).toBe(1);
+    expect(v.config.version).toBe(2);
     expect(v.role).toBe('keyholder');
   });
 
@@ -200,7 +200,7 @@ describe('webhooks', () => {
   it('created initialises state and metadata', async () => {
     const s = fake.addSession('s2', config);
     await post('/webhook', { payload: { event: 'extension_session.created', data: { session: s } } }, { Authorization: `Basic ${btoa('hook:secret')}` });
-    expect((fake.sessions.get('s2')!.data as any).lockation.v).toBe(1);
+    expect((fake.sessions.get('s2')!.data as any).lockation.v).toBe(2);
     expect((fake.sessions.get('s2') as any).metadata).toBeDefined();
   });
 });
