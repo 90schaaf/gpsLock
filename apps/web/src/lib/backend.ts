@@ -27,6 +27,15 @@ export interface PairingResult {
   view: SessionView;
 }
 
+export interface NotificationSetup {
+  topic: string;
+  /** `https://ntfy.sh/<topic>` – works in the browser and as QR code. */
+  url: string;
+  /** `ntfy://ntfy.sh/<topic>` – opens the ntfy app directly. */
+  deepLink: string;
+  view: SessionView;
+}
+
 export interface Backend {
   readonly demo: boolean;
   session(): Promise<SessionView>;
@@ -37,6 +46,11 @@ export interface Backend {
   capabilities(): Promise<{ commands: CommandInfo[]; live: boolean }>;
   pairTracking(): Promise<PairingResult>;
   unpairTracking(): Promise<SessionView>;
+  /** ntfy push notifications for the current role (wearer warnings / keyholder events). 503 `notifications_unavailable` without server token. */
+  setupNotifications(): Promise<NotificationSetup>;
+  stopNotifications(): Promise<SessionView>;
+  /** Wearer: hide the "rules changed" notice. */
+  ackRulesChanged(): Promise<SessionView>;
 }
 
 export class ApiError extends Error {
@@ -101,6 +115,15 @@ export class HttpBackend implements Backend {
   }
   async unpairTracking() {
     return this.post<SessionView>('/api/tracking/unpair', this.main());
+  }
+  async setupNotifications() {
+    return this.post<NotificationSetup>('/api/notify/setup', this.main());
+  }
+  async stopNotifications() {
+    return this.post<SessionView>('/api/notify/stop', this.main());
+  }
+  async ackRulesChanged() {
+    return this.post<SessionView>('/api/notice/ack', this.main());
   }
   async capabilities() {
     return this.post<{ commands: CommandInfo[]; live: boolean }>(

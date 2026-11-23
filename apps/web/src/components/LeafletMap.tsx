@@ -12,6 +12,8 @@ export interface MapCircle {
   draggable?: boolean;
   selected?: boolean;
   dashed?: boolean;
+  /** Always show the label (e.g. numbered hunt checkpoints). */
+  permanentLabel?: boolean;
 }
 
 export interface MapPoint {
@@ -75,7 +77,7 @@ export function LeafletMap(props: LeafletMapProps) {
         fillOpacity: c.selected ? 0.3 : 0.15,
         dashArray: c.dashed ? '6 6' : undefined,
       }).addTo(g);
-      if (c.label) circle.bindTooltip(c.label, { permanent: false, direction: 'top' });
+      if (c.label) circle.bindTooltip(c.label, { permanent: !!c.permanentLabel, direction: c.permanentLabel ? 'center' : 'top', className: c.permanentLabel ? 'map-label' : undefined });
       circle.on('click', (e: L.LeafletMouseEvent) => {
         L.DomEvent.stopPropagation(e);
         handlers.current.onCircleClick?.(c.id);
