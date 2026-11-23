@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+pages-dist/
+coverage/
+.idea/
+*.log
+.DS_Store
