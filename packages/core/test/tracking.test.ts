@@ -15,7 +15,7 @@ import {
   type LockationState,
   type TrackedInput,
 } from '../src/index.js';
-import { BAR, GYM, HOME, Sim, T0, cfg, fixAt, minutes, north, types, zones } from './helpers.js';
+import { BAR, GYM, HOME, Sim, T0, cfg, fixAt, minutes, north, types, zones, slot0 } from './helpers.js';
 
 class Tracker {
   state: LockationState;
@@ -50,12 +50,13 @@ describe('F14 background tracking – evaluation', () => {
     expect(types(t.at(BAR, minutes(T0, 8)))).toEqual([]); // cooldown
   });
 
-  it('AC3 forbidden triggers on leave when the visit was long enough, but only once per visit', () => {
+  it('v1 config: a visit only noticed on leave gets the penalties of its whole stay (v2 timeline)', () => {
     const t = new Tracker(cfg({ zones: [zones.bar], tracking, rules: { forbidden: { enabled: true, zoneIds: ['bar'], cooldownMinutes: 0, onEnter: [{ type: 'add_time', seconds: 3600 }] } } }));
     t.send({ transition: { event: 'enter', zoneId: 'bar', at: T0.getTime() }, fix: fixAt(BAR, T0) }, T0);
     const leave = t.send({ transition: { event: 'leave', zoneId: 'bar', at: minutes(T0, 20).getTime() }, fix: fixAt(north(BAR, 400), minutes(T0, 20)) }, minutes(T0, 20));
-    expect(types(leave)).toEqual(['add_time']);
-    expect(leave.events.join(' ')).toMatch(/for 20 min/);
+    // v1 cooldown 0 → repeat every 5 min (minimum); first penalty after entryConfirm (5 min): 5, 10, 15, 20 min
+    expect(types(leave)).toEqual(['add_time', 'add_time', 'add_time', 'add_time']);
+    expect(leave.events.join(' ')).toMatch(/for 20 min – penalty 4/);
     // short visit → nothing
     t.at(BAR, minutes(T0, 60));
     expect(types(t.at(north(BAR, 600), minutes(T0, 62)))).toEqual([]);
@@ -95,14 +96,14 @@ describe('F14 background tracking – evaluation', () => {
     const t = new Tracker(config);
     const r = t.at(HOME, minutes(T0, 100));
     expect(types(r)).toEqual([]);
-    expect(t.state.required.nextDeadline).toBe(minutes(T0, 340).toISOString());
+    expect(slot0(t.state).nextDeadline).toBe(minutes(T0, 340).toISOString());
     expect(types(t.at(BAR, minutes(T0, 120)))).toEqual([]); // outside: no onOutside, no wrong guess
     expect(types(t.at(GYM, minutes(T0, 130)))).toEqual(['remove_time']); // checkpoint found by tracking
     const noCount = cfg({ zones: [zones.home], tracking: { ...tracking, countsAsCheckin: false }, rules: { required: { enabled: true, zoneIds: ['home'] } } });
     const t2 = new Tracker(noCount);
-    const before = t2.state.required.nextDeadline;
+    const before = slot0(t2.state).nextDeadline;
     t2.at(HOME, minutes(T0, 10));
-    expect(t2.state.required.nextDeadline).toBe(before);
+    expect(slot0(t2.state).nextDeadline).toBe(before);
   });
 
   it('AC7 out of order / too old positions are ignored but count as heartbeat', () => {
@@ -121,7 +122,7 @@ describe('F14 background tracking – evaluation', () => {
     const t = new Tracker(cfg({ zones: [zones.bar], tracking: { ...tracking, entryConfirmMinutes: 0 }, rules: { forbidden: { enabled: true, zoneIds: ['bar'], onEnter: [{ type: 'add_time', seconds: 1 }] } } }));
     const r = t.at(BAR, minutes(T0, 0), 15, minutes(T0, 30));
     expect(types(r)).toEqual(['add_time']);
-    expect(t.state.forbidden.lastTriggered.bar).toBe(T0.toISOString());
+    expect(t.state.forbidden.visits.bar!.lastPenaltyAt).toBe(T0.toISOString());
   });
 
   it('implausible tracked jumps are rejected without penalty', () => {
@@ -191,7 +192,7 @@ describe('F14 OwnTracks format helpers', () => {
     expect(a.command.waypoints.waypoints.map((w) => w.desc)).toEqual(['Home', 'Bar']);
     expect(JSON.stringify(a)).not.toContain('Secret');
     expect(owntracksWaypoints(config).hash).toBe(a.hash);
-    const moved = { ...config, zones: [{ ...zones.home, radiusM: 200 }, zones.bar] };
+    const moved = { ...config, zones: [{ ...config.zones[0]!, radiusM: 200 }, config.zones[1]!] };
     expect(owntracksWaypoints(moved).hash).not.toBe(a.hash);
     expect(owntracksWaypoints(moved).command.waypoints.waypoints[0]!.tst).toBe(a.command.waypoints.waypoints[0]!.tst);
   });
@@ -242,7 +243,7 @@ describe('F16 live tracking only', () => {
   it('AC3 background updates count as required check-ins even if countsAsCheckin is off', () => {
     const t = new Tracker(liveCfg());
     t.at(HOME, minutes(T0, 100));
-    expect(t.state.required.nextDeadline).toBe(minutes(T0, 340).toISOString());
+    expect(slot0(t.state).nextDeadline).toBe(minutes(T0, 340).toISOString());
   });
 
   it('AC4 the first valid update after a missed deadline fires onSuccess once (recovery)', () => {
@@ -252,7 +253,7 @@ describe('F16 live tracking only', () => {
     expect(types(tick)).toContain('freeze');
     const back = t.at(HOME, minutes(T0, 250));
     expect(types(back)).toEqual(['unfreeze']);
-    expect(back.events).toContain('Back in a required zone – check-in counted.');
+    expect(back.events).toContain('Back in "Home" – check-in counted.');
     expect(types(t.at(HOME, minutes(T0, 260)))).toEqual([]);
   });
 

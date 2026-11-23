@@ -3,7 +3,8 @@
  * Formats: https://owntracks.org/booklet/tech/json/ and https://owntracks.org/booklet/tech/http/
  */
 import type { LockationConfig } from './config.js';
-import type { TrackedInput } from './engine.js';
+import { type TrackedInput, visibleCheckpoints } from './engine.js';
+import type { LockationState } from './state.js';
 
 /** FNV-1a 32 bit hash. */
 export function fnv1a(s: string): number {
@@ -19,9 +20,11 @@ export interface OwnTracksConfigOptions {
   url: string;
   username: string;
   password: string;
+  /** 1 = significant changes (battery saving), 2 = move (frequent). Default 1. */
+  monitoring?: 1 | 2;
 }
 
-/** `.otrc` configuration for HTTP mode (mode 3), significant-changes monitoring (1). */
+/** `.otrc` configuration for HTTP mode (mode 3); monitoring 1 (significant) or 2 (move). */
 export function owntracksConfiguration(o: OwnTracksConfigOptions) {
   return {
     _type: 'configuration',
@@ -32,7 +35,7 @@ export function owntracksConfiguration(o: OwnTracksConfigOptions) {
     password: o.password,
     deviceId: 'lockation',
     tid: 'LO',
-    monitoring: 1,
+    monitoring: o.monitoring ?? 1,
     locatorDisplacement: 100,
     locatorInterval: 300,
     extendedData: false,
@@ -53,8 +56,18 @@ export function owntracksConfigLink(o: OwnTracksConfigOptions): string {
   return `owntracks:///config?inline=${encodeURIComponent(toBase64(JSON.stringify(owntracksConfiguration(o))))}`;
 }
 
-/** Zones as OwnTracks waypoints. Hunt checkpoints are never included (F14 AC9). */
-export function owntracksWaypoints(config: LockationConfig) {
+export const CHECKPOINT_PREFIX = 'Hunt ';
+
+/** Waypoint name of a hunt checkpoint ("Hunt 3: Fountain"), distinct from zone names. */
+export function checkpointWaypointName(index: number, name: string): string {
+  return `${CHECKPOINT_PREFIX}${index + 1}: ${name}`;
+}
+
+/**
+ * Zones and the **visible** hunt checkpoints as OwnTracks waypoints (F14 AC9: never a checkpoint the wearer can't see).
+ * Found checkpoints are dropped, so the hash changes and the next response pushes the new list.
+ */
+export function owntracksWaypoints(config: LockationConfig, state?: LockationState) {
   const waypoints = config.zones.map((z) => ({
     _type: 'waypoint',
     desc: z.name,
@@ -64,11 +77,30 @@ export function owntracksWaypoints(config: LockationConfig) {
     // `tst` is the unique key of a waypoint in the apps – keep it stable per zone id.
     tst: 1_600_000_000 + (fnv1a(z.id) % 100_000_000),
   }));
+  const reveal = config.rules.hunt.reveal;
+  if (state && (reveal === 'all' || reveal === 'map')) {
+    for (const v of visibleCheckpoints(config, state)) {
+      if (v.status === 'found' || v.status === 'upcoming') continue;
+      waypoints.push({
+        _type: 'waypoint',
+        desc: checkpointWaypointName(v.index, v.cp.name),
+        lat: v.cp.lat,
+        lon: v.cp.lng,
+        rad: Math.round(v.cp.radiusM),
+        tst: 1_700_000_000 + (fnv1a(`cp:${v.cp.id}`) % 100_000_000),
+      });
+    }
+  }
   const hash = fnv1a(JSON.stringify(waypoints)).toString(36);
   return {
     hash,
     command: { _type: 'cmd', action: 'setWaypoints', waypoints: { _type: 'waypoints', waypoints } },
   };
+}
+
+/** Remote configuration change (e.g. switch between move and significant mode without pairing again). */
+export function owntracksSetMonitoring(monitoring: 1 | 2) {
+  return { _type: 'cmd', action: 'setConfiguration', configuration: { _type: 'configuration', monitoring } };
 }
 
 interface OwnTracksMessage {
@@ -102,8 +134,14 @@ export function parseOwnTracks(body: unknown, config: LockationConfig): TrackedI
   if (m._type === 'transition') {
     const event = m.event === 'enter' || m.event === 'leave' ? m.event : undefined;
     if (!event) return fix ? { fix } : undefined;
-    const zone = typeof m.desc === 'string' ? config.zones.find((z) => z.name === m.desc) : undefined;
-    return { fix, transition: { event, zoneId: zone?.id, at: Math.round(tst * 1000) } };
+    const desc = typeof m.desc === 'string' ? m.desc : undefined;
+    const zone = desc ? config.zones.find((z) => z.name === desc) : undefined;
+    let checkpointId: string | undefined;
+    if (!zone && desc?.startsWith(CHECKPOINT_PREFIX)) {
+      const cps = config.rules.hunt.checkpoints;
+      checkpointId = cps.find((c, i) => checkpointWaypointName(i, c.name) === desc)?.id;
+    }
+    return { fix, transition: { event, zoneId: zone?.id, checkpointId, at: Math.round(tst * 1000) } };
   }
   return undefined;
 }

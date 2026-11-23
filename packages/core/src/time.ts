@@ -89,3 +89,57 @@ export function formatLocalTime(date: Date, tz: string): string {
     minute: '2-digit',
   }).format(date);
 }
+
+const WEEKDAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+const weekdayFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/** Weekday in the timezone, 0 = Monday … 6 = Sunday. */
+export function weekdayIndex(date: Date, tz: string): number {
+  let f = weekdayFormatters.get(tz);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' });
+    weekdayFormatters.set(tz, f);
+  }
+  const map: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+  return map[f.format(date)] ?? 0;
+}
+
+export interface WindowLike {
+  start: string;
+  end: string;
+  days?: readonly string[];
+}
+
+/**
+ * Start instant of the window instance active at `at`, or undefined if none is active.
+ * Windows may cross midnight; such a window belongs to the day it starts (`days` filter).
+ * `start === end` means a 24 h window. If several windows overlap, the latest start wins.
+ */
+export function activeWindowStart(windows: readonly WindowLike[], at: Date, tz: string): Date | undefined {
+  if (!windows.length) return undefined;
+  const p = localParts(at, tz);
+  const m = p.hour * 60 + p.minute;
+  const base = at.getTime() - (p.second * 1000 + at.getUTCMilliseconds());
+  const wd = weekdayIndex(at, tz);
+  let best: number | undefined;
+  for (const w of windows) {
+    const s = parseHHMM(w.start);
+    const e = parseHHMM(w.end);
+    const duration = (e - s + 1440) % 1440 || 1440;
+    const candidates: [number, number][] = [];
+    if (m >= s) candidates.push([m - s, wd]);
+    candidates.push([m + 1440 - s, (wd + 6) % 7]);
+    for (const [elapsed, day] of candidates) {
+      if (elapsed >= duration) continue;
+      if (w.days?.length && !w.days.includes(WEEKDAY_KEYS[day]!)) continue;
+      const start = base - elapsed * MINUTE;
+      if (best === undefined || start > best) best = start;
+    }
+  }
+  return best === undefined ? undefined : new Date(best);
+}
+
+export function formatWindow(w: WindowLike): string {
+  const days = w.days?.length && w.days.length < 7 ? ` (${w.days.map((d) => d[0]!.toUpperCase() + d.slice(1)).join(', ')})` : '';
+  return `${w.start}–${w.end}${days}`;
+}

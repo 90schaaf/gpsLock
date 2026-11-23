@@ -1,9 +1,9 @@
 /** View models sent to the browser, Chaster metadata (F12) and privacy helpers (F9). */
-import type { LockationConfig } from './config.js';
-import { describeConsequence, type Consequence } from './consequences.js';
-import type { CheckinRecord, PlannedConsequence } from './engine.js';
-import { effectivePrivacy, type LockationState } from './state.js';
-import { formatLocalTime, MINUTE } from './time.js';
+import { activeRoles, forbiddenTimings, type LockationConfig, type ZoneRole, zonesWithRole } from './config.js';
+import { describeConsequence, describeWhen, type Consequence } from './consequences.js';
+import { type CheckinRecord, type PlannedConsequence, visibleCheckpoints } from './engine.js';
+import { earliestDeadline, effectivePrivacy, type LockationState, requiredSlots } from './state.js';
+import { activeWindowStart, formatLocalTime, formatWindow, MINUTE } from './time.js';
 
 export type Role = 'wearer' | 'keyholder';
 
@@ -13,13 +13,40 @@ export interface ZoneView {
   lat: number;
   lng: number;
   radiusM: number;
-  kinds: ('required' | 'forbidden' | 'reward')[];
+  /** Roles of enabled rules. */
+  kinds: ZoneRole[];
+  /** Human readable time windows ("Stay inside 22:00–06:00", "Forbidden 20:00–02:00"). */
+  windows: string[];
+  /** A window of this zone is active right now. */
+  windowActive: boolean;
+  /** F17 – the keyholder confirmed this place is intentionally hard to reach. */
+  reachabilityNote?: string;
 }
 
 export interface RuleSummary {
-  rule: 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'curfew' | 'tracking';
+  rule: 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'tracking';
   title: string;
   lines: string[];
+}
+
+export interface RequiredSlotView {
+  key: string;
+  name: string;
+  nextDeadline?: string;
+  overdue: boolean;
+  missedCount: number;
+  lastValidAt?: string;
+  graceMinutes: number;
+}
+
+export interface HuntCheckpointView {
+  index: number;
+  name: string;
+  hint: string;
+  lat: number;
+  lng: number;
+  radiusM: number;
+  status: 'found' | 'current' | 'open' | 'upcoming';
 }
 
 export interface SessionView {
@@ -34,15 +61,26 @@ export interface SessionView {
   liveOnly: boolean;
   zones: ZoneView[];
   rules: RuleSummary[];
+  /** Earliest required deadline (summary); details per zone in `requiredSlots`. */
   required?: { nextDeadline?: string; overdue: boolean; missedCount: number; lastValidAt?: string; graceMinutes: number };
+  requiredSlots?: RequiredSlotView[];
   hunt?: {
     status: 'active' | 'completed' | 'failed';
     index: number;
     total: number;
-    reveal: 'hint' | 'distance' | 'map';
+    reveal: 'all' | 'hint' | 'distance' | 'map';
+    order: 'sequence' | 'any';
     hint?: string;
     distanceBand?: string;
     target?: { lat: number; lng: number; radiusM: number };
+    /** Visible checkpoints with status (reveal `all`: every checkpoint; `map`: the current/open ones). */
+    checkpoints: HuntCheckpointView[];
+    /** Hints of the open checkpoints (any-order mode with hint/distance reveal). */
+    openHints?: string[];
+    /** Whether the wearer may submit a hunt guess (disabled with reveal `all`). */
+    guessesAllowed: boolean;
+    /** Generic note when hidden checkpoints are in difficult terrain (F17). */
+    terrainNote?: string;
     deadline?: string;
   };
   travel?: { totalKm: number; pendingKm: number; stepKm: number; kmToday: number; dailyCapKm: number };
@@ -62,6 +100,8 @@ export interface SessionView {
     missedCount: number;
     heartbeatMinutes: number;
     updates: number;
+    /** OwnTracks mode the phone should use. */
+    mode: 'move' | 'significant';
   };
   /**
    * Last accepted position of the wearer. Always included for the wearer (rounded in zone-only mode);
@@ -70,6 +110,12 @@ export interface SessionView {
   lastPosition?: { lat: number; lng: number; accuracy: number; at: string; approximate: boolean };
   /** Zones the wearer is currently known to be in (from check-ins and tracking). */
   presentZones: string[];
+  /** Ongoing forbidden-zone stays with the next penalty time. */
+  forbiddenVisits: { zone: string; since: string; penalties: number; nextPenaltyAt?: string }[];
+  /** Configuration changed during the lock (shown to the wearer until acknowledged). */
+  rulesChanged?: { at: string; summary: string[] };
+  /** Whether ntfy notifications can be set up (worker has a token). Filled in by the backend. */
+  notifications?: { available: boolean; subscribed: boolean };
   stats: { checkins: number; accepted: number; lastCheckinAt?: string };
   history: CheckinRecord[];
 }
@@ -87,43 +133,57 @@ export function trackingStatus(state: LockationState, heartbeatMinutes: number, 
   return now.getTime() - seen <= heartbeatMinutes * MINUTE ? 'connected' : 'no_signal';
 }
 
-const list = (cs: Consequence[]) => (cs.length ? cs.map(describeConsequence).join(', ') : 'nothing');
+const list = (cs: Consequence[]) => (cs.length ? cs.map((c) => describeConsequence(c) + describeWhen(c.when)).join(', ') : 'nothing');
 
 export function summarizeRules(config: LockationConfig): RuleSummary[] {
-  const names = new Map(config.zones.map((z) => [z.id, z.name]));
-  const zoneNames = (ids: string[]) => ids.map((i) => names.get(i) ?? i).join(', ');
   const out: RuleSummary[] = [];
-  const { required, forbidden, reward, travel, hunt, curfew } = config.rules;
+  const { required, forbidden, reward, travel, hunt } = config.rules;
   if (required.enabled) {
-    out.push({
-      rule: 'required',
-      title: 'Required check-in',
-      lines: [
-        `Check in ${required.zoneIds.length ? `inside ${zoneNames(required.zoneIds)}` : 'anywhere'} at least every ${fmtMinutes(required.intervalMinutes)} (grace ${fmtMinutes(required.graceMinutes)}).`,
-        ...(required.quietHours ? [`No check-ins required between ${required.quietHours.start} and ${required.quietHours.end}.`] : []),
-        `Missed: ${list(required.onMissed)}.`,
-        ...(required.onOutside.length ? [`Checked in outside: ${list(required.onOutside)}.`] : []),
-        ...(required.onSuccess.length ? [`Successful check-in: ${list(required.onSuccess)}.`] : []),
-      ],
-    });
+    const lines: string[] = [];
+    if (required.anywhere) lines.push(`Check in anywhere at least every ${fmtMinutes(required.intervalMinutes)} (grace ${fmtMinutes(required.graceMinutes)}).`);
+    const zones = zonesWithRole(config, 'required');
+    const interval = zones.filter((z) => z.required.intervalCheckins);
+    if (interval.length) {
+      if (required.combine === 'any') {
+        lines.push(`Check in inside ${interval.map((z) => z.name).join(' or ')} at least every ${fmtMinutes(required.intervalMinutes)} (grace ${fmtMinutes(required.graceMinutes)}).`);
+      } else {
+        for (const z of interval) {
+          lines.push(
+            `Check in inside ${z.name} at least every ${fmtMinutes(z.required.intervalMinutes ?? required.intervalMinutes)} (grace ${fmtMinutes(z.required.graceMinutes ?? required.graceMinutes)})${z.required.onMissed.length ? `; missed there additionally: ${list(z.required.onMissed)}` : ''}.`,
+          );
+        }
+      }
+    }
+    for (const z of zones.filter((x) => x.required.stayWindows.length)) {
+      lines.push(`Stay inside ${z.name} during ${z.required.stayWindows.map(formatWindow).join(', ')}.`);
+    }
+    if (zones.some((z) => z.required.stayWindows.length)) lines.push(`Outside during a stay window: ${list(required.onOutsideDuringWindow)} (at most every ${fmtMinutes(required.windowCooldownMinutes)}).`);
+    if (required.quietHours) lines.push(`No check-ins required between ${required.quietHours.start} and ${required.quietHours.end}.`);
+    if (required.anywhere || interval.length) lines.push(`Missed: ${list(required.onMissed)}.`);
+    if (required.onOutside.length) lines.push(`Checked in outside the required zones: ${list(required.onOutside)}.`);
+    if (required.onSuccess.length) lines.push(`Successful check-in: ${list(required.onSuccess)}.`);
+    if (required.warnBeforeMinutes) lines.push(`You get a warning ${fmtMinutes(required.warnBeforeMinutes)} before a deadline (if notifications are set up).`);
+    out.push({ rule: 'required', title: 'Required zones', lines });
   }
   if (forbidden.enabled) {
-    out.push({
-      rule: 'forbidden',
-      title: 'Forbidden zones',
-      lines: [`Checking in inside ${zoneNames(forbidden.zoneIds)}: ${list(forbidden.onEnter)}.`],
-    });
+    const lines: string[] = [];
+    for (const z of zonesWithRole(config, 'forbidden')) {
+      const T = forbiddenTimings(config, z);
+      const when = z.forbidden.windows.length ? ` during ${z.forbidden.windows.map(formatWindow).join(', ')}` : '';
+      const timeline = config.tracking.enabled
+        ? `${T.firstWarning !== null ? `warning after ${fmtMinutes(T.firstWarning)}, ` : ''}first penalty after ${fmtMinutes(T.firstPenalty)}, then every ${fmtMinutes(T.repeatEvery)}`
+        : `penalty at each check-in inside (at most every ${fmtMinutes(T.repeatEvery)})`;
+      lines.push(`${z.name}${when}: ${timeline}: ${list([...forbidden.onEnter, ...z.forbidden.onEnter])}.`);
+    }
+    out.push({ rule: 'forbidden', title: 'Forbidden zones', lines });
   }
   if (reward.enabled) {
-    out.push({
-      rule: 'reward',
-      title: 'Reward zones',
-      lines: [
-        `Checking in inside ${zoneNames(reward.zoneIds)}: ${list(reward.onEnter)}.`,
-        `At most ${reward.maxPerDay}× per day, cooldown ${fmtMinutes(reward.cooldownMinutes)} per zone.`,
-        ...(reward.dwellMinutes ? [`You must stay at least ${fmtMinutes(reward.dwellMinutes)} in the zone.`] : []),
-      ],
+    const lines = zonesWithRole(config, 'reward').map((z) => {
+      const dwell = z.reward.dwellMinutes ?? reward.dwellMinutes;
+      return `${z.name}: ${list([...reward.onEnter, ...z.reward.onEnter])} – at most ${z.reward.maxPerDay ?? reward.maxPerDay}× per day, cooldown ${fmtMinutes(z.reward.cooldownMinutes ?? reward.cooldownMinutes)}${dwell ? `, stay at least ${fmtMinutes(dwell)}` : ''}.`;
     });
+    lines.push(`At most ${reward.maxPerDay} reward${reward.maxPerDay === 1 ? '' : 's'} per day in total.`);
+    out.push({ rule: 'reward', title: 'Reward zones', lines });
   }
   if (travel.enabled) {
     out.push({
@@ -140,19 +200,12 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
       rule: 'hunt',
       title: 'Scavenger hunt',
       lines: [
-        `${hunt.checkpoints.length} checkpoints in a fixed order.`,
+        `${hunt.checkpoints.length} checkpoints, ${hunt.order === 'any' ? 'in any order' : 'in a fixed order'}${hunt.reveal === 'all' ? ' – all shown on the map' : ''}.`,
         `Each checkpoint: ${list(hunt.onCheckpoint)}. Completed: ${list(hunt.onComplete)}.`,
-        `Wrong hunt check-in: ${list(hunt.onWrong)}.`,
+        ...(hunt.reveal !== 'all' ? [`Wrong hunt guess: ${list(hunt.onWrong)}.`] : []),
         ...(hunt.timeLimitMinutes ? [`Time limit ${fmtMinutes(hunt.timeLimitMinutes)}: ${list(hunt.onTimeout)}.`] : []),
         ...(hunt.blockUnlockUntilComplete ? ['The lock cannot be unlocked until the hunt is completed.'] : []),
       ],
-    });
-  }
-  if (curfew.enabled) {
-    out.push({
-      rule: 'curfew',
-      title: 'Curfew',
-      lines: [`Between ${curfew.start} and ${curfew.end} you must stay inside ${zoneNames(curfew.zoneIds)}. Being outside: ${list(curfew.onOutside)}.`],
     });
   }
   const tr = config.tracking;
@@ -164,8 +217,10 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
         'Your phone reports its location in the background with the OwnTracks app.',
         ...(tr.liveOnly ? ['Manual check-ins are disabled – only live tracking counts.'] : []),
         `If no location arrives for ${fmtMinutes(tr.heartbeatMinutes)}: ${list(tr.onHeartbeatMissed)}.`,
-        ...(forbidden.enabled && tr.entryConfirmMinutes ? [`Forbidden zones count after ${fmtMinutes(tr.entryConfirmMinutes)} inside.`] : []),
+        ...(tr.quietHours ? [`No missing-signal penalties between ${tr.quietHours.start} and ${tr.quietHours.end}.`] : []),
+        ...(tr.warnBeforeMinutes ? [`You get a warning ${fmtMinutes(tr.warnBeforeMinutes)} before a missing-signal penalty (if notifications are set up).`] : []),
         ...((tr.countsAsCheckin || tr.liveOnly) && required.enabled ? ['Background locations inside a required zone count as check-ins.'] : []),
+        ...(config.antiCheat.liveVerificationEveryHours ? [`Random verification pictures, on average every ${config.antiCheat.liveVerificationEveryHours} h.`] : []),
       ],
     });
   }
@@ -189,15 +244,25 @@ export interface BuildViewInput {
   now: Date;
 }
 
+const reachNote = (ack: { reasons: string[] } | undefined) => (ack ? `${ack.reasons.join(', ')} – confirmed as intentional by the keyholder` : undefined);
+
 export function buildSessionView({ role, isSelfLock, config, state, history, now }: BuildViewInput): SessionView {
   const privacy = effectivePrivacy(config, state);
-  const kinds = new Map<string, ZoneView['kinds']>();
-  const mark = (ids: string[], k: ZoneView['kinds'][number], on: boolean) => {
-    if (on) for (const id of ids) kinds.set(id, [...(kinds.get(id) ?? []), k]);
-  };
-  mark(config.rules.required.zoneIds, 'required', config.rules.required.enabled);
-  mark(config.rules.forbidden.zoneIds, 'forbidden', config.rules.forbidden.enabled);
-  mark(config.rules.reward.zoneIds, 'reward', config.rules.reward.enabled);
+
+  const zones: ZoneView[] = config.zones.map((z) => {
+    const kinds = activeRoles(config, z);
+    const windows: string[] = [];
+    let windowActive = false;
+    if (kinds.includes('required') && z.required.stayWindows.length) {
+      windows.push(`Stay inside ${z.required.stayWindows.map(formatWindow).join(', ')}`);
+      windowActive ||= !!activeWindowStart(z.required.stayWindows, now, config.timezone);
+    }
+    if (kinds.includes('forbidden') && z.forbidden.windows.length) {
+      windows.push(`Forbidden ${z.forbidden.windows.map(formatWindow).join(', ')}`);
+      windowActive ||= !!activeWindowStart(z.forbidden.windows, now, config.timezone);
+    }
+    return { id: z.id, name: z.name, lat: z.lat, lng: z.lng, radiusM: z.radiusM, kinds, windows, windowActive, reachabilityNote: reachNote(z.reachabilityAck) };
+  });
 
   const view: SessionView = {
     role,
@@ -208,12 +273,14 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
     matchMode: config.matchMode,
     maxAccuracyM: config.antiCheat.maxAccuracyM,
     liveOnly: config.tracking.enabled && config.tracking.liveOnly,
-    zones: config.zones.map((z) => ({ ...z, kinds: kinds.get(z.id) ?? [] })),
+    zones,
     rules: summarizeRules(config),
     freezeUntil: state.freezeUntil,
     stats: { checkins: state.checkinCount, accepted: state.acceptedCount, lastCheckinAt: state.lastAttemptAt },
     history: history.map((h) => (privacy === 'exact' ? h : redactRecord(h))),
     presentZones: config.zones.filter((z) => state.presence[z.id]).map((z) => z.name),
+    forbiddenVisits: [],
+    rulesChanged: state.rulesChanged,
   };
   const la = state.lastAccepted;
   if (la && (role === 'wearer' || (role === 'keyholder' && privacy === 'exact'))) {
@@ -231,36 +298,73 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
       missedCount: state.tracking.missedCount,
       heartbeatMinutes: config.tracking.heartbeatMinutes,
       updates: state.tracking.trackedCount,
+      mode: owntracksModeName(config),
     };
   }
 
-  const r = config.rules.required;
-  if (r.enabled) {
-    const deadline = state.required.nextDeadline;
-    view.required = {
-      nextDeadline: deadline,
-      overdue: !!deadline && now.getTime() > Date.parse(deadline),
-      missedCount: state.required.missedCount,
-      lastValidAt: state.required.lastValidAt,
-      graceMinutes: r.graceMinutes,
-    };
+  if (config.rules.forbidden.enabled) {
+    for (const z of zonesWithRole(config, 'forbidden')) {
+      const v = state.forbidden.visits[z.id];
+      if (!v || v.leftAt) continue;
+      const T = forbiddenTimings(config, z);
+      view.forbiddenVisits.push({
+        zone: z.name,
+        since: v.since,
+        penalties: v.penalties,
+        nextPenaltyAt: config.tracking.enabled ? new Date(Date.parse(v.since) + (T.firstPenalty + v.penalties * T.repeatEvery) * MINUTE).toISOString() : undefined,
+      });
+    }
+  }
+
+  const slots = requiredSlots(config);
+  if (config.rules.required.enabled) {
+    view.requiredSlots = slots.map((s) => {
+      const st = state.required.slots[s.key];
+      return {
+        key: s.key,
+        name: s.name,
+        nextDeadline: st?.nextDeadline,
+        overdue: !!st?.nextDeadline && now.getTime() > Date.parse(st.nextDeadline),
+        missedCount: st?.missedCount ?? 0,
+        lastValidAt: st?.lastValidAt,
+        graceMinutes: s.graceMinutes,
+      };
+    });
+    const first = earliestDeadline(state);
+    const firstSlot = first ? view.requiredSlots.find((s) => s.key === first.key) : undefined;
+    if (firstSlot) {
+      view.required = {
+        nextDeadline: firstSlot.nextDeadline,
+        overdue: view.requiredSlots.some((s) => s.overdue),
+        missedCount: view.requiredSlots.reduce((a, s) => a + s.missedCount, 0),
+        lastValidAt: firstSlot.lastValidAt,
+        graceMinutes: firstSlot.graceMinutes,
+      };
+    }
   }
 
   const h = config.rules.hunt;
   if (h.enabled) {
-    const cp = h.checkpoints[state.hunt.index];
-    // Only the current checkpoint is ever revealed (F6 AC3). The keyholder sees everything in the config page.
+    const active = state.hunt.status === 'active';
+    const cp = h.order === 'sequence' ? h.checkpoints[state.hunt.index] : undefined;
+    const visible = visibleCheckpoints(config, state);
+    const visibleIds = new Set(visible.map((v) => v.cp.id));
+    const hiddenDifficult = h.checkpoints.some((c) => c.reachabilityAck && !visibleIds.has(c.id));
+    const open = h.checkpoints.filter((c) => !state.hunt.found.includes(c.id));
     view.hunt = {
       status: state.hunt.status,
       index: state.hunt.index,
       total: h.checkpoints.length,
       reveal: h.reveal,
-      hint: state.hunt.status === 'active' ? cp?.hint : undefined,
-      distanceBand: h.reveal !== 'hint' && state.hunt.status === 'active' ? state.hunt.lastDistanceBand : undefined,
-      target: h.reveal === 'map' && cp && state.hunt.status === 'active' ? { lat: cp.lat, lng: cp.lng, radiusM: cp.radiusM } : undefined,
-      deadline: h.timeLimitMinutes
-        ? new Date(Date.parse(state.hunt.startedAt ?? state.startedAt) + h.timeLimitMinutes * MINUTE).toISOString()
-        : undefined,
+      order: h.order,
+      hint: active && h.order === 'sequence' ? cp?.hint : undefined,
+      openHints: active && h.order === 'any' && h.reveal !== 'all' ? open.map((c) => c.hint).filter(Boolean) : undefined,
+      distanceBand: h.reveal !== 'hint' && active ? state.hunt.lastDistanceBand : undefined,
+      target: h.reveal === 'map' && h.order === 'sequence' && cp && active ? { lat: cp.lat, lng: cp.lng, radiusM: cp.radiusM } : undefined,
+      checkpoints: h.reveal === 'all' || h.reveal === 'map' ? visible.map((v) => ({ index: v.index, name: v.cp.name, hint: v.cp.hint, lat: v.cp.lat, lng: v.cp.lng, radiusM: v.cp.radiusM, status: v.status })) : [],
+      guessesAllowed: h.reveal !== 'all' && active,
+      terrainNote: hiddenDifficult ? 'One or more checkpoints are in difficult terrain – confirmed as intentional by the keyholder.' : undefined,
+      deadline: h.timeLimitMinutes ? new Date(Date.parse(state.hunt.startedAt ?? state.startedAt) + h.timeLimitMinutes * MINUTE).toISOString() : undefined,
     };
   }
 
@@ -275,6 +379,13 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
     };
   }
   return view;
+}
+
+function owntracksModeName(config: LockationConfig): 'move' | 'significant' {
+  const m = config.tracking.owntracksMode;
+  if (m !== 'auto') return m;
+  const forbidden = config.rules.forbidden.enabled && zonesWithRole(config, 'forbidden').length > 0;
+  return config.tracking.heartbeatMinutes < 60 || forbidden ? 'move' : 'significant';
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -297,15 +408,16 @@ export function computeMetadata(config: LockationConfig, state: LockationState, 
     reasons.push(`Scavenger hunt not completed (${state.hunt.index}/${h.checkpoints.length} checkpoints).`);
   }
   const r = config.rules.required;
-  const deadline = state.required.nextDeadline ? new Date(state.required.nextDeadline) : undefined;
-  const overdue = r.enabled && !!deadline && now > deadline;
+  const first = r.enabled ? earliestDeadline(state) : undefined;
+  const deadline = first?.deadline;
+  const overdue = r.enabled && Object.values(state.required.slots).some((s) => s.nextDeadline && now > new Date(s.nextDeadline));
   if (overdue) reasons.push('A required GPS check-in is overdue.');
 
   const live = config.tracking.enabled && config.tracking.liveOnly;
   let description = 'Prove your location';
   if (live && !state.tracking.deviceUser) {
     description = 'Set up live tracking!';
-  } else if (r.enabled && deadline) {
+  } else if (deadline) {
     const due = formatLocalTime(deadline, config.timezone);
     description = overdue ? (live ? 'Required location overdue!' : 'Check-in overdue!') : live ? `Be in a required zone by ${due}` : `Next check-in due ${due}`;
   } else if (live) {
@@ -336,9 +448,13 @@ export function buildLogEntry(
       ? 'Lockation'
       : record?.outcome === 'rejected'
         ? 'GPS check-in rejected'
-        : record?.zones.length
-          ? `GPS check-in: ${record.zones.join(', ')}`
-          : 'GPS check-in';
+        : record?.source === 'tracked'
+          ? record.zones.length
+            ? `GPS background update: ${record.zones.join(', ')}`
+            : 'GPS background update'
+          : record?.zones.length
+            ? `GPS check-in: ${record.zones.join(', ')}`
+            : 'GPS check-in';
   const lines = [...events];
   if (consequences.length) lines.push(`Consequences: ${consequences.map((c) => describeConsequence(c.consequence)).join(', ')}.`);
   return {

@@ -34,7 +34,7 @@ describe('F1 geo', () => {
 describe('F1/F11 config validation', () => {
   it('fills defaults for an empty config', () => {
     const c = defaultConfig('Europe/Zurich');
-    expect(c.version).toBe(1);
+    expect(c.version).toBe(2);
     expect(c.privacy.coordinates).toBe('zone_only');
     expect(c.antiCheat.maxAccuracyM).toBe(100);
     expect(c.rules.required.enabled).toBe(false);
