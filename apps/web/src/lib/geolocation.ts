@@ -49,3 +49,27 @@ export function getFix(opts: { timeoutMs?: number; embedded?: boolean } = {}): P
     );
   });
 }
+
+/** Whether the location permission is already granted (no prompt needed). `undefined` if the browser can't tell. */
+export async function geolocationGranted(): Promise<boolean | undefined> {
+  try {
+    const p = await navigator.permissions?.query({ name: 'geolocation' as PermissionName });
+    return p ? p.state === 'granted' : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Live position while the page is open (only for the wearer's own map – nothing is sent to the server).
+ * Returns a stop function.
+ */
+export function watchFix(onFix: (f: Fix) => void, onError?: (e: GeoError) => void, embedded = false): () => void {
+  if (!('geolocation' in navigator)) return () => undefined;
+  const id = navigator.geolocation.watchPosition(
+    (pos) => onFix({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy, timestamp: Math.round(pos.timestamp) }),
+    (err) => onError?.(mapGeoError(err, embedded)),
+    { enableHighAccuracy: true, maximumAge: 15_000, timeout: 30_000 },
+  );
+  return () => navigator.geolocation.clearWatch(id);
+}

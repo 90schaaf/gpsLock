@@ -1,12 +1,30 @@
 /**
  * The rule engine. Pure functions: (config, state, input, context) → result.
- * No I/O; the worker / demo backend apply the planned consequences.
+ * No I/O; the worker / demo backend apply the planned consequences and deliver the notices.
  */
-import type { LockationConfig, Zone } from './config.js';
-import { type Consequence, describeConsequence, scaleConsequence } from './consequences.js';
+import {
+  type Checkpoint,
+  forbiddenTimings,
+  type KeyholderNotifyKind,
+  type LockationConfig,
+  matchModeOf,
+  type Zone,
+  zonesWithRole,
+} from './config.js';
+import { appliesAt, type Consequence, describeConsequence, scaleConsequence } from './consequences.js';
 import { distanceBand, haversineM, isInside, roundCoord } from './geo.js';
-import { cloneState, computeDeadline, effectivePrivacy, type LockationState } from './state.js';
-import { dayKey, isInQuietHours, MINUTE } from './time.js';
+import {
+  cloneState,
+  computeDeadline,
+  effectivePrivacy,
+  type LockationState,
+  nextHeartbeatFrom,
+  type RequiredSlot,
+  requiredSlots,
+  syncSlots,
+  type VisitState,
+} from './state.js';
+import { activeWindowStart, adjustForQuietHours, dayKey, formatLocalTime, isInQuietHours, MINUTE } from './time.js';
 
 export interface Fix {
   lat: number;
@@ -36,6 +54,22 @@ export interface PlannedConsequence {
   idempotencyKey: string;
 }
 
+/**
+ * A push notification (ntfy) produced by an evaluation. Wearer notices are warnings; keyholder notices are filtered
+ * by `config.notifications.keyholder[kind]` and combined per evaluation by the worker. Texts never contain coordinates.
+ */
+export interface Notice {
+  audience: 'wearer' | 'keyholder';
+  /** Keyholder switch the notice belongs to (keyholder notices only). */
+  kind?: KeyholderNotifyKind;
+  title: string;
+  message: string;
+  priority: 'default' | 'high';
+  /** Stable key (dedupe/rate limit), e.g. `forbidden:bar:<since>:warn:0`. */
+  key: string;
+  zoneId?: string;
+}
+
 export type RejectReason = 'rate_limited' | 'stale_fix' | 'future_fix' | 'poor_accuracy' | 'implausible_speed' | 'out_of_order' | 'manual_disabled';
 
 export interface CheckinRecord {
@@ -59,6 +93,7 @@ export interface EvalResult {
   state: LockationState;
   consequences: PlannedConsequence[];
   events: string[];
+  notices: Notice[];
 }
 
 export interface CheckinResult extends EvalResult {
@@ -67,8 +102,8 @@ export interface CheckinResult extends EvalResult {
 
 export interface TrackedInput {
   fix?: Fix;
-  /** OwnTracks region transition. `zoneId` is resolved by the caller (may be undefined for unknown regions). */
-  transition?: { event: 'enter' | 'leave'; zoneId?: string; at: number };
+  /** OwnTracks region transition, resolved by the caller to a zone or a hunt checkpoint. */
+  transition?: { event: 'enter' | 'leave'; zoneId?: string; checkpointId?: string; at: number };
 }
 
 export interface TrackedResult extends CheckinResult {
@@ -76,9 +111,22 @@ export interface TrackedResult extends CheckinResult {
   notable: boolean;
 }
 
+/** Sources whose consequences count as a penalty (keyholder "penalty applied" notification). */
+const PENALTY_SOURCES = new Set([
+  'required.onMissed',
+  'required.onOutside',
+  'required.onOutsideDuringWindow',
+  'forbidden.onEnter',
+  'tracking.onHeartbeatMissed',
+  'hunt.onWrong',
+  'hunt.onTimeout',
+  'antiCheat.implausible',
+]);
+
 class Planner {
   readonly list: PlannedConsequence[] = [];
   readonly events: string[] = [];
+  readonly notices: Notice[] = [];
   constructor(private readonly ctx: EvalContext) {}
 
   add(source: string, consequences: Consequence[], factor = 1, keySuffix = '') {
@@ -92,7 +140,7 @@ class Planner {
     }
   }
 
-  /** Add with an idempotency key that is stable across retries (cron). */
+  /** Add with an idempotency key that is stable across retries (cron, repeated observations). */
   addStable(source: string, consequences: Consequence[], stableKey: string) {
     consequences.forEach((c, i) => {
       this.list.push({ consequence: c, source, idempotencyKey: `${this.ctx.sessionId}:${stableKey}:${i}` });
@@ -102,9 +150,33 @@ class Planner {
   event(msg: string) {
     this.events.push(msg);
   }
+
+  notify(n: Omit<Notice, 'priority'> & { priority?: Notice['priority'] }) {
+    this.notices.push({ priority: 'default', ...n });
+  }
+
+  /** Keyholder notices derived from the planned consequences (penalties, verification pictures). */
+  finish(): Notice[] {
+    const penalties = this.list.filter((p) => PENALTY_SOURCES.has(p.source));
+    if (penalties.length) {
+      this.notify({
+        audience: 'keyholder',
+        kind: 'penalty',
+        title: 'Lockation: penalty applied',
+        message: `${penalties.map((p) => describeConsequence(p.consequence)).join(', ')}.`,
+        key: `penalty:${penalties[0]!.idempotencyKey}`,
+      });
+    }
+    const vp = this.list.find((p) => p.consequence.type === 'verification_picture');
+    if (vp) {
+      this.notify({ audience: 'keyholder', kind: 'verification', title: 'Lockation: verification picture', message: 'A verification picture was requested from the wearer.', key: `vp:${vp.idempotencyKey}` });
+    }
+    return this.notices;
+  }
 }
 
 const msSince = (iso: string | undefined, now: Date) => (iso ? now.getTime() - Date.parse(iso) : Infinity);
+const list = (cs: Consequence[]) => (cs.length ? cs.map(describeConsequence).join(', ') : 'nothing');
 
 function zonesById(config: LockationConfig): Map<string, Zone> {
   return new Map(config.zones.map((z) => [z.id, z]));
@@ -179,6 +251,7 @@ export function evaluateCheckin(
   const state = cloneState(prevState);
   const plan = new Planner(ctx);
   const now = ctx.now;
+  syncSlots(config, state, now);
   state.checkinCount += 1;
   state.lastAttemptAt = now.toISOString();
   const record = newRecord(config, state, ctx.evalId, now, fix, purpose, plan.events);
@@ -188,7 +261,7 @@ export function evaluateCheckin(
     record.reason = reason;
     plan.event(message);
     finalizeRecord(record, plan.list);
-    return { state, consequences: plan.list, events: plan.events, record };
+    return { state, consequences: plan.list, events: plan.events, notices: plan.finish(), record };
   };
 
   if (isLiveOnly(config)) {
@@ -237,7 +310,7 @@ export function evaluateCheckin(
   storeLastAccepted(config, state, fix, now);
   trackFreeze(state, plan.list, now);
   finalizeRecord(record, plan.list);
-  return { state, consequences: plan.list, events: plan.events, record };
+  return { state, consequences: plan.list, events: plan.events, notices: plan.finish(), record };
 }
 
 /** F14 – evaluate a background observation (OwnTracks location or transition). */
@@ -245,14 +318,19 @@ export function evaluateTracked(config: LockationConfig, prevState: LockationSta
   const state = cloneState(prevState);
   const plan = new Planner(ctx);
   const now = ctx.now;
+  syncSlots(config, state, now);
   const fix = input.fix;
   const at = new Date(Math.min(fix?.timestamp ?? input.transition?.at ?? now.getTime(), now.getTime()));
 
   // Every authenticated message proves the device is alive (heartbeat).
+  const wasConnected = !!state.tracking.lastSeenAt && (!state.tracking.pairedAt || state.tracking.lastSeenAt >= state.tracking.pairedAt);
   state.tracking.lastSeenAt = now.toISOString();
   state.tracking.trackedCount += 1;
   if (config.tracking.enabled) {
-    state.tracking.nextHeartbeat = new Date(now.getTime() + config.tracking.heartbeatMinutes * MINUTE).toISOString();
+    state.tracking.nextHeartbeat = nextHeartbeatFrom(config, now).toISOString();
+    if (!wasConnected) {
+      plan.notify({ audience: 'keyholder', kind: 'tracking', title: 'Lockation: tracking connected', message: 'The wearer\'s phone sent its first background location.', key: `tracking:connected:${state.tracking.pairedAt ?? ''}` });
+    }
   }
 
   const record = newRecord(config, state, ctx.evalId, at, fix, 'general', plan.events);
@@ -265,7 +343,7 @@ export function evaluateTracked(config: LockationConfig, prevState: LockationSta
     record.reason = reason;
     plan.event(message);
     finalizeRecord(record, plan.list);
-    return { state, consequences: plan.list, events: plan.events, record, notable: false };
+    return { state, consequences: plan.list, events: plan.events, notices: plan.finish(), record, notable: plan.notices.length > 0 };
   };
 
   if (fix) {
@@ -280,12 +358,14 @@ export function evaluateTracked(config: LockationConfig, prevState: LockationSta
     return reject('stale_fix', 'Background update ignored (stale fix).');
   }
 
-  const forced = input.transition?.zoneId ? { event: input.transition.event, zoneId: input.transition.zoneId } : undefined;
-  runRules(config, state, fix, at, ctx, plan, record, { source: 'tracked', purpose: 'general', countDistance: true, forced });
+  const t = input.transition;
+  const forced = t?.zoneId ? { event: t.event, zoneId: t.zoneId } : undefined;
+  const forcedCheckpoint = t?.checkpointId && t.event === 'enter' ? t.checkpointId : undefined;
+  runRules(config, state, fix, at, ctx, plan, record, { source: 'tracked', purpose: 'general', countDistance: true, forced, forcedCheckpoint });
   if (fix) storeLastAccepted(config, state, fix, now);
 
   const presenceAfter = Object.keys(state.presence).sort().join(',');
-  const notable = plan.list.length > 0 || presenceAfter !== presenceBefore || huntBefore !== `${state.hunt.index}:${state.hunt.status}`;
+  const notable = plan.list.length > 0 || plan.notices.length > 0 || presenceAfter !== presenceBefore || huntBefore !== `${state.hunt.index}:${state.hunt.status}`;
   if (presenceAfter !== presenceBefore) {
     const names = zonesById(config);
     const was = new Set(presenceBefore ? presenceBefore.split(',') : []);
@@ -297,7 +377,7 @@ export function evaluateTracked(config: LockationConfig, prevState: LockationSta
 
   trackFreeze(state, plan.list, now);
   finalizeRecord(record, plan.list);
-  return { state, consequences: plan.list, events: plan.events, record, notable };
+  return { state, consequences: plan.list, events: plan.events, notices: plan.finish(), record, notable };
 }
 
 interface RuleOpts {
@@ -305,11 +385,14 @@ interface RuleOpts {
   purpose: CheckinPurpose;
   countDistance: boolean;
   forced?: { event: 'enter' | 'leave'; zoneId: string };
+  forcedCheckpoint?: string;
 }
 
 interface LeftZone {
   id: string;
   since: string;
+  /** End of the stay (leave transition time or last observation inside). */
+  end: number;
   durationMs: number;
 }
 
@@ -317,18 +400,18 @@ interface LeftZone {
 function runRules(config: LockationConfig, state: LockationState, fix: Fix | undefined, at: Date, ctx: EvalContext, plan: Planner, record: CheckinRecord, o: RuleOpts) {
   const rctx: EvalContext = { ...ctx, now: at };
   const zones = zonesById(config);
-  const inside = new Set(fix ? config.zones.filter((z) => isInside(fix, z, config.matchMode)).map((z) => z.id) : []);
+  const inside = new Set(fix ? config.zones.filter((z) => isInside(fix, z, matchModeOf(config, z))).map((z) => z.id) : []);
   if (o.forced?.event === 'enter') inside.add(o.forced.zoneId);
   if (o.forced?.event === 'leave') inside.delete(o.forced.zoneId);
   record.zones = config.zones.filter((z) => inside.has(z.id)).map((z) => z.name);
 
   const left = updatePresence(config, state, fix, inside, at, o.forced);
 
-  if (fix) evalHunt(config, state, fix, rctx, plan, o.source === 'manual' ? o.purpose : 'general');
-  if (o.source === 'manual' || config.tracking.countsAsCheckin || isLiveOnly(config)) evalRequired(config, state, inside, zones, rctx, plan, o.source);
-  evalForbidden(config, state, inside, left, zones, rctx, plan, o.source);
+  evalHunt(config, state, fix, rctx, plan, o.source === 'manual' ? o.purpose : 'general', o.forcedCheckpoint);
+  if (o.source === 'manual' || config.tracking.countsAsCheckin || isLiveOnly(config)) evalRequired(config, state, inside, rctx, plan, o.source);
+  if (fix || o.forced) evalStayWindows(config, state, inside, rctx, plan);
+  evalForbidden(config, state, inside, left, zones, rctx, plan, o.source, ctx.now);
   evalReward(config, state, inside, left, zones, rctx, plan, o.source);
-  if (fix) evalCurfew(config, state, inside, rctx, plan);
   if (fix && o.countDistance) evalTravel(config, state, fix, rctx, plan);
 }
 
@@ -355,7 +438,7 @@ function updatePresence(config: LockationConfig, state: LockationState, fix: Fix
     if (!out) continue;
     // A transition tells us the exact leave time; otherwise only the last observation inside is certain.
     const end = forcedLeave ? at.getTime() : Date.parse(p.lastSeen);
-    left.push({ id, since: p.since, durationMs: Math.max(0, end - Date.parse(p.since)) });
+    left.push({ id, since: p.since, end, durationMs: Math.max(0, end - Date.parse(p.since)) });
     delete state.presence[id];
   }
   return left;
@@ -370,26 +453,72 @@ function finalizeRecord(record: CheckinRecord, list: PlannedConsequence[]) {
 }
 
 // ---------- F6 hunt ----------
-function evalHunt(config: LockationConfig, state: LockationState, fix: Fix, ctx: EvalContext, plan: Planner, purpose: CheckinPurpose) {
+
+/** Checkpoints the wearer may see (and that may be synced to OwnTracks), with their status. */
+export function visibleCheckpoints(config: LockationConfig, state: LockationState): { cp: Checkpoint; index: number; status: 'found' | 'current' | 'open' | 'upcoming' }[] {
+  const h = config.rules.hunt;
+  if (!h.enabled) return [];
+  const found = new Set(state.hunt.found);
+  const all = h.checkpoints.map((cp, index) => {
+    let status: 'found' | 'current' | 'open' | 'upcoming';
+    if (h.order === 'any') status = found.has(cp.id) ? 'found' : 'open';
+    else status = index < state.hunt.index ? 'found' : index === state.hunt.index ? 'current' : 'upcoming';
+    return { cp, index, status };
+  });
+  if (h.reveal === 'all') return all;
+  if (state.hunt.status !== 'active') return [];
+  if (h.order === 'any') return all.filter((c) => c.status === 'open');
+  return all.filter((c) => c.status === 'current');
+}
+
+function evalHunt(config: LockationConfig, state: LockationState, fix: Fix | undefined, ctx: EvalContext, plan: Planner, purpose: CheckinPurpose, forcedCheckpoint?: string) {
   const hunt = config.rules.hunt;
   if (!hunt.enabled || state.hunt.status !== 'active') return;
-  const target = hunt.checkpoints[state.hunt.index];
-  if (!target) return;
-  if (isInside(fix, target, config.matchMode)) {
-    state.hunt.index += 1;
-    state.hunt.lastDistanceBand = undefined;
-    plan.add('hunt.onCheckpoint', hunt.onCheckpoint);
-    if (state.hunt.index >= hunt.checkpoints.length) {
-      state.hunt.status = 'completed';
-      plan.event(`Scavenger hunt completed – all ${hunt.checkpoints.length} checkpoints found!`);
-      plan.add('hunt.onComplete', hunt.onComplete);
-    } else {
-      plan.event(`Checkpoint ${state.hunt.index}/${hunt.checkpoints.length} found! Next hint unlocked.`);
+  const isIn = (cp: Checkpoint) => cp.id === forcedCheckpoint || (!!fix && isInside(fix, cp, matchModeOf(config, cp)));
+  const total = hunt.checkpoints.length;
+  const complete = () => {
+    state.hunt.status = 'completed';
+    plan.event(`Scavenger hunt completed – all ${total} checkpoints found!`);
+    plan.add('hunt.onComplete', hunt.onComplete);
+    plan.notify({ audience: 'keyholder', kind: 'hunt', title: 'Lockation: hunt completed', message: `All ${total} checkpoints found.`, key: 'hunt:completed' });
+  };
+  const found = (cp: Checkpoint, n: number) => {
+    plan.add('hunt.onCheckpoint', hunt.onCheckpoint, 1, `:cp:${cp.id}`);
+    plan.notify({ audience: 'keyholder', kind: 'hunt', title: 'Lockation: checkpoint found', message: `Checkpoint ${n}/${total} "${cp.name}" found.`, key: `hunt:${cp.id}` });
+  };
+
+  if (hunt.order === 'any') {
+    const done = new Set(state.hunt.found);
+    const hits = hunt.checkpoints.filter((cp) => !done.has(cp.id) && isIn(cp));
+    for (const cp of hits) {
+      state.hunt.found.push(cp.id);
+      found(cp, state.hunt.found.length);
     }
-    return;
+    state.hunt.index = state.hunt.found.length;
+    if (hits.length) {
+      state.hunt.lastDistanceBand = undefined;
+      if (state.hunt.found.length >= total) complete();
+      else plan.event(`Checkpoint${hits.length > 1 ? 's' : ''} ${hits.map((c) => `"${c.name}"`).join(', ')} found (${state.hunt.found.length}/${total}).`);
+      return;
+    }
+  } else {
+    const target = hunt.checkpoints[state.hunt.index];
+    if (!target) return;
+    if (isIn(target)) {
+      state.hunt.index += 1;
+      state.hunt.lastDistanceBand = undefined;
+      found(target, state.hunt.index);
+      if (state.hunt.index >= total) complete();
+      else plan.event(`Checkpoint ${state.hunt.index}/${total} found! Next hint unlocked.`);
+      return;
+    }
   }
-  if (purpose !== 'hunt') return;
-  const band = distanceBand(haversineM(fix, target));
+
+  // Wrong guesses: only an explicit manual hunt guess, never with all targets visible.
+  if (purpose !== 'hunt' || hunt.reveal === 'all' || !fix) return;
+  const open = hunt.order === 'any' ? hunt.checkpoints.filter((c) => !state.hunt.found.includes(c.id)) : [hunt.checkpoints[state.hunt.index]!];
+  const nearest = Math.min(...open.map((c) => haversineM(fix, c)));
+  const band = distanceBand(nearest);
   state.hunt.lastDistanceBand = band;
   const coolingDown = msSince(state.hunt.lastWrongAt, ctx.now) < hunt.wrongCooldownMinutes * MINUTE;
   if (!coolingDown) {
@@ -402,54 +531,209 @@ function evalHunt(config: LockationConfig, state: LockationState, fix: Fix, ctx:
 }
 
 // ---------- F2 required ----------
-function evalRequired(config: LockationConfig, state: LockationState, inside: Set<string>, zones: Map<string, Zone>, ctx: EvalContext, plan: Planner, source: ObservationSource) {
+
+function slotValid(slot: RequiredSlot, inside: Set<string>): boolean {
+  return slot.zoneIds === null || slot.zoneIds.some((id) => inside.has(id));
+}
+
+function evalRequired(config: LockationConfig, state: LockationState, inside: Set<string>, ctx: EvalContext, plan: Planner, source: ObservationSource) {
   const r = config.rules.required;
   if (!r.enabled) return;
-  const valid = r.zoneIds.length === 0 || r.zoneIds.some((id) => inside.has(id));
-  if (valid) {
+  const slots = requiredSlots(config);
+  if (!slots.length) return;
+  const done: string[] = [];
+  for (const slot of slots) {
+    const s = state.required.slots[slot.key];
+    if (!s || !slotValid(slot, inside)) continue;
     // Background updates only reset the deadline; onSuccess consequences would fire far too often –
     // except for the first valid background update after a missed deadline (e.g. "unfreeze when back").
-    const recovered = source === 'tracked' && !!state.required.missedSinceValid;
-    state.required.lastValidAt = ctx.now.toISOString();
-    state.required.nextDeadline = computeDeadline(config, ctx.now).toISOString();
-    state.required.missedSinceValid = undefined;
+    const recovered = source === 'tracked' && !!s.missedSinceValid;
+    s.lastValidAt = ctx.now.toISOString();
+    s.nextDeadline = computeDeadline(config, ctx.now, slot).toISOString();
+    s.missedSinceValid = undefined;
     if (recovered) {
-      plan.add('required.onSuccess', r.onSuccess);
-      plan.event('Back in a required zone – check-in counted.');
+      plan.add('required.onSuccess', slot.onSuccess, 1, `:req:${slot.key}`);
+      plan.event(slot.zoneIds ? `Back in "${slot.name}" – check-in counted.` : 'Location received – check-in counted.');
     } else if (source === 'manual') {
-      plan.add('required.onSuccess', r.onSuccess);
-      plan.event(`Required check-in done${r.zoneIds.length ? ` (${r.zoneIds.filter((i) => inside.has(i)).map((i) => zones.get(i)?.name).join(', ')})` : ''}.`);
+      plan.add('required.onSuccess', slot.onSuccess, 1, `:req:${slot.key}`);
+      done.push(slot.name);
     }
-  } else if (source === 'manual') {
+  }
+  if (source !== 'manual') return;
+  if (done.length) {
+    plan.event(`Required check-in done (${done.join(', ')}).`);
+    plan.notify({ audience: 'keyholder', kind: 'requiredDone', title: 'Lockation: check-in done', message: `Required check-in done (${done.join(', ')}).`, key: `required:done:${ctx.evalId}` });
+  }
+  const zoneSlots = slots.filter((s) => s.zoneIds !== null);
+  if (zoneSlots.length && !zoneSlots.some((s) => slotValid(s, inside))) {
     plan.add('required.onOutside', r.onOutside);
-    plan.event(`Not inside a required zone (${r.zoneIds.map((i) => zones.get(i)?.name).join(', ')}).`);
+    plan.event(`Not inside a required zone (${zoneSlots.map((s) => s.name).join(', ')}).`);
   }
 }
 
-// ---------- F3 forbidden ----------
-function evalForbidden(config: LockationConfig, state: LockationState, inside: Set<string>, left: LeftZone[], zones: Map<string, Zone>, ctx: EvalContext, plan: Planner, source: ObservationSource) {
+/** Former curfew: during an active "must stay inside" window, being outside all such zones is penalised (cooldown). */
+function evalStayWindows(config: LockationConfig, state: LockationState, inside: Set<string>, ctx: EvalContext, plan: Planner) {
+  const r = config.rules.required;
+  if (!r.enabled) return;
+  const active = zonesWithRole(config, 'required').filter((z) => z.required.stayWindows.length && activeWindowStart(z.required.stayWindows, ctx.now, config.timezone));
+  if (!active.length) return;
+  // Hysteresis: a zone the wearer is still "present" in counts as inside.
+  if (active.some((z) => inside.has(z.id) || state.presence[z.id])) return;
+  if (msSince(state.required.windowLastTriggered, ctx.now) < r.windowCooldownMinutes * MINUTE) return;
+  state.required.windowLastTriggered = ctx.now.toISOString();
+  plan.add('required.onOutsideDuringWindow', [...r.onOutsideDuringWindow, ...active.flatMap((z) => z.required.onOutsideDuringWindow)], 1, ':window');
+  plan.event(`Outside ${active.map((z) => `"${z.name}"`).join(' / ')} during a "must stay inside" window!`);
+}
+
+// ---------- F3 forbidden (escalation timeline) ----------
+
+const FORBIDDEN_MAX_STEPS = 24;
+
+function forbiddenWindowStart(config: LockationConfig, z: Zone, at: Date): Date | undefined | 'always' {
+  if (!z.forbidden.windows.length) return 'always';
+  return activeWindowStart(z.forbidden.windows, at, config.timezone);
+}
+
+function penaltyDue(visit: VisitState, n: number, firstPenalty: number, repeatEvery: number): number {
+  return Date.parse(visit.since) + (firstPenalty + (n - 1) * repeatEvery) * MINUTE;
+}
+
+/**
+ * Apply all penalties of a visit that are due up to `upTo`, and the warning of the current step if it is due and the
+ * next penalty is still ahead. Warnings are only sent when `upTo` is the real "now" (`allowWarn`).
+ */
+function advanceVisit(config: LockationConfig, z: Zone, visit: VisitState, upTo: number, plan: Planner, allowWarn: boolean) {
+  const T = forbiddenTimings(config, z);
+  const rule = config.rules.forbidden;
+  let steps = 0;
+  while (steps < FORBIDDEN_MAX_STEPS) {
+    const n = visit.penalties + 1;
+    const due = penaltyDue(visit, n, T.firstPenalty, T.repeatEvery);
+    if (due > upTo) break;
+    const consequences = [...rule.onEnter, ...z.forbidden.onEnter].filter((c) => appliesAt(c, n));
+    plan.addStable('forbidden.onEnter', consequences, `forbidden:${z.id}:${visit.since}:${n}`);
+    const mins = Math.round((due - Date.parse(visit.since)) / MINUTE);
+    plan.event(`Inside forbidden zone "${z.name}" for ${mins} min – penalty ${n}${consequences.length ? `: ${list(consequences)}` : ''}.`);
+    if (n === 1 && T.firstWarning === null) {
+      plan.notify({ audience: 'keyholder', kind: 'forbiddenEntered', title: 'Lockation: forbidden zone', message: `The wearer is in the forbidden zone "${z.name}".`, key: `forbidden:${z.id}:${visit.since}:entered`, zoneId: z.id });
+    }
+    visit.penalties = n;
+    visit.lastPenaltyAt = new Date(due).toISOString();
+    steps += 1;
+  }
+  if (!allowWarn) return;
+  const step = visit.penalties;
+  if (visit.warnedStep >= step) return;
+  const offset = step === 0 ? T.firstWarning : T.repeatWarning;
+  if (offset === null) return;
+  const base = step === 0 ? Date.parse(visit.since) : Date.parse(visit.lastPenaltyAt!);
+  const warnAt = base + offset * MINUTE;
+  const next = penaltyDue(visit, step + 1, T.firstPenalty, T.repeatEvery);
+  if (upTo < warnAt || upTo >= next) return;
+  visit.warnedStep = step;
+  const left = Math.max(1, Math.round((next - upTo) / MINUTE));
+  const consequences = [...rule.onEnter, ...z.forbidden.onEnter].filter((c) => appliesAt(c, step + 1));
+  const what = consequences.length ? list(consequences) : 'a penalty';
+  plan.notify({
+    audience: 'wearer',
+    title: step === 0 ? `Forbidden zone "${z.name}"` : `Still inside "${z.name}"`,
+    message: step === 0 ? `You are in the forbidden zone "${z.name}" – leave within ${left} min or: ${what}.` : `Still inside "${z.name}" – next penalty in ${left} min: ${what}.`,
+    priority: 'high',
+    key: `forbidden:${z.id}:${visit.since}:warn:${step}`,
+    zoneId: z.id,
+  });
+  plan.event(step === 0 ? `Warning: inside forbidden zone "${z.name}" – penalty in ${left} min.` : `Warning: still inside "${z.name}" – next penalty in ${left} min.`);
+  if (step === 0) {
+    plan.notify({ audience: 'keyholder', kind: 'forbiddenEntered', title: 'Lockation: forbidden zone', message: `The wearer entered the forbidden zone "${z.name}".`, key: `forbidden:${z.id}:${visit.since}:entered`, zoneId: z.id });
+  }
+}
+
+function evalForbidden(config: LockationConfig, state: LockationState, inside: Set<string>, left: LeftZone[], zones: Map<string, Zone>, ctx: EvalContext, plan: Planner, source: ObservationSource, realNow: Date) {
   const f = config.rules.forbidden;
   if (!f.enabled) return;
-  const confirm = config.tracking.entryConfirmMinutes * MINUTE;
-  for (const id of f.zoneIds) {
-    const name = zones.get(id)?.name ?? id;
-    const p = state.presence[id];
-    const l = left.find((x) => x.id === id);
-    let trigger = false;
-    if (source === 'manual' && inside.has(id)) trigger = true;
-    else if (p && inside.has(id)) trigger = ctx.now.getTime() - Date.parse(p.since) >= confirm;
-    else if (l) {
-      const alreadyThisVisit = !!state.forbidden.lastTriggered[id] && state.forbidden.lastTriggered[id]! >= l.since;
-      trigger = !alreadyThisVisit && l.durationMs >= confirm;
-    }
-    if (!trigger) continue;
-    if (msSince(state.forbidden.lastTriggered[id], ctx.now) < f.cooldownMinutes * MINUTE) {
-      if (source === 'manual') plan.event(`Inside forbidden zone "${name}" (already penalised recently).`);
+  const at = ctx.now.getTime();
+  const tracking = config.tracking.enabled;
+  for (const z of zonesWithRole(config, 'forbidden')) {
+    const T = forbiddenTimings(config, z);
+    const ws = forbiddenWindowStart(config, z, ctx.now);
+    let visit = state.forbidden.visits[z.id];
+    if (ws === undefined) {
+      // Not forbidden right now (outside its windows): an ongoing visit ends without further penalties.
+      if (visit) delete state.forbidden.visits[z.id];
       continue;
     }
-    state.forbidden.lastTriggered[id] = ctx.now.toISOString();
-    plan.add(`forbidden.onEnter`, f.onEnter, 1, `:f:${id}`);
-    plan.event(l ? `Was inside forbidden zone "${name}" for ${Math.round(l.durationMs / MINUTE)} min!` : `Inside forbidden zone "${name}"!`);
+    const windowStart = ws === 'always' ? undefined : ws.getTime();
+
+    if (!tracking) {
+      // Manual check-ins only: immediate penalty, repeated at most every `repeatEvery`.
+      if (source !== 'manual') continue;
+      if (inside.has(z.id)) {
+        if (!visit) visit = state.forbidden.visits[z.id] = { since: ctx.now.toISOString(), lastInside: ctx.now.toISOString(), penalties: 0, warnedStep: -1 };
+        visit.leftAt = undefined;
+        visit.lastInside = ctx.now.toISOString();
+        if (visit.lastPenaltyAt && at - Date.parse(visit.lastPenaltyAt) < T.repeatEvery * MINUTE) {
+          plan.event(`Inside forbidden zone "${z.name}" (already penalised recently).`);
+          continue;
+        }
+        const n = visit.penalties + 1;
+        const consequences = [...f.onEnter, ...z.forbidden.onEnter].filter((c) => appliesAt(c, n));
+        plan.addStable('forbidden.onEnter', consequences, `forbidden:${z.id}:${visit.since}:${n}`);
+        visit.penalties = n;
+        visit.lastPenaltyAt = ctx.now.toISOString();
+        plan.event(`Inside forbidden zone "${z.name}"!`);
+        plan.notify({ audience: 'keyholder', kind: 'forbiddenEntered', title: 'Lockation: forbidden zone', message: `The wearer checked in inside the forbidden zone "${z.name}".`, key: `forbidden:${z.id}:${visit.since}:entered:${n}`, zoneId: z.id });
+      } else if (visit) {
+        visit.leftAt ??= ctx.now.toISOString();
+        if (at - Date.parse(visit.leftAt) >= T.repeatEvery * MINUTE) delete state.forbidden.visits[z.id];
+      }
+      continue;
+    }
+
+    // With background tracking: escalation timeline based on presence.
+    const p = state.presence[z.id];
+    const l = left.find((x) => x.id === z.id);
+    if (p) {
+      if (visit?.leftAt && at - Date.parse(visit.leftAt) >= T.repeatEvery * MINUTE) visit = undefined; // long gone → new visit
+      if (!visit) {
+        let since = Date.parse(p.since);
+        if (windowStart !== undefined) since = Math.max(since, windowStart);
+        visit = state.forbidden.visits[z.id] = { since: new Date(since).toISOString(), lastInside: ctx.now.toISOString(), penalties: 0, warnedStep: -1 };
+      }
+      visit.leftAt = undefined;
+      visit.lastInside = ctx.now.toISOString();
+      advanceVisit(config, z, visit, at, plan, at >= realNow.getTime() - MINUTE);
+    } else if (visit && !visit.leftAt) {
+      const end = l ? l.end : Date.parse(visit.lastInside);
+      advanceVisit(config, z, visit, end, plan, false);
+      visit.leftAt = new Date(end).toISOString();
+      plan.event(`Left forbidden zone "${z.name}"${visit.penalties ? ` after ${visit.penalties} penalt${visit.penalties === 1 ? 'y' : 'ies'}` : ''}.`);
+    }
+    if (visit?.leftAt && at - Date.parse(visit.leftAt) >= T.repeatEvery * MINUTE) delete state.forbidden.visits[z.id];
+  }
+  void zones;
+}
+
+/** Cron part of the forbidden timeline: keep escalating while the wearer is (still believed to be) inside. */
+function tickForbidden(config: LockationConfig, state: LockationState, now: Date, plan: Planner) {
+  if (!config.rules.forbidden.enabled || !config.tracking.enabled) return;
+  const fresh = config.tracking.heartbeatMinutes * MINUTE;
+  for (const z of zonesWithRole(config, 'forbidden')) {
+    const visit = state.forbidden.visits[z.id];
+    if (!visit) continue;
+    const T = forbiddenTimings(config, z);
+    if (visit.leftAt) {
+      if (now.getTime() - Date.parse(visit.leftAt) >= T.repeatEvery * MINUTE) delete state.forbidden.visits[z.id];
+      continue;
+    }
+    if (forbiddenWindowStart(config, z, now) === undefined) {
+      delete state.forbidden.visits[z.id];
+      continue;
+    }
+    const p = state.presence[z.id];
+    if (!p) continue;
+    // "Still inside" is assumed only while the last location inside is fresh; afterwards the missing-signal rule applies.
+    const limit = Math.min(now.getTime(), Date.parse(p.lastSeen) + fresh);
+    advanceVisit(config, z, visit, limit, plan, limit === now.getTime());
   }
 }
 
@@ -461,10 +745,14 @@ function evalReward(config: LockationConfig, state: LockationState, inside: Set<
   if (state.reward.day !== today) {
     state.reward.day = today;
     state.reward.countToday = 0;
+    state.reward.countByZone = {};
   }
-  const dwell = r.dwellMinutes * MINUTE;
-  for (const id of r.zoneIds) {
-    const name = zones.get(id)?.name ?? id;
+  for (const z of zonesWithRole(config, 'reward')) {
+    const id = z.id;
+    const name = z.name;
+    const dwell = (z.reward.dwellMinutes ?? r.dwellMinutes) * MINUTE;
+    const cooldown = (z.reward.cooldownMinutes ?? r.cooldownMinutes) * MINUTE;
+    const zoneCap = z.reward.maxPerDay ?? r.maxPerDay;
     const p = state.presence[id];
     const l = left.find((x) => x.id === id);
     const isIn = inside.has(id) && !!p;
@@ -478,32 +766,23 @@ function evalReward(config: LockationConfig, state: LockationState, inside: Set<
         continue;
       }
     }
-    if (state.reward.countToday >= r.maxPerDay) {
+    if (state.reward.countToday >= r.maxPerDay || (state.reward.countByZone[id] ?? 0) >= zoneCap) {
       if (source === 'manual') plan.event(`Reward zone "${name}": daily limit reached.`);
       continue;
     }
-    if (msSince(state.reward.lastTriggered[id], ctx.now) < r.cooldownMinutes * MINUTE) {
+    if (msSince(state.reward.lastTriggered[id], ctx.now) < cooldown) {
       if (source === 'manual') plan.event(`Reward zone "${name}": still cooling down.`);
       continue;
     }
     state.reward.lastTriggered[id] = ctx.now.toISOString();
     state.reward.countToday += 1;
-    plan.add('reward.onEnter', r.onEnter, 1, `:r:${id}`);
+    state.reward.countByZone[id] = (state.reward.countByZone[id] ?? 0) + 1;
+    const consequences = [...r.onEnter, ...z.reward.onEnter];
+    plan.add('reward.onEnter', consequences, 1, `:r:${id}`);
     plan.event(`Reward zone "${name}" reached!`);
+    plan.notify({ audience: 'keyholder', kind: 'reward', title: 'Lockation: reward earned', message: `Reward zone "${name}": ${list(consequences)}.`, key: `reward:${id}:${ctx.now.toISOString()}`, zoneId: id });
   }
-}
-
-// ---------- F15 curfew ----------
-function evalCurfew(config: LockationConfig, state: LockationState, inside: Set<string>, ctx: EvalContext, plan: Planner) {
-  const c = config.rules.curfew;
-  if (!c.enabled || !c.zoneIds.length) return;
-  if (!isInQuietHours(ctx.now, { start: c.start, end: c.end }, config.timezone)) return;
-  // Hysteresis: a zone the wearer is still "present" in counts as inside.
-  if (c.zoneIds.some((id) => inside.has(id) || state.presence[id])) return;
-  if (msSince(state.curfew.lastTriggered, ctx.now) < c.cooldownMinutes * MINUTE) return;
-  state.curfew.lastTriggered = ctx.now.toISOString();
-  plan.add('curfew.onOutside', c.onOutside, 1, ':curfew');
-  plan.event(`Outside the curfew zone during curfew (${c.start}–${c.end})!`);
+  void zones;
 }
 
 // ---------- F5 travel ----------
@@ -543,54 +822,89 @@ function trackFreeze(state: LockationState, list: PlannedConsequence[], now: Dat
   }
 }
 
+// ---------- heartbeat helpers ----------
+
 export const MAX_MISSED_PER_TICK = 10;
 
-/** Cron evaluation: deadlines, heartbeat, timed freezes, hunt timeout. */
+/** Cron evaluation: deadlines, warnings, heartbeat, forbidden escalation, timed freezes, hunt timeout, random verification. */
 export function evaluateTick(config: LockationConfig, prevState: LockationState, ctx: EvalContext): EvalResult {
   const state = cloneState(prevState);
   const plan = new Planner(ctx);
   const now = ctx.now;
+  syncSlots(config, state, now);
 
-  // F2 missed check-ins
+  // F2 required: warnings before deadlines, then missed deadlines (per slot)
   const r = config.rules.required;
-  if (r.enabled) {
-    if (!state.required.nextDeadline) {
-      state.required.nextDeadline = computeDeadline(config, now).toISOString();
+  for (const slot of requiredSlots(config)) {
+    const s = state.required.slots[slot.key];
+    if (!s?.nextDeadline) continue;
+    const dl = Date.parse(s.nextDeadline);
+    if (r.warnBeforeMinutes && now.getTime() >= dl - r.warnBeforeMinutes * MINUTE && now.getTime() < dl && s.warnedFor !== s.nextDeadline) {
+      s.warnedFor = s.nextDeadline;
+      const left = Math.max(1, Math.round((dl - now.getTime()) / MINUTE));
+      plan.notify({
+        audience: 'wearer',
+        title: 'Check-in due soon',
+        message: `Required check-in ${slot.zoneIds ? `at "${slot.name}"` : ''} due in ${left} min (${formatLocalTime(new Date(dl), config.timezone)}). Missed: ${list(slot.onMissed)}.`.replace('  ', ' '),
+        priority: 'high',
+        key: `required:${slot.key}:warn:${s.nextDeadline}`,
+      });
     }
     let n = 0;
     while (n < MAX_MISSED_PER_TICK) {
-      const deadline: Date = new Date(state.required.nextDeadline!);
-      if (now.getTime() < deadline.getTime() + r.graceMinutes * MINUTE) break;
-      // Key on the deadline itself → idempotent across retried ticks.
-      plan.addStable('required.onMissed', r.onMissed, `missed:${deadline.toISOString()}`);
-      state.required.missedCount += 1;
-      state.required.missedSinceValid = true;
-      plan.event(`Required check-in missed (due ${deadline.toISOString()}).`);
-      state.required.nextDeadline = computeDeadline(config, deadline).toISOString();
+      const deadline: Date = new Date(s.nextDeadline!);
+      if (now.getTime() < deadline.getTime() + slot.graceMinutes * MINUTE) break;
+      // Key on slot + deadline → idempotent across retried ticks.
+      plan.addStable('required.onMissed', slot.onMissed, `missed:${slot.key}:${deadline.toISOString()}`);
+      s.missedCount += 1;
+      s.missedSinceValid = true;
+      plan.event(`Required check-in${slot.zoneIds ? ` at "${slot.name}"` : ''} missed (due ${formatLocalTime(deadline, config.timezone)}).`);
+      plan.notify({ audience: 'keyholder', kind: 'requiredMissed', title: 'Lockation: check-in missed', message: `Required check-in${slot.zoneIds ? ` at "${slot.name}"` : ''} missed.`, key: `missed:${slot.key}:${deadline.toISOString()}` });
+      s.nextDeadline = computeDeadline(config, deadline, slot).toISOString();
       n += 1;
     }
   }
 
-  // F14 heartbeat
+  // F14 heartbeat (with quiet hours and warning)
   const tr = config.tracking;
   if (tr.enabled) {
     const hb = tr.heartbeatMinutes * MINUTE;
-    if (!state.tracking.nextHeartbeat) state.tracking.nextHeartbeat = new Date(now.getTime() + hb).toISOString();
+    if (!state.tracking.nextHeartbeat) state.tracking.nextHeartbeat = nextHeartbeatFrom(config, now).toISOString();
+    let due = new Date(state.tracking.nextHeartbeat);
+    if (tr.quietHours && isInQuietHours(due, tr.quietHours, config.timezone)) {
+      due = new Date(adjustForQuietHours(due, tr.quietHours, config.timezone).getTime() + hb);
+      state.tracking.nextHeartbeat = due.toISOString();
+    }
+    const quietNow = !!tr.quietHours && isInQuietHours(now, tr.quietHours, config.timezone);
+    if (tr.warnBeforeMinutes && !quietNow && now.getTime() >= due.getTime() - tr.warnBeforeMinutes * MINUTE && now.getTime() < due.getTime() && state.tracking.warnedFor !== state.tracking.nextHeartbeat) {
+      state.tracking.warnedFor = state.tracking.nextHeartbeat;
+      const left = Math.max(1, Math.round((due.getTime() - now.getTime()) / MINUTE));
+      plan.notify({
+        audience: 'wearer',
+        title: 'No location from your phone',
+        message: `${state.tracking.lastSeenAt ? `No location since ${formatLocalTime(new Date(state.tracking.lastSeenAt), config.timezone)}` : 'Background tracking is not set up'} – open OwnTracks, otherwise in ${left} min: ${list(tr.onHeartbeatMissed)}.`,
+        priority: 'high',
+        key: `heartbeat:warn:${state.tracking.nextHeartbeat}`,
+      });
+    }
     let n = 0;
     while (n < MAX_MISSED_PER_TICK) {
-      const due: Date = new Date(state.tracking.nextHeartbeat!);
+      due = new Date(state.tracking.nextHeartbeat!);
       if (now.getTime() < due.getTime()) break;
       plan.addStable('tracking.onHeartbeatMissed', tr.onHeartbeatMissed, `heartbeat:${due.toISOString()}`);
       state.tracking.missedCount += 1;
-      plan.event(
-        state.tracking.lastSeenAt
-          ? `No background location received since ${state.tracking.lastSeenAt}.`
-          : 'Background tracking has not been set up.',
-      );
-      state.tracking.nextHeartbeat = new Date(due.getTime() + hb).toISOString();
+      const msg = state.tracking.lastSeenAt ? `No background location received since ${formatLocalTime(new Date(state.tracking.lastSeenAt), config.timezone)}.` : 'Background tracking has not been set up.';
+      plan.event(msg);
+      plan.notify({ audience: 'keyholder', kind: 'tracking', title: 'Lockation: no signal', message: msg, key: `heartbeat:${due.toISOString()}` });
+      let next = new Date(due.getTime() + hb);
+      if (tr.quietHours && isInQuietHours(next, tr.quietHours, config.timezone)) next = new Date(adjustForQuietHours(next, tr.quietHours, config.timezone).getTime() + hb);
+      state.tracking.nextHeartbeat = next.toISOString();
       n += 1;
     }
   }
+
+  // F3 forbidden escalation while inside
+  tickForbidden(config, state, now, plan);
 
   // Timed freeze
   if (state.freezeUntil && now.getTime() >= Date.parse(state.freezeUntil)) {
@@ -607,14 +921,76 @@ export function evaluateTick(config: LockationConfig, prevState: LockationState,
       state.hunt.status = 'failed';
       plan.addStable('hunt.onTimeout', h.onTimeout, 'hunt-timeout');
       plan.event('Scavenger hunt time limit exceeded.');
+      plan.notify({ audience: 'keyholder', kind: 'hunt', title: 'Lockation: hunt failed', message: 'The scavenger hunt time limit was exceeded.', key: 'hunt:failed' });
+    }
+  }
+
+  // Live-only: random verification pictures
+  const every = config.antiCheat.liveVerificationEveryHours;
+  if (isLiveOnly(config) && every) {
+    const rng = ctx.rng ?? Math.random;
+    const schedule = (from: number) => new Date(from + every * 60 * MINUTE * (0.5 + rng())).toISOString();
+    if (!state.nextLiveVerification) state.nextLiveVerification = schedule(now.getTime());
+    else if (now.getTime() >= Date.parse(state.nextLiveVerification)) {
+      plan.addStable('antiCheat.verification', [{ type: 'verification_picture' }], `live-vp:${state.nextLiveVerification}`);
+      plan.event('Random verification picture requested.');
+      state.nextLiveVerification = schedule(now.getTime());
     }
   }
 
   trackFreeze(state, plan.list.filter((p) => p.source !== 'freeze.expired'), now);
-  return { state, consequences: plan.list, events: plan.events };
+  return { state, consequences: plan.list, events: plan.events, notices: plan.finish() };
 }
 
 /** Whether the tick would do anything (used by the worker to skip writes). */
 export function tickIsNoop(result: EvalResult): boolean {
-  return result.consequences.length === 0 && result.events.length === 0;
+  return result.consequences.length === 0 && result.events.length === 0 && result.notices.length === 0;
+}
+
+/**
+ * Next instant at which a tick has something to do (penalty, warning, unfreeze, …), or undefined.
+ * The worker indexes sessions by this time so the 1-minute cron only touches sessions that are due.
+ */
+export function nextDueAt(config: LockationConfig, state: LockationState, now: Date): Date | undefined {
+  const times: number[] = [];
+  const push = (t: number | undefined) => {
+    if (t !== undefined && Number.isFinite(t)) times.push(t);
+  };
+  const r = config.rules.required;
+  for (const slot of requiredSlots(config)) {
+    const s = state.required.slots[slot.key];
+    if (!s?.nextDeadline) continue;
+    const dl = Date.parse(s.nextDeadline);
+    push(dl + slot.graceMinutes * MINUTE);
+    if (r.warnBeforeMinutes && s.warnedFor !== s.nextDeadline) push(dl - r.warnBeforeMinutes * MINUTE);
+  }
+  const tr = config.tracking;
+  if (tr.enabled && state.tracking.nextHeartbeat) {
+    const due = Date.parse(state.tracking.nextHeartbeat);
+    push(due);
+    if (tr.warnBeforeMinutes && state.tracking.warnedFor !== state.tracking.nextHeartbeat) push(due - tr.warnBeforeMinutes * MINUTE);
+  }
+  if (config.rules.forbidden.enabled && tr.enabled) {
+    for (const z of zonesWithRole(config, 'forbidden')) {
+      const v = state.forbidden.visits[z.id];
+      if (!v) continue;
+      const T = forbiddenTimings(config, z);
+      if (v.leftAt) {
+        push(Date.parse(v.leftAt) + T.repeatEvery * MINUTE);
+        continue;
+      }
+      const next = penaltyDue(v, v.penalties + 1, T.firstPenalty, T.repeatEvery);
+      push(next);
+      const offset = v.penalties === 0 ? T.firstWarning : T.repeatWarning;
+      if (offset !== null && v.warnedStep < v.penalties) {
+        push((v.penalties === 0 ? Date.parse(v.since) : Date.parse(v.lastPenaltyAt!)) + offset * MINUTE);
+      }
+    }
+  }
+  if (state.freezeUntil) push(Date.parse(state.freezeUntil));
+  const h = config.rules.hunt;
+  if (h.enabled && h.timeLimitMinutes && state.hunt.status === 'active') push(Date.parse(state.hunt.startedAt ?? state.startedAt) + h.timeLimitMinutes * MINUTE);
+  if (state.nextLiveVerification) push(Date.parse(state.nextLiveVerification));
+  if (!times.length) return undefined;
+  return new Date(Math.max(now.getTime(), Math.min(...times)));
 }

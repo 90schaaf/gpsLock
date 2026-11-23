@@ -22,7 +22,8 @@ export function north(p: { lat: number; lng: number }, m: number) {
   return { lat: p.lat + m / 111_195, lng: p.lng };
 }
 
-export function cfg(input: LockationConfigInput): LockationConfig {
+/** Accepts v1 (legacy) and v2 input – v1 is migrated by parseConfig. */
+export function cfg(input: Record<string, unknown> | LockationConfigInput): LockationConfig {
   const res = parseConfig({ timezone: 'Europe/Zurich', ...input });
   if (!res.ok) throw new Error(JSON.stringify(res.issues));
   return res.config;
@@ -64,3 +65,6 @@ export const zones = {
 };
 
 export const types = (r: { consequences: { consequence: { type: string } }[] }) => r.consequences.map((c) => c.consequence.type);
+
+/** First required slot of a state (v1 tests had a single deadline). */
+export const slot0 = (s: LockationState) => Object.values(s.required.slots)[0]!;

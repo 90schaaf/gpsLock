@@ -1,17 +1,89 @@
-/** Lock configuration schema (stored as the Chaster extension `config`). */
+/**
+ * Lock configuration schema (stored as the Chaster extension `config`).
+ *
+ * Version 2 (2026-11-23): zones carry roles (required and/or reward, or forbidden, or neutral) and per-zone settings;
+ * the curfew became "stay windows" of required zones; forbidden zones escalate with warnings. Version 1 configs are
+ * migrated on read by `migrateConfig` (see the bottom of this file), so stored v1 configs keep their behaviour.
+ */
 import { z } from 'zod';
 import { ConsequenceListSchema } from './consequences.js';
 
-export const MIN_RADIUS_M = 50;
+export const CONFIG_VERSION = 2;
+export const MIN_RADIUS_M = 20;
+/** Below this radius the config editor warns that indoor GPS may be less precise than the zone. */
+export const SMALL_RADIUS_HINT_M = 100;
 /** Max. zones + hunt checkpoints per lock (iOS monitors at most 20 regions per app → everything can be synced to OwnTracks). */
 export const MAX_PLACES = 20;
 export const MAX_RADIUS_M = 50_000;
+export const MAX_WINDOWS = 10;
 
 const lat = z.number().min(-90).max(90);
 const lng = z.number().min(-180).max(180);
 const radiusM = z.number().min(MIN_RADIUS_M).max(MAX_RADIUS_M);
 const id = z.string().regex(/^[a-zA-Z0-9_-]{1,40}$/);
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'expected HH:MM');
+const minutes = (max: number) => z.number().int().min(0).max(max);
+
+export const WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+export type Weekday = (typeof WEEKDAYS)[number];
+
+/** A daily time window in the lock timezone; may cross midnight (it then belongs to the day it starts). */
+export const WindowSchema = z.object({
+  start: hhmm,
+  end: hhmm,
+  /** Days on which the window starts. Missing/empty = every day. */
+  days: z.array(z.enum(WEEKDAYS)).max(7).optional(),
+});
+export type TimeWindow = z.infer<typeof WindowSchema>;
+
+export const MatchModeSchema = z.enum(['lenient', 'strict']);
+export const ZoneRoleSchema = z.enum(['required', 'reward', 'forbidden']);
+export type ZoneRole = z.infer<typeof ZoneRoleSchema>;
+
+/** F17 – the keyholder confirmed that a flagged place is intentionally hard to reach. */
+export const ReachabilityAckSchema = z.object({
+  reasons: z.array(z.string().min(1).max(60)).min(1).max(10),
+  at: z.string().max(40),
+});
+
+const ZoneRequiredSchema = z
+  .object({
+    /** Interval check-ins for this zone (false = only stay windows, e.g. a migrated curfew zone). */
+    intervalCheckins: z.boolean().default(true),
+    intervalMinutes: z.number().int().min(15).max(43_200).optional(),
+    graceMinutes: minutes(1440).optional(),
+    /** "Must stay inside" windows (former curfew). Needs background tracking. */
+    stayWindows: z.array(WindowSchema).max(MAX_WINDOWS).default([]),
+    onMissed: ConsequenceListSchema,
+    onSuccess: ConsequenceListSchema,
+    onOutsideDuringWindow: ConsequenceListSchema,
+  })
+  .default({});
+
+/** Forbidden-zone escalation timings. `null` switches a warning off; `undefined` (per zone) inherits the rule value. */
+const nullableMinutes = (max: number) => minutes(max).nullable();
+
+const ZoneForbiddenSchema = z
+  .object({
+    /** Forbidden only during these windows. Empty = always forbidden. */
+    windows: z.array(WindowSchema).max(MAX_WINDOWS).default([]),
+    firstWarningAfterMinutes: nullableMinutes(1440).optional(),
+    firstPenaltyAfterMinutes: minutes(1440).optional(),
+    repeatEveryMinutes: z.number().int().min(5).max(10_080).optional(),
+    repeatWarningAfterMinutes: nullableMinutes(10_080).optional(),
+    /** Extra punishment for this zone, applied after the rule's common list at every penalty. */
+    onEnter: ConsequenceListSchema,
+  })
+  .default({});
+
+const ZoneRewardSchema = z
+  .object({
+    cooldownMinutes: minutes(10_080).optional(),
+    maxPerDay: z.number().int().min(1).max(100).optional(),
+    dwellMinutes: minutes(1440).optional(),
+    onEnter: ConsequenceListSchema,
+  })
+  .default({});
 
 export const ZoneSchema = z.object({
   id,
@@ -19,32 +91,56 @@ export const ZoneSchema = z.object({
   lat,
   lng,
   radiusM,
+  /** Empty = neutral. `forbidden` excludes every other role. */
+  roles: z.array(ZoneRoleSchema).max(2).default([]),
+  /** Overrides the lock-wide match mode. */
+  matchMode: MatchModeSchema.optional(),
+  required: ZoneRequiredSchema,
+  forbidden: ZoneForbiddenSchema,
+  reward: ZoneRewardSchema,
+  reachabilityAck: ReachabilityAckSchema.optional(),
 });
 export type Zone = z.infer<typeof ZoneSchema>;
 
-export const CheckpointSchema = ZoneSchema.extend({
+export const CheckpointSchema = z.object({
+  id,
+  name: z.string().min(1).max(60),
+  lat,
+  lng,
+  radiusM,
   hint: z.string().max(500).default(''),
+  matchMode: MatchModeSchema.optional(),
+  reachabilityAck: ReachabilityAckSchema.optional(),
 });
 export type Checkpoint = z.infer<typeof CheckpointSchema>;
 
 const RequiredRuleSchema = z
   .object({
     enabled: z.boolean().default(false),
-    zoneIds: z.array(id).default([]),
+    /** Also require a check-in anywhere (no zone) every interval. */
+    anywhere: z.boolean().default(false),
+    /** `each` = every required zone has its own deadline; `any` = one shared deadline (v1 behaviour). */
+    combine: z.enum(['each', 'any']).default('each'),
     intervalMinutes: z.number().int().min(15).max(43_200).default(240),
-    graceMinutes: z.number().int().min(0).max(1440).default(15),
+    graceMinutes: minutes(1440).default(5),
     quietHours: z.object({ start: hhmm, end: hhmm }).optional(),
+    /** Optional warning N minutes before a required deadline. */
+    warnBeforeMinutes: z.number().int().min(5).max(1440).optional(),
     onSuccess: ConsequenceListSchema,
     onOutside: ConsequenceListSchema,
     onMissed: ConsequenceListSchema,
+    onOutsideDuringWindow: ConsequenceListSchema,
+    windowCooldownMinutes: minutes(10_080).default(60),
   })
   .default({});
 
 const ForbiddenRuleSchema = z
   .object({
     enabled: z.boolean().default(false),
-    zoneIds: z.array(id).default([]),
-    cooldownMinutes: z.number().int().min(0).max(10_080).default(60),
+    firstWarningAfterMinutes: nullableMinutes(1440).default(2),
+    firstPenaltyAfterMinutes: minutes(1440).default(10),
+    repeatEveryMinutes: z.number().int().min(5).max(10_080).default(5),
+    repeatWarningAfterMinutes: nullableMinutes(10_080).default(1),
     onEnter: ConsequenceListSchema,
   })
   .default({});
@@ -52,23 +148,12 @@ const ForbiddenRuleSchema = z
 const RewardRuleSchema = z
   .object({
     enabled: z.boolean().default(false),
-    zoneIds: z.array(id).default([]),
-    cooldownMinutes: z.number().int().min(0).max(10_080).default(720),
+    cooldownMinutes: minutes(10_080).default(720),
+    /** Overall cap per day across all reward zones (zones may have their own, lower caps). */
     maxPerDay: z.number().int().min(1).max(100).default(1),
-    /** F14 – minutes of continuous presence required before the reward (0 = immediately). */
-    dwellMinutes: z.number().int().min(0).max(1440).default(0),
+    /** Minutes of continuous presence required before the reward (0 = immediately). */
+    dwellMinutes: minutes(1440).default(0),
     onEnter: ConsequenceListSchema,
-  })
-  .default({});
-
-const CurfewRuleSchema = z
-  .object({
-    enabled: z.boolean().default(false),
-    zoneIds: z.array(id).default([]),
-    start: hhmm.default('22:00'),
-    end: hhmm.default('06:00'),
-    cooldownMinutes: z.number().int().min(0).max(10_080).default(60),
-    onOutside: ConsequenceListSchema,
   })
   .default({});
 
@@ -77,11 +162,16 @@ export const TrackingSchema = z
     enabled: z.boolean().default(false),
     heartbeatMinutes: z.number().int().min(15).max(10_080).default(20),
     onHeartbeatMissed: ConsequenceListSchema,
-    entryConfirmMinutes: z.number().int().min(0).max(120).default(3),
     maxDelayMinutes: z.number().int().min(1).max(10_080).default(1440),
     countsAsCheckin: z.boolean().default(true),
     /** F16 – live tracking only: manual check-ins are disabled, every rule runs on background updates. */
     liveOnly: z.boolean().default(false),
+    /** OwnTracks monitoring mode provisioned on pairing. `auto` → move if heartbeat < 60 min or forbidden zones exist. */
+    owntracksMode: z.enum(['auto', 'move', 'significant']).default('auto'),
+    /** No missing-signal penalties or warnings during these hours. */
+    quietHours: z.object({ start: hhmm, end: hhmm }).optional(),
+    /** Warn the wearer N minutes before a missing-signal penalty (10 ≤ N < heartbeatMinutes). */
+    warnBeforeMinutes: z.number().int().min(10).max(10_079).optional(),
   })
   .default({});
 
@@ -99,8 +189,10 @@ const HuntRuleSchema = z
   .object({
     enabled: z.boolean().default(false),
     checkpoints: z.array(CheckpointSchema).max(MAX_PLACES).default([]),
-    reveal: z.enum(['hint', 'distance', 'map']).default('distance'),
-    wrongCooldownMinutes: z.number().int().min(0).max(1440).default(10),
+    /** `all` = hint + all checkpoints pinned on the map (wrong guesses are disabled). */
+    reveal: z.enum(['all', 'hint', 'distance', 'map']).default('all'),
+    order: z.enum(['sequence', 'any']).default('sequence'),
+    wrongCooldownMinutes: minutes(1440).default(10),
     timeLimitMinutes: z.number().int().min(10).max(525_600).optional(),
     blockUnlockUntilComplete: z.boolean().default(false),
     onCheckpoint: ConsequenceListSchema,
@@ -120,6 +212,8 @@ export const AntiCheatSchema = z
     verificationPicture: z.enum(['never', 'always', 'random']).default('never'),
     verificationProbability: z.number().min(0).max(1).default(0.2),
     minIntervalSeconds: z.number().int().min(0).max(86_400).default(60),
+    /** Live-tracking-only locks: request a verification picture at random, on average every N hours. */
+    liveVerificationEveryHours: z.number().int().min(1).max(168).optional(),
   })
   .default({});
 export type AntiCheat = z.infer<typeof AntiCheatSchema>;
@@ -129,11 +223,26 @@ export const PrivacySchema = z
   .default({});
 export type CoordinatePrivacy = 'zone_only' | 'exact';
 
+/** Keyholder notification switches (ntfy). */
+export const KeyholderNotifySchema = z
+  .object({
+    penalty: z.boolean().default(true),
+    forbiddenEntered: z.boolean().default(true),
+    tracking: z.boolean().default(true),
+    requiredMissed: z.boolean().default(true),
+    requiredDone: z.boolean().default(false),
+    hunt: z.boolean().default(true),
+    reward: z.boolean().default(false),
+    verification: z.boolean().default(true),
+  })
+  .default({});
+export type KeyholderNotifyKind = keyof z.infer<typeof KeyholderNotifySchema>;
+
 export const LockationConfigSchema = z
   .object({
-    version: z.literal(1).default(1),
+    version: z.literal(CONFIG_VERSION).default(CONFIG_VERSION),
     timezone: z.string().min(1).max(64).default('UTC'),
-    matchMode: z.enum(['lenient', 'strict']).default('lenient'),
+    matchMode: MatchModeSchema.default('lenient'),
     zones: z.array(ZoneSchema).max(MAX_PLACES).default([]),
     rules: z
       .object({
@@ -142,69 +251,76 @@ export const LockationConfigSchema = z
         reward: RewardRuleSchema,
         travel: TravelRuleSchema,
         hunt: HuntRuleSchema,
-        curfew: CurfewRuleSchema,
       })
       .default({}),
     tracking: TrackingSchema,
     antiCheat: AntiCheatSchema,
     privacy: PrivacySchema,
+    notifications: z.object({ keyholder: KeyholderNotifySchema }).default({}),
     /** Keyholder accepted the disclaimer (checked on save, not on read – old configs stay readable). */
     disclaimer: z.object({ version: z.number().int().min(1), acceptedAt: z.string().max(40) }).optional(),
   })
   .superRefine((cfg, ctx) => {
+    const issue = (path: (string | number)[], message: string) => ctx.addIssue({ code: 'custom', path, message });
     const places = cfg.zones.length + cfg.rules.hunt.checkpoints.length;
-    if (places > MAX_PLACES) {
-      ctx.addIssue({ code: 'custom', path: ['zones'], message: `at most ${MAX_PLACES} zones and hunt checkpoints in total (currently ${places})` });
-    }
+    if (places > MAX_PLACES) issue(['zones'], `at most ${MAX_PLACES} zones and hunt checkpoints in total (currently ${places})`);
+    if (!isValidTimezone(cfg.timezone)) issue(['timezone'], `unknown timezone "${cfg.timezone}"`);
+
     const ids = new Set<string>();
     cfg.zones.forEach((z, i) => {
-      if (ids.has(z.id)) ctx.addIssue({ code: 'custom', path: ['zones', i, 'id'], message: `duplicate zone id "${z.id}"` });
+      if (ids.has(z.id)) issue(['zones', i, 'id'], `duplicate zone id "${z.id}"`);
       ids.add(z.id);
-    });
-    if (!isValidTimezone(cfg.timezone)) {
-      ctx.addIssue({ code: 'custom', path: ['timezone'], message: `unknown timezone "${cfg.timezone}"` });
-    }
-    if (cfg.rules.curfew.enabled) {
-      if (cfg.rules.curfew.zoneIds.length === 0) {
-        ctx.addIssue({ code: 'custom', path: ['rules', 'curfew', 'zoneIds'], message: 'select at least one curfew zone' });
-      }
-      if (!cfg.tracking.enabled) {
-        ctx.addIssue({ code: 'custom', path: ['rules', 'curfew', 'enabled'], message: 'a curfew needs background tracking to be enabled' });
-      }
-    }
-    if (cfg.tracking.liveOnly && !cfg.tracking.enabled) {
-      ctx.addIssue({ code: 'custom', path: ['tracking', 'liveOnly'], message: 'live tracking only needs background tracking to be enabled' });
-    }
-    for (const rule of ['required', 'forbidden', 'reward', 'curfew'] as const) {
-      cfg.rules[rule].zoneIds.forEach((zid, i) => {
-        if (!ids.has(zid)) {
-          ctx.addIssue({ code: 'custom', path: ['rules', rule, 'zoneIds', i], message: `unknown zone "${zid}"` });
+      if (new Set(z.roles).size !== z.roles.length) issue(['zones', i, 'roles'], 'duplicate role');
+      if (z.roles.includes('forbidden') && z.roles.length > 1) issue(['zones', i, 'roles'], 'a forbidden zone cannot have other roles');
+      const f = forbiddenTimings(cfg, z);
+      if (z.roles.includes('forbidden')) {
+        if (f.firstWarning !== null && f.firstWarning >= f.firstPenalty) {
+          issue(['zones', i, 'forbidden', 'firstWarningAfterMinutes'], 'the first warning must come before the first penalty');
         }
-      });
-    }
-    if (cfg.rules.forbidden.enabled && cfg.rules.forbidden.zoneIds.length === 0) {
-      ctx.addIssue({ code: 'custom', path: ['rules', 'forbidden', 'zoneIds'], message: 'select at least one forbidden zone' });
-    }
-    if (cfg.rules.reward.enabled && cfg.rules.reward.zoneIds.length === 0) {
-      ctx.addIssue({ code: 'custom', path: ['rules', 'reward', 'zoneIds'], message: 'select at least one reward zone' });
-    }
-    const forbidden = new Set(cfg.rules.forbidden.enabled ? cfg.rules.forbidden.zoneIds : []);
-    cfg.rules.required.zoneIds.forEach((zid, i) => {
-      if (cfg.rules.required.enabled && forbidden.has(zid)) {
-        ctx.addIssue({ code: 'custom', path: ['rules', 'required', 'zoneIds', i], message: 'a zone cannot be both required and forbidden' });
+        if (f.repeatWarning !== null && f.repeatWarning >= f.repeatEvery) {
+          issue(['zones', i, 'forbidden', 'repeatWarningAfterMinutes'], 'the repeat warning must come before the next penalty');
+        }
+      }
+      if (z.roles.includes('required') && z.required.stayWindows.length && !cfg.tracking.enabled) {
+        issue(['zones', i, 'required', 'stayWindows'], '"must stay inside" windows need background tracking to be enabled');
       }
     });
-    if (cfg.rules.hunt.enabled && cfg.rules.hunt.checkpoints.length === 0) {
-      ctx.addIssue({ code: 'custom', path: ['rules', 'hunt', 'checkpoints'], message: 'add at least one checkpoint' });
+
+    const R = cfg.rules;
+    const withRole = (r: ZoneRole) => cfg.zones.filter((z) => z.roles.includes(r));
+    if (R.required.enabled && !R.required.anywhere && withRole('required').length === 0) {
+      issue(['rules', 'required', 'enabled'], 'mark at least one zone as required, or require check-ins anywhere');
     }
+    if (R.forbidden.enabled && withRole('forbidden').length === 0) issue(['rules', 'forbidden', 'enabled'], 'mark at least one zone as forbidden');
+    if (R.reward.enabled && withRole('reward').length === 0) issue(['rules', 'reward', 'enabled'], 'mark at least one zone as reward zone');
+    if (R.forbidden.firstWarningAfterMinutes !== null && R.forbidden.firstWarningAfterMinutes >= R.forbidden.firstPenaltyAfterMinutes) {
+      issue(['rules', 'forbidden', 'firstWarningAfterMinutes'], 'the first warning must come before the first penalty');
+    }
+    if (R.forbidden.repeatWarningAfterMinutes !== null && R.forbidden.repeatWarningAfterMinutes >= R.forbidden.repeatEveryMinutes) {
+      issue(['rules', 'forbidden', 'repeatWarningAfterMinutes'], 'the repeat warning must come before the next penalty');
+    }
+    if (R.required.warnBeforeMinutes !== undefined && R.required.warnBeforeMinutes >= R.required.intervalMinutes) {
+      issue(['rules', 'required', 'warnBeforeMinutes'], 'the warning must be shorter than the check-in interval');
+    }
+    const tr = cfg.tracking;
+    if (tr.liveOnly && !tr.enabled) issue(['tracking', 'liveOnly'], 'live tracking only needs background tracking to be enabled');
+    if (tr.warnBeforeMinutes !== undefined && tr.warnBeforeMinutes >= tr.heartbeatMinutes) {
+      issue(['tracking', 'warnBeforeMinutes'], 'the warning must come before the missing-signal penalty');
+    }
+    if (cfg.antiCheat.liveVerificationEveryHours !== undefined && !tr.liveOnly) {
+      issue(['antiCheat', 'liveVerificationEveryHours'], 'random verification pictures need "live tracking only"');
+    }
+    if (R.hunt.enabled && R.hunt.checkpoints.length === 0) issue(['rules', 'hunt', 'checkpoints'], 'add at least one checkpoint');
     const cpIds = new Set<string>();
-    cfg.rules.hunt.checkpoints.forEach((c, i) => {
-      if (cpIds.has(c.id)) ctx.addIssue({ code: 'custom', path: ['rules', 'hunt', 'checkpoints', i, 'id'], message: `duplicate checkpoint id "${c.id}"` });
+    R.hunt.checkpoints.forEach((c, i) => {
+      if (cpIds.has(c.id)) issue(['rules', 'hunt', 'checkpoints', i, 'id'], `duplicate checkpoint id "${c.id}"`);
       cpIds.add(c.id);
     });
   });
 
 export type LockationConfig = z.infer<typeof LockationConfigSchema>;
+export type LockationConfigInput = z.input<typeof LockationConfigSchema>;
+export type HuntReveal = LockationConfig['rules']['hunt']['reveal'];
 
 /** Bump when the disclaimer text changes materially – keyholders must accept again on the next save. */
 export const DISCLAIMER_VERSION = 1;
@@ -212,7 +328,6 @@ export const DISCLAIMER_VERSION = 1;
 export function disclaimerAccepted(config: Pick<LockationConfig, 'disclaimer'>): boolean {
   return (config.disclaimer?.version ?? 0) >= DISCLAIMER_VERSION;
 }
-export type LockationConfigInput = z.input<typeof LockationConfigSchema>;
 
 export function isValidTimezone(tz: string): boolean {
   try {
@@ -234,9 +349,9 @@ export interface ConfigIssue {
 
 export type ParseConfigResult = { ok: true; config: LockationConfig } | { ok: false; issues: ConfigIssue[] };
 
-/** Parse unknown input (from Chaster or the config page) into a full config. */
+/** Parse unknown input (from Chaster or the config page) into a full v2 config. v1 input is migrated first. */
 export function parseConfig(input: unknown): ParseConfigResult {
-  const res = LockationConfigSchema.safeParse(input ?? {});
+  const res = LockationConfigSchema.safeParse(migrateConfig(input ?? {}));
   if (res.success) return { ok: true, config: res.data };
   return {
     ok: false,
@@ -255,4 +370,149 @@ export function enabledRules(cfg: LockationConfig): string[] {
     ...(Object.keys(cfg.rules) as (keyof LockationConfig['rules'])[]).filter((k) => cfg.rules[k].enabled),
     ...(cfg.tracking.enabled ? ['tracking'] : []),
   ];
+}
+
+// ---------- helpers used by engine, view and UI ----------
+
+export function zonesWithRole(cfg: LockationConfig, role: ZoneRole): Zone[] {
+  return cfg.zones.filter((z) => z.roles.includes(role));
+}
+
+/** The role a zone effectively plays (its role list filtered by the enabled rules). */
+export function activeRoles(cfg: LockationConfig, z: Zone): ZoneRole[] {
+  return z.roles.filter((r) => cfg.rules[r].enabled);
+}
+
+export function matchModeOf(cfg: LockationConfig, place: { matchMode?: 'lenient' | 'strict' }): 'lenient' | 'strict' {
+  return place.matchMode ?? cfg.matchMode;
+}
+
+export interface ForbiddenTimings {
+  firstWarning: number | null;
+  firstPenalty: number;
+  repeatEvery: number;
+  repeatWarning: number | null;
+}
+
+export function forbiddenTimings(cfg: LockationConfig, z: Zone): ForbiddenTimings {
+  const r = cfg.rules.forbidden;
+  const f = z.forbidden;
+  return {
+    firstWarning: f.firstWarningAfterMinutes === undefined ? r.firstWarningAfterMinutes : f.firstWarningAfterMinutes,
+    firstPenalty: f.firstPenaltyAfterMinutes ?? r.firstPenaltyAfterMinutes,
+    repeatEvery: f.repeatEveryMinutes ?? r.repeatEveryMinutes,
+    repeatWarning: f.repeatWarningAfterMinutes === undefined ? r.repeatWarningAfterMinutes : f.repeatWarningAfterMinutes,
+  };
+}
+
+/** Effective OwnTracks monitoring: 2 = move (frequent), 1 = significant (battery saving). */
+export function owntracksMonitoring(cfg: LockationConfig): 1 | 2 {
+  const m = cfg.tracking.owntracksMode;
+  if (m === 'move') return 2;
+  if (m === 'significant') return 1;
+  const forbidden = cfg.rules.forbidden.enabled && zonesWithRole(cfg, 'forbidden').length > 0;
+  return cfg.tracking.heartbeatMinutes < 60 || forbidden ? 2 : 1;
+}
+
+// ---------- v1 → v2 migration ----------
+
+type Obj = Record<string, unknown>;
+const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
+const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+const strs = (v: unknown): string[] => arr(v).filter((x): x is string => typeof x === 'string');
+
+/**
+ * Converts a v1 config (zone lists per rule, curfew rule, single forbidden cooldown) to the v2 shape.
+ * v2 input is returned unchanged. The result is still validated by the schema afterwards.
+ *
+ * Behaviour-preserving choices:
+ * - roles come from the rule zone lists; a zone listed as both required and forbidden keeps `forbidden`;
+ * - required: `anywhere` = enabled without zones; several required zones → `combine: "any"` (one shared deadline);
+ *   a missing grace period gets the v1 default (15 min);
+ * - forbidden: first penalty after `tracking.entryConfirmMinutes` (v1 default 3), repeat every `cooldownMinutes`
+ *   (min. 5), no warnings;
+ * - curfew → "must stay inside" windows of the curfew zones (required role, no interval check-ins unless the zone was
+ *   already required), curfew consequences/cooldown → `onOutsideDuringWindow` / `windowCooldownMinutes`;
+ * - hunt reveal default stays `distance` (v1 default).
+ */
+export function migrateConfig(input: unknown): unknown {
+  if (!isObj(input)) return input;
+  if (input.version === CONFIG_VERSION) return input;
+  if (input.version !== undefined && input.version !== 1) return input; // let the schema report it
+
+  const rules: Obj = isObj(input.rules) ? input.rules : {};
+  const req: Obj = isObj(rules.required) ? rules.required : {};
+  const forb: Obj = isObj(rules.forbidden) ? rules.forbidden : {};
+  const rew: Obj = isObj(rules.reward) ? rules.reward : {};
+  const cur: Obj = isObj(rules.curfew) ? rules.curfew : {};
+  const hunt: Obj = isObj(rules.hunt) ? rules.hunt : {};
+  const tracking: Obj = isObj(input.tracking) ? input.tracking : {};
+
+  const reqIds = new Set(strs(req.zoneIds));
+  const forbIds = new Set(strs(forb.zoneIds));
+  const rewIds = new Set(strs(rew.zoneIds));
+  const curfewOn = cur.enabled === true;
+  const curIds = new Set(curfewOn ? strs(cur.zoneIds) : []);
+
+  const zones = arr(input.zones).map((raw) => {
+    if (!isObj(raw)) return raw;
+    const zid = String(raw.id);
+    const roles: string[] = [];
+    if (forbIds.has(zid)) roles.push('forbidden');
+    else {
+      if (reqIds.has(zid) || curIds.has(zid)) roles.push('required');
+      if (rewIds.has(zid)) roles.push('reward');
+    }
+    const z: Obj = { ...raw, roles };
+    if (roles.includes('required') && curIds.has(zid)) {
+      z.required = {
+        intervalCheckins: reqIds.has(zid) && req.enabled !== false,
+        stayWindows: [{ start: cur.start ?? '22:00', end: cur.end ?? '06:00' }],
+      };
+    }
+    return z;
+  });
+
+  const reqZoneCount = [...reqIds].filter((zid) => !forbIds.has(zid)).length;
+  const reqEnabled = req.enabled === true;
+  const { zoneIds: _rz, ...reqRest } = req;
+  const required: Obj = {
+    ...reqRest,
+    enabled: reqEnabled || curfewOn,
+    anywhere: reqEnabled && reqIds.size === 0,
+    combine: reqZoneCount > 1 ? 'any' : 'each',
+    graceMinutes: req.graceMinutes ?? 15,
+  };
+  if (curfewOn) {
+    required.onOutsideDuringWindow = cur.onOutside ?? [];
+    required.windowCooldownMinutes = cur.cooldownMinutes ?? 60;
+  }
+
+  const cooldown = typeof forb.cooldownMinutes === 'number' ? forb.cooldownMinutes : 60;
+  const confirm = typeof tracking.entryConfirmMinutes === 'number' ? tracking.entryConfirmMinutes : 3;
+  const forbidden: Obj = {
+    enabled: forb.enabled === true,
+    onEnter: forb.onEnter ?? [],
+    firstWarningAfterMinutes: null,
+    repeatWarningAfterMinutes: null,
+    firstPenaltyAfterMinutes: Math.max(0, confirm),
+    repeatEveryMinutes: Math.max(5, cooldown),
+  };
+  const { zoneIds: _wz, ...rewRest } = rew;
+  const { entryConfirmMinutes: _ec, ...trackingRest } = tracking;
+
+  return {
+    ...input,
+    version: CONFIG_VERSION,
+    zones,
+    rules: {
+      ...rules,
+      required,
+      forbidden,
+      reward: rewRest,
+      hunt: { reveal: 'distance', ...hunt },
+      curfew: undefined,
+    },
+    tracking: trackingRest,
+  };
 }

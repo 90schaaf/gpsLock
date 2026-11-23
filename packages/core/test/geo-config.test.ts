@@ -34,7 +34,7 @@ describe('F1 geo', () => {
 describe('F1/F11 config validation', () => {
   it('fills defaults for an empty config', () => {
     const c = defaultConfig('Europe/Zurich');
-    expect(c.version).toBe(1);
+    expect(c.version).toBe(2);
     expect(c.privacy.coordinates).toBe('zone_only');
     expect(c.antiCheat.maxAccuracyM).toBe(100);
     expect(c.rules.required.enabled).toBe(false);
@@ -95,5 +95,13 @@ describe('disclaimer', () => {
     if (old.ok) expect(disclaimerAccepted(old.config)).toBe(false);
     expect(disclaimerAccepted({ disclaimer: { version: DISCLAIMER_VERSION, acceptedAt: '2026-11-23T00:00:00Z' } })).toBe(true);
     expect(disclaimerAccepted({ disclaimer: { version: DISCLAIMER_VERSION - 1 || 0, acceptedAt: 'x' } } as any)).toBe(false);
+  });
+});
+
+describe('radius limits', () => {
+  it('accepts 20 m and rejects smaller radii', () => {
+    const z = (r: number) => ({ zones: [{ id: 'a', name: 'A', lat: 47, lng: 8, radiusM: r }] });
+    expect(parseConfig(z(20)).ok).toBe(true);
+    expect(parseConfig(z(19)).ok).toBe(false);
   });
 });

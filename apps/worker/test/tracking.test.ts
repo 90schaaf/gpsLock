@@ -160,3 +160,34 @@ describe('F16 live tracking only', () => {
     expect(fake.actionCalls().map((c) => c.body.action)).toEqual([{ name: "add_time", params: 3600 }]);
   });
 });
+
+describe('security: only wearer and keyholder', () => {
+  it('refuses any other role with 403 and returns no zones or locations', async () => {
+    fake.mainTokens.set('other-token', { role: 'viewer' as any, sessionId: 's1' });
+    const r = await post('/api/session', { mainToken: 'other-token' });
+    expect(r.status).toBe(403);
+    const body = (await r.json()) as any;
+    expect(body.error.code).toBe('not_allowed');
+    expect(JSON.stringify(body)).not.toMatch(/zones|lat|lng/);
+  });
+
+  it('reports "waiting" after pairing and "connected" after the first location', async () => {
+    const p = await pair();
+    expect(p.view.tracking.status).toBe('waiting');
+    await post('/track/owntracks', loc(HOME, now), basic(p.username, p.password));
+    const v = (await (await post('/api/session', { mainToken: 'wearer-token' })).json()) as any;
+    expect(v.tracking.status).toBe('connected');
+  });
+});
+
+describe('security: configuration page roles', () => {
+  it('refuses config endpoints for other roles', async () => {
+    fake.configTokens.set('cfg-other', { config: {}, role: 'viewer' as any, sessionId: 's1' });
+    for (const path of ['/api/config/get', '/api/capabilities']) {
+      const r = await post(path, { configToken: 'cfg-other' });
+      expect(r.status).toBe(403);
+    }
+    const save = await post('/api/config/save', { configToken: 'cfg-other', config: { disclaimer: { version: 1, acceptedAt: 'x' } } });
+    expect(save.status).toBe(403);
+  });
+});

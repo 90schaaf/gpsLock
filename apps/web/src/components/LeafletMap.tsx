@@ -124,4 +124,5 @@ export const ZONE_COLORS = {
   neutral: '#3498db',
   hunt: '#9b59b6',
   me: '#7c5cff',
+  last: '#6b6880',
 };

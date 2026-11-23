@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateTick, adjustForQuietHours, MAX_MISSED_PER_TICK } from '../src/index.js';
-import { BAR, GYM, HOME, Sim, T0, cfg, minutes, north, types, zones } from './helpers.js';
+import { BAR, GYM, HOME, Sim, T0, cfg, minutes, north, types, zones, slot0 } from './helpers.js';
 
 const addHour = { type: 'add_time' as const, seconds: 3600 };
 const removeHour = { type: 'remove_time' as const, seconds: 3600 };
@@ -15,7 +15,7 @@ describe('F2 required check-in', () => {
 
   it('initial deadline = start + interval', () => {
     const sim = new Sim(config);
-    expect(sim.state.required.nextDeadline).toBe(minutes(T0, 240).toISOString());
+    expect(slot0(sim.state).nextDeadline).toBe(minutes(T0, 240).toISOString());
   });
 
   it('AC1 a valid check-in resets the deadline', () => {
@@ -25,15 +25,15 @@ describe('F2 required check-in', () => {
     expect(r.record.outcome).toBe('accepted');
     expect(r.record.zones).toEqual(['Home']);
     expect(types(r)).toEqual(['unfreeze']);
-    expect(sim.state.required.nextDeadline).toBe(minutes(at, 240).toISOString());
+    expect(slot0(sim.state).nextDeadline).toBe(minutes(at, 240).toISOString());
   });
 
   it('AC2 an outside check-in applies onOutside and keeps the deadline', () => {
     const sim = new Sim(config);
-    const before = sim.state.required.nextDeadline;
+    const before = slot0(sim.state).nextDeadline;
     const r = sim.checkin(GYM, minutes(T0, 30));
     expect(types(r)).toEqual(['freeze']);
-    expect(sim.state.required.nextDeadline).toBe(before);
+    expect(slot0(sim.state).nextDeadline).toBe(before);
   });
 
   it('AC3 missed is applied once per interval, idempotent', () => {
@@ -47,14 +47,14 @@ describe('F2 required check-in', () => {
     // Retrying the same tick from the old state produces the same idempotency key
     const retry = evaluateTick(config, sim.state, ctx(257, 'other'));
     expect(retry.consequences[0]!.idempotencyKey).toBe(r1.consequences[0]!.idempotencyKey);
-    expect(r1.state.required.nextDeadline).toBe(minutes(T0, 480).toISOString());
+    expect(slot0(r1.state).nextDeadline).toBe(minutes(T0, 480).toISOString());
   });
 
   it('AC4 catches up multiple missed intervals, capped', () => {
     const sim = new Sim(config);
     const r = evaluateTick(config, sim.state, { now: minutes(T0, 240 * 3 + 20), sessionId: 's1', evalId: 't' });
     expect(r.consequences).toHaveLength(3);
-    expect(r.state.required.missedCount).toBe(3);
+    expect(slot0(r.state).missedCount).toBe(3);
     const far = evaluateTick(config, sim.state, { now: minutes(T0, 240 * 100), sessionId: 's1', evalId: 't' });
     expect(far.consequences).toHaveLength(MAX_MISSED_PER_TICK);
   });

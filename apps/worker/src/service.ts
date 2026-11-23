@@ -76,6 +76,10 @@ export class LockationService {
   private async resolve(mainToken: string): Promise<Resolved> {
     if (!mainToken) throw new HttpError(401, 'missing_token', 'mainToken is required');
     const auth = await this.client.authSession(mainToken);
+    // Security: only the wearer and the keyholder of this lock may see zones, locations and history.
+    if (auth.role !== 'wearer' && auth.role !== 'keyholder') {
+      throw new HttpError(403, 'not_allowed', 'Only the wearer and the keyholder of this lock can open Lockation.');
+    }
     const session = auth.session;
     const config = parseConfigOrDefault(session.config);
     return {
@@ -146,9 +150,18 @@ export class LockationService {
   }
 
   // ---------- configuration page ----------
+  /** Loads the configuration for a token; only the wearer or keyholder may use the configuration page (F19). */
+  private async configuration(configToken: string) {
+    const c = await this.client.getConfiguration(configToken);
+    if (c.role !== 'wearer' && c.role !== 'keyholder') {
+      throw new HttpError(403, 'not_allowed', 'Only the wearer and the keyholder of this lock can configure Lockation.');
+    }
+    return c;
+  }
+
   async configGet(configToken: string) {
     if (!configToken) throw new HttpError(401, 'missing_token', 'configToken is required');
-    const c = await this.client.getConfiguration(configToken);
+    const c = await this.configuration(configToken);
     const parsed = parseConfig(c.config);
     return {
       config: parsed.ok ? parsed.config : parseConfigOrDefault(undefined),
@@ -165,7 +178,7 @@ export class LockationService {
     if (!disclaimerAccepted(parsed.config)) {
       throw new HttpError(400, 'disclaimer_required', 'Please accept the Lockation disclaimer before saving.');
     }
-    const current = await this.client.getConfiguration(configToken);
+    const current = await this.configuration(configToken);
     if (current.sessionId) {
       // F9 AC3: privacy cannot be upgraded while a session is running.
       const before = parseConfigOrDefault(current.config);
@@ -180,7 +193,7 @@ export class LockationService {
   async capabilities(opts: { mainToken?: string; configToken?: string }) {
     let sessionId: string | null = null;
     if (opts.mainToken) sessionId = (await this.resolve(opts.mainToken)).sessionId;
-    else if (opts.configToken) sessionId = (await this.client.getConfiguration(opts.configToken)).sessionId;
+    else if (opts.configToken) sessionId = (await this.configuration(opts.configToken)).sessionId;
     const known = KNOWN_COMMANDS.map((k) => ({ id: k.id, extension: k.extension, title: k.title, description: k.description, exampleInput: k.exampleInput, available: true, source: 'known' as const }));
     if (!sessionId) return { commands: known, live: false };
     try {
