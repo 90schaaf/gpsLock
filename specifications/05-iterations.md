@@ -84,6 +84,16 @@ extensions can react to `lockation.checked-in` events.
 - UI: in the Forbidden tab, each selected zone expands to show its cooldown field and an "Extra punishment" consequence editor.
   Rule summary shown to the wearer lists per-zone cooldowns and extras.
 - The editor shows the resulting timeline and what a 1-hour stay costs (e.g. "1 h inside = 11 penalties").
+- **Repeat penalties – decided (2026-11-23):** by default every repeat applies the same consequences as the first penalty
+  (common list + the zone's extra list). Each consequence entry can be scheduled individually:
+  - `when: { every: true }` (default) – at every penalty;
+  - `when: { everyNth: n }` – at every n-th penalty (e.g. pillory at the 3rd, 6th, 9th …);
+  - `when: { nth: n }` – exactly once, at the n-th penalty (e.g. freeze at the 4th).
+  - Shape: optional `when` on the consequence (`ConsequenceSchema` gains `when?`); the penalty counter per visit is kept in state
+    (`forbidden.visits[zoneId] = {since, penalties}`) and reset when the wearer has clearly left (re-entry rule above).
+  - Editor: a small "when" selector per consequence row (*every time / every n-th / only the n-th*), shown only in lists that repeat.
+  - The same `when` option can later be reused for other repeating lists (missed heartbeat, missed required check-ins).
+  - Tests: every / everyNth / nth over a 1-hour stay, counter reset after leaving, idempotency per penalty number.
 - Tests: timeline with default values (warnings and penalties at 2/10/11/15/… min), per-zone values independent, re-entry continues
   the escalation, leaving stops it, no warning at/after a penalty time, manual check-in immediate penalty, extra list after the
   common list, idempotency keys per zone and escalation step, 1-min cron only touches sessions with active escalations.
@@ -230,7 +240,10 @@ cooldown and extra punishment*, *Zone roles*.
   - Used by: missing-signal warning, forbidden-zone escalation warnings; later possibly required check-in deadlines.
   - Web Push is not implemented (iOS only for home-screen web apps, not inside Chaster's iframe).
   - Free-tier budget: one ntfy request = one Worker subrequest; the 1-min cron batches warnings per run.
-- Privacy: only the warning text is sent, no location; topic/subscription deleted when the session ends.
+- Privacy – decided (2026-11-23): the push text may contain **zone names and the consequence** ("You are in the forbidden zone
+  *Bar* – leave within 8 min or +1 h"), **never coordinates**. Hidden hunt checkpoints are never named. ntfy.sh can read the text
+  (TLS only, no end-to-end encryption) – stated in the privacy page; a self-hosted ntfy (`NTFY_BASE`) avoids that.
+  Topic/subscription is deleted when the session ends.
 - Tests: warning sent once at `nextHeartbeat − warnBeforeMinutes`, not sent if a location arrived, idempotent across cron runs,
   never sent at or after the deadline (late cron run → skipped), validation of the 10 min minimum and `< heartbeatMinutes`.
 
@@ -238,7 +251,12 @@ cooldown and extra punishment*, *Zone roles*.
 
 - `tracking.heartbeatMinutes` default 180 → **20**, minimum 30 → **15** (three cron runs). Implemented.
 - Risk: a stationary phone in OwnTracks *Significant* mode (especially iOS) may not report for hours → frequent penalties.
-  To verify on real devices; possible follow-ups: a heartbeat quiet-hours option and the planned warning (min. lead time 10 min fits below 20 min).
+  To verify on real devices; mitigations: Move mode (below), the planned warning, and quiet hours:
+- **Missing-signal quiet hours – decided (2026-11-23): optional.** `tracking.quietHours?: {start, end}` (lock timezone, may cross
+  midnight; not set by default). No missing-signal penalty is due during quiet hours; a deadline that falls inside moves to the end
+  of quiet hours + one full `heartbeatMinutes` period (so the phone has time to report after waking). No warnings during quiet hours.
+  Forbidden zones, stay windows and all other rules keep working at night on the locations that do arrive.
+  Tests: deadline inside quiet hours moved, midnight crossing, no warning inside, normal behaviour outside.
 - **OwnTracks mode – decided (2026-11-23): keyholder chooses**, setting `tracking.owntracksMode: "auto" | "move" | "significant"`
   in the Tracking tab, default **`auto`**:
   - `auto` → pairing provisions **Move** mode (`monitoring: 2`, frequent reports, more battery) if `heartbeatMinutes < 60` **or**
@@ -293,3 +311,25 @@ intentional before the configuration can be saved.
 per point, ack cleared when reasons change, save blocked, service failure → non-blocking, wearer view texts incl. hidden checkpoints.
 
 **Docs:** user guide *Configuring a lock* (safety check section), *Privacy* (third-party lookups), FAQ ("why can't I save?").
+
+### Confirmed behaviour (2026-11-23)
+
+- **Recovery after a missed required check-in applies to all tracked locks** (not only live-tracking-only): the first valid
+  background location back in a required zone applies `onSuccess` once. With per-zone required deadlines this applies per zone.
+  Already implemented (F14/F16); keep when reworking the required rule.
+
+### Minor open points – proposed defaults (to confirm or change before implementing)
+
+| # | Point | Proposed default |
+|---|---|---|
+| 1 | Radius below 100 m for zones | Allowed (min 50 m) but the editor shows a hint "GPS indoors may be less precise than this radius". Hunt checkpoints: no hint. |
+| 2 | Required per zone: which extra lists per zone | `onMissed` and `onSuccess` per zone; `onOutside` stays rule-level only. |
+| 3 | Required per zone: manual check-in outside all required zones | `onOutside` applies once per check-in (not once per zone). |
+| 4 | Missing-signal warning lead time default | 10 min (= minimum) when the option is enabled; option off by default. |
+| 5 | Warnings for required check-in deadlines | Yes, same mechanism: optional "warn N min before a required deadline", off by default. |
+| 6 | Keyholder notifications (ntfy for the keyholder: penalties, forbidden entry, missing signal) | Not now – backlog item for after the beta. |
+| 7 | Forbidden-zone warnings optional | Each warning time can be set to *off*; penalties still follow the timeline. |
+| 8 | Forbidden-zone windows + escalation | A visit already inside at window start starts its timeline at window start. |
+| 9 | Verification pictures in live-tracking-only mode | Optional "random verification picture every N hours" (cron-based), off by default. |
+| 10 | Hunt `any` order + time limit | Time limit unchanged (applies to the whole hunt). |
+| 11 | i18n | English only for the beta (unchanged). |
