@@ -27,3 +27,12 @@ is a **trust-assisted game**, not proof. Keyholders: use verification pictures i
 
 Never configure rules that pressure someone to go to unsafe places or to travel when it is not safe.
 Chaster's emergency unlock is unaffected by Lockation.
+
+## Contact & data requests
+
+Lockation is a community project. For questions, bug reports and data requests use the issue tracker:
+[github.com/90schaaf/lockation/issues](https://github.com/90schaaf/lockation/issues).
+
+- Stored data (check-in history, phone pairing) is **deleted automatically when the lock ends**.
+- To have data deleted earlier, open an issue **without posting personal data** (no usernames, locations or lock IDs) –
+  a maintainer will reply and arrange the details privately.

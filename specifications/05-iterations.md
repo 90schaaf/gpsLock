@@ -353,3 +353,39 @@ per point, ack cleared when reasons change, save blocked, service failure → no
 - Self-locks: wearer and keyholder are the same person → only the wearer setup is offered.
 - Tests: subscribe/unsubscribe, per-event switches, combined messages, rate limit, no coordinates in any text, topic removed on delete webhook.
 - Implement together with the wearer warnings (shared ntfy client, topics, KV cleanup).
+
+### Storage: move from KV to Cloudflare D1 (decided 2026-11-23, beta)
+
+- Reason: Workers KV on the free tier allows ~1,000 writes/day; the 5-min cron cursor alone uses ~290, the planned 1-min timer
+  would add ~1,440. D1 (SQLite) free tier allows ~100k row writes/day (verify current limits in the Cloudflare dashboard).
+- Tables (proposal): `history(session_id, id, at, record_json)` (last 200 per session), `devices(username, session_id, hash)`,
+  `ntfy_topics(session_id, role, topic)`, `escalations(session_id, zone_id, since, penalties, next_at)` (indexed by `next_at`
+  so the 1-min cron selects only due rows), `cron_state(key, value)`.
+- Engine state stays in Chaster session data (`data.lockation`) as today.
+- Migration: no production data yet → new binding `DB`, schema in `apps/worker/migrations/0001_init.sql`
+  (`wrangler d1 migrations apply`); KV binding removed afterwards. Setup docs (`wrangler d1 create lockation`) updated.
+- Tests: in-memory SQLite (e.g. `better-sqlite3` or Miniflare D1) replacing `MemoryKV`; history trimming, device lookup,
+  due-escalation query, cleanup on session delete.
+
+### ntfy with an account token (decided 2026-11-23, beta)
+
+- ntfy.sh limits anonymous senders per IP and Cloudflare Workers share IPs → the Worker authenticates with an access token of a
+  (free) ntfy.sh account: secret `NTFY_TOKEN` (`wrangler secret put NTFY_TOKEN`), header `Authorization: Bearer <token>`.
+  Without the secret, notifications are disabled and the UI hides the setup buttons.
+- Topics stay random per session; the account only authenticates the sender. Upgrade to a paid plan if limits are reached.
+
+### Operator contact (decided 2026-11-23)
+
+- Privacy page and disclaimer name **GitHub issues** as the contact: `https://github.com/90schaaf/lockation/issues`
+  ("Questions, data deletion requests and bug reports"). No personal data published.
+- Note in the privacy page: deletion of stored data happens automatically when the lock ends; earlier deletion on request via
+  an issue (without posting personal data publicly – a maintainer will reply). Some privacy laws may require more operator
+  details – to revisit before a public (non-beta) release.
+
+### Reward zones per zone (decided 2026-11-23)
+
+- Per reward zone, falling back to the rule values: `cooldownMinutes`, `maxPerDay`, `dwellMinutes` (minimum stay) and an extra
+  reward list on top of the common `onEnter` (`when` scheduling as for forbidden repeats is not needed).
+- Shape: `rules.reward.zones: Record<zoneId, { cooldownMinutes?, maxPerDay?, dwellMinutes?, onEnter? }>`; daily count per zone
+  (`reward.countToday` becomes per zone; rule-level `maxPerDay` stays as an overall cap across all reward zones).
+- Same expandable per-zone editor as required/forbidden. Tests: per-zone limits independent, overall cap, fallback, dwell per zone.
