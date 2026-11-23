@@ -2,7 +2,9 @@
 import { z } from 'zod';
 import { ConsequenceListSchema } from './consequences.js';
 
-export const MIN_RADIUS_M = 50;
+export const MIN_RADIUS_M = 20;
+/** Below this radius the config editor warns that indoor GPS may be less precise than the zone. */
+export const SMALL_RADIUS_HINT_M = 100;
 /** Max. zones + hunt checkpoints per lock (iOS monitors at most 20 regions per app → everything can be synced to OwnTracks). */
 export const MAX_PLACES = 20;
 export const MAX_RADIUS_M = 50_000;

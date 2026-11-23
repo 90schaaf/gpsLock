@@ -11,7 +11,7 @@ wearer. *Accepted check-in* = a check-in that passed anti-cheat.
 
 ## F1 – Zones and geofence matching
 
-Zones are circles `{id, name, lat, lng, radiusM}` with `50 ≤ radiusM ≤ 50 000`.
+Zones are circles `{id, name, lat, lng, radiusM}` with `20 ≤ radiusM ≤ 50 000` (changed from 50 on 2026-11-23); the editor shows a hint for zones below 100 m.
 A lock has at most **20 places in total** (zones + hunt checkpoints, `MAX_PLACES`), matching the iOS limit of 20 monitored regions per app. Validation error: "at most 20 zones and hunt checkpoints in total (currently N)"; the config editor shows "N / 20 places used" and blocks adding more.
 The distance is the haversine distance in metres (Earth radius 6 371 008.8 m).
 

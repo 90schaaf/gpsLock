@@ -318,18 +318,38 @@ per point, ack cleared when reasons change, save blocked, service failure → no
   background location back in a required zone applies `onSuccess` once. With per-zone required deadlines this applies per zone.
   Already implemented (F14/F16); keep when reworking the required rule.
 
-### Minor open points – proposed defaults (to confirm or change before implementing)
+### Minor points – confirmed 2026-11-23
 
 | # | Point | Proposed default |
 |---|---|---|
-| 1 | Radius below 100 m for zones | Allowed (min 50 m) but the editor shows a hint "GPS indoors may be less precise than this radius". Hunt checkpoints: no hint. |
+| 1 | Radius below 100 m for zones | **Minimum lowered to 20 m (implemented)**; zones below 100 m show a hint in the editor. Hunt checkpoints: no hint. |
 | 2 | Required per zone: which extra lists per zone | `onMissed` and `onSuccess` per zone; `onOutside` stays rule-level only. |
 | 3 | Required per zone: manual check-in outside all required zones | `onOutside` applies once per check-in (not once per zone). |
 | 4 | Missing-signal warning lead time default | 10 min (= minimum) when the option is enabled; option off by default. |
 | 5 | Warnings for required check-in deadlines | Yes, same mechanism: optional "warn N min before a required deadline", off by default. |
-| 6 | Keyholder notifications (ntfy for the keyholder: penalties, forbidden entry, missing signal) | Not now – backlog item for after the beta. |
+| 6 | Keyholder notifications | **In the beta** – see *Keyholder notifications* below. |
 | 7 | Forbidden-zone warnings optional | Each warning time can be set to *off*; penalties still follow the timeline. |
 | 8 | Forbidden-zone windows + escalation | A visit already inside at window start starts its timeline at window start. |
 | 9 | Verification pictures in live-tracking-only mode | Optional "random verification picture every N hours" (cron-based), off by default. |
 | 10 | Hunt `any` order + time limit | Time limit unchanged (applies to the whole hunt). |
 | 11 | i18n | English only for the beta (unchanged). |
+
+### Keyholder notifications (decided 2026-11-23: part of the beta)
+
+- The keyholder can subscribe to push notifications via **ntfy**, like the wearer's warnings: *Set up notifications* on the
+  keyholder view of the main page → worker creates a separate secret topic (`KV NTFY_KH:<sessionId>`), subscribe link + QR code;
+  *Stop notifications* deletes it; the delete webhook removes it with the session.
+- Events, each switchable by the keyholder (defaults in brackets):
+  - penalty applied (any rule) [on] – "Bar: +1 h (forbidden zone, 2nd penalty)"
+  - forbidden zone entered [on] – at the first warning time, so the keyholder knows before the first penalty
+  - missing signal / tracking stopped / tracking set up [on]
+  - required check-in missed [on], required check-in done [off]
+  - hunt checkpoint found / hunt completed / hunt failed [on]
+  - reward earned [off]
+  - verification picture requested [on]
+- Text rules as for wearer warnings: zone names and consequences, never coordinates (even with `privacy: exact` – the keyholder
+  sees exact positions only in the app, not in third-party push). Hunt checkpoints may be named for the keyholder.
+- Rate limit: at most 1 notification per event type and zone per 5 min; bursts in one evaluation are combined into one message.
+- Self-locks: wearer and keyholder are the same person → only the wearer setup is offered.
+- Tests: subscribe/unsubscribe, per-event switches, combined messages, rate limit, no coordinates in any text, topic removed on delete webhook.
+- Implement together with the wearer warnings (shared ntfy client, topics, KV cleanup).

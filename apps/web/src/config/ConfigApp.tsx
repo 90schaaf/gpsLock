@@ -1,4 +1,4 @@
-import { DISCLAIMER_VERSION, disclaimerAccepted, MAX_PLACES, MIN_RADIUS_M, MAX_RADIUS_M, parseConfig, type ConfigIssue, type LockationConfig } from '@lockation/core';
+import { DISCLAIMER_VERSION, disclaimerAccepted, MAX_PLACES, MIN_RADIUS_M, SMALL_RADIUS_HINT_M, MAX_RADIUS_M, parseConfig, type ConfigIssue, type LockationConfig } from '@lockation/core';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { LeafletMap, ZONE_COLORS, type MapCircle } from '../components/LeafletMap.js';
 import { ApiError, type Backend, type CommandInfo } from '../lib/backend.js';
@@ -237,6 +237,11 @@ export function ConfigApp({ backend, bridge }: { backend: Backend; bridge: Confi
                   d.zones.splice(i, 1);
                   for (const r of [d.rules.required, d.rules.forbidden, d.rules.reward, d.rules.curfew]) r.zoneIds = r.zoneIds.filter((x) => x !== z.id);
                 }); }}>✕</button>
+                {z.radiusM < SMALL_RADIUS_HINT_M && (
+                  <span class="small muted" data-testid="small-radius-hint" style={{ flexBasis: '100%' }}>
+                    ⚠ Small zone: phone GPS indoors is often less precise than {z.radiusM} m – check-ins may be judged "outside".
+                  </span>
+                )}
               </li>
             ))}
           </ul>

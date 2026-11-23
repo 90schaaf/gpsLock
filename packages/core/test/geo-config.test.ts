@@ -97,3 +97,11 @@ describe('disclaimer', () => {
     expect(disclaimerAccepted({ disclaimer: { version: DISCLAIMER_VERSION - 1 || 0, acceptedAt: 'x' } } as any)).toBe(false);
   });
 });
+
+describe('radius limits', () => {
+  it('accepts 20 m and rejects smaller radii', () => {
+    const z = (r: number) => ({ zones: [{ id: 'a', name: 'A', lat: 47, lng: 8, radiusM: r }] });
+    expect(parseConfig(z(20)).ok).toBe(true);
+    expect(parseConfig(z(19)).ok).toBe(false);
+  });
+});
