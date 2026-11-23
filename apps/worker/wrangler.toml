@@ -1,0 +1,26 @@
+name = "lockation"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+workers_dev = true
+preview_urls = false
+
+# Every 5 minutes: missed check-ins, timed unfreeze, hunt timeouts (F2/F6/F7)
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+CHASTER_API_BASE = "https://api.chaster.app"
+# Comma separated list of origins allowed to call the API (your GitHub Pages origin)
+ALLOWED_ORIGINS = "https://90schaaf.github.io,http://localhost:5173"
+# The slug of your extension in the Chaster developer portal
+EXTENSION_SLUG = "lockation"
+
+# Create with: npx wrangler kv namespace create LOCKATION_KV  → paste the id here
+[[kv_namespaces]]
+binding = "KV"
+id = "4a0eac95f1024f4fa9399f2b22a11454"
+
+# Secrets (never commit!):
+#   npx wrangler secret put CHASTER_TOKEN       (developer token from the Chaster developer portal)
+#   npx wrangler secret put WEBHOOK_USERNAME
+#   npx wrangler secret put WEBHOOK_PASSWORD
