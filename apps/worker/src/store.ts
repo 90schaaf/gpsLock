@@ -1,33 +1,126 @@
-/** KV-backed check-in history (F9) and helpers. */
+/** D1-backed storage: history (F9), OwnTracks devices (F14), ntfy topics, due index, sent notifications, settings. */
 import type { CheckinRecord } from '@lockation/core';
-import { redactRecord } from '@lockation/core';
-import type { KVLike } from './types.js';
+import type { D1Like } from './types.js';
 
 export const HISTORY_LIMIT = 200;
-const historyKey = (sessionId: string) => `HISTORY:${sessionId}`;
 
-export class HistoryStore {
-  constructor(private kv: KVLike) {}
+export interface DeviceRecord {
+  sessionId: string;
+  hash: string;
+  createdAt: string;
+}
 
-  async list(sessionId: string): Promise<CheckinRecord[]> {
-    const v = (await this.kv.get(historyKey(sessionId), 'json')) as CheckinRecord[] | null;
-    return Array.isArray(v) ? v : [];
+export type Audience = 'wearer' | 'keyholder';
+
+export class Store {
+  constructor(private db: D1Like) {}
+
+  private run(sql: string, ...args: unknown[]) {
+    return this.db.prepare(sql).bind(...args).run();
+  }
+  private async all<T>(sql: string, ...args: unknown[]): Promise<T[]> {
+    const r = await this.db.prepare(sql).bind(...args).all<T>();
+    return r.results ?? [];
+  }
+  private first<T>(sql: string, ...args: unknown[]): Promise<T | null> {
+    return this.db.prepare(sql).bind(...args).first<T>();
   }
 
-  async append(sessionId: string, record: CheckinRecord): Promise<CheckinRecord[]> {
-    const list = [record, ...(await this.list(sessionId))].slice(0, HISTORY_LIMIT);
-    // Expire 90 days after the last write as a safety net (normally purged by the delete webhook).
-    await this.kv.put(historyKey(sessionId), JSON.stringify(list), { expirationTtl: 90 * 86_400 });
-    return list;
+  // ---------- history ----------
+  async listHistory(sessionId: string): Promise<CheckinRecord[]> {
+    const rows = await this.all<{ record: string }>('SELECT record FROM history WHERE session_id = ? ORDER BY rowid DESC LIMIT ?', sessionId, HISTORY_LIMIT);
+    return rows.map((r) => JSON.parse(r.record) as CheckinRecord);
   }
 
-  async redact(sessionId: string): Promise<void> {
-    const list = (await this.list(sessionId)).map(redactRecord);
-    await this.kv.put(historyKey(sessionId), JSON.stringify(list), { expirationTtl: 90 * 86_400 });
+  async appendHistory(sessionId: string, record: CheckinRecord): Promise<void> {
+    await this.run('INSERT OR REPLACE INTO history (session_id, id, at, record) VALUES (?, ?, ?, ?)', sessionId, record.id, record.at, JSON.stringify(record));
+    await this.run(
+      'DELETE FROM history WHERE session_id = ? AND rowid NOT IN (SELECT rowid FROM history WHERE session_id = ? ORDER BY rowid DESC LIMIT ?)',
+      sessionId,
+      sessionId,
+      HISTORY_LIMIT,
+    );
   }
 
-  purge(sessionId: string): Promise<void> {
-    return this.kv.delete(historyKey(sessionId));
+  /** Remove coordinates from all records of a session (privacy downgrade). */
+  async redactHistory(sessionId: string): Promise<void> {
+    await this.run("UPDATE history SET record = json_remove(record, '$.lat', '$.lng') WHERE session_id = ?", sessionId);
+  }
+
+  // ---------- devices ----------
+  async createDevice(sessionId: string, now: Date): Promise<{ username: string; password: string }> {
+    await this.removeDevice(sessionId);
+    const username = `lo${randomString(12)}`.toLowerCase();
+    const password = randomString(24);
+    await this.run('INSERT INTO devices (username, session_id, hash, created_at) VALUES (?, ?, ?, ?)', username, sessionId, await sha256Hex(password), now.toISOString());
+    return { username, password };
+  }
+
+  async removeDevice(sessionId: string): Promise<void> {
+    await this.run('DELETE FROM devices WHERE session_id = ?', sessionId);
+  }
+
+  async verifyDevice(username: string, password: string): Promise<DeviceRecord | null> {
+    const row = await this.first<{ session_id: string; hash: string; created_at: string }>('SELECT session_id, hash, created_at FROM devices WHERE username = ?', username);
+    if (!row) return null;
+    return safeEqual(await sha256Hex(password), row.hash) ? { sessionId: row.session_id, hash: row.hash, createdAt: row.created_at } : null;
+  }
+
+  // ---------- ntfy topics ----------
+  async createTopic(sessionId: string, role: Audience, now: Date): Promise<string> {
+    const topic = `lockation-${randomString(32)}`;
+    await this.run('INSERT OR REPLACE INTO topics (session_id, role, topic, created_at) VALUES (?, ?, ?, ?)', sessionId, role, topic, now.toISOString());
+    return topic;
+  }
+
+  async topic(sessionId: string, role: Audience): Promise<string | null> {
+    const row = await this.first<{ topic: string }>('SELECT topic FROM topics WHERE session_id = ? AND role = ?', sessionId, role);
+    return row?.topic ?? null;
+  }
+
+  async removeTopic(sessionId: string, role: Audience): Promise<void> {
+    await this.run('DELETE FROM topics WHERE session_id = ? AND role = ?', sessionId, role);
+  }
+
+  // ---------- due index ----------
+  async setDue(sessionId: string, at: Date | undefined): Promise<void> {
+    if (!at) await this.run('DELETE FROM due WHERE session_id = ?', sessionId);
+    else await this.run('INSERT OR REPLACE INTO due (session_id, next_at) VALUES (?, ?)', sessionId, at.getTime());
+  }
+
+  async dueSessions(upTo: Date, limit: number): Promise<string[]> {
+    const rows = await this.all<{ session_id: string }>('SELECT session_id FROM due WHERE next_at <= ? ORDER BY next_at LIMIT ?', upTo.getTime(), limit);
+    return rows.map((r) => r.session_id);
+  }
+
+  // ---------- sent notifications ----------
+  /** Records `key` and returns true if it wasn't sent within `windowMs` (dedupe / rate limit). */
+  async markSent(sessionId: string, key: string, now: Date, windowMs = Number.POSITIVE_INFINITY): Promise<boolean> {
+    const row = await this.first<{ at: number }>('SELECT at FROM sent WHERE session_id = ? AND key = ?', sessionId, key);
+    if (row && now.getTime() - row.at < windowMs) return false;
+    await this.run('INSERT OR REPLACE INTO sent (session_id, key, at) VALUES (?, ?, ?)', sessionId, key, now.getTime());
+    return true;
+  }
+
+  async pruneSent(olderThan: Date): Promise<void> {
+    await this.run('DELETE FROM sent WHERE at < ?', olderThan.getTime());
+  }
+
+  // ---------- settings ----------
+  async getSetting(key: string): Promise<string | null> {
+    return (await this.first<{ value: string }>('SELECT value FROM kv WHERE key = ?', key))?.value ?? null;
+  }
+
+  async setSetting(key: string, value: string | null): Promise<void> {
+    if (value === null) await this.run('DELETE FROM kv WHERE key = ?', key);
+    else await this.run('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)', key, value);
+  }
+
+  // ---------- session end ----------
+  async purgeSession(sessionId: string): Promise<void> {
+    for (const t of ['history', 'devices', 'topics', 'due', 'sent']) {
+      await this.run(`DELETE FROM ${t} WHERE session_id = ?`, sessionId);
+    }
   }
 }
 
@@ -39,43 +132,6 @@ export function safeEqual(a: string, b: string): boolean {
   let diff = x.length ^ y.length;
   for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
   return diff === 0;
-}
-
-export interface DeviceRecord {
-  sessionId: string;
-  hash: string;
-  createdAt: string;
-}
-
-/** F14 – OwnTracks device credentials. Only a SHA-256 hash of the password is stored. */
-export class DeviceStore {
-  constructor(private kv: KVLike) {}
-
-  get(username: string): Promise<DeviceRecord | null> {
-    return this.kv.get(`DEVICE:${username}`, 'json') as Promise<DeviceRecord | null>;
-  }
-
-  async create(sessionId: string, now: Date): Promise<{ username: string; password: string }> {
-    await this.removeForSession(sessionId);
-    const username = `gl${randomString(12)}`.toLowerCase();
-    const password = randomString(24);
-    const rec: DeviceRecord = { sessionId, hash: await sha256Hex(password), createdAt: now.toISOString() };
-    await this.kv.put(`DEVICE:${username}`, JSON.stringify(rec));
-    await this.kv.put(`SESSIONDEV:${sessionId}`, username);
-    return { username, password };
-  }
-
-  async removeForSession(sessionId: string): Promise<void> {
-    const old = await this.kv.get(`SESSIONDEV:${sessionId}`);
-    if (old) await this.kv.delete(`DEVICE:${old}`);
-    await this.kv.delete(`SESSIONDEV:${sessionId}`);
-  }
-
-  async verify(username: string, password: string): Promise<DeviceRecord | null> {
-    const rec = await this.get(username);
-    if (!rec) return null;
-    return safeEqual(await sha256Hex(password), rec.hash) ? rec : null;
-  }
 }
 
 export function randomString(len: number): string {

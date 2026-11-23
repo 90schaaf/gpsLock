@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { handleRequest, runCron, type Overrides } from '../src/index.js';
-import { FakeChaster, MemoryKV, makeEnv } from './fake-chaster.js';
+import { FakeChaster, FakeD1, historyOf, makeEnv } from './fake-chaster.js';
 
 const HOME = { lat: 47.3769, lng: 8.5417 };
 const BAR = { lat: 47.39, lng: 8.515 };
@@ -19,7 +19,7 @@ const config = {
 };
 
 let fake: FakeChaster;
-let kv: MemoryKV;
+let db: FakeD1;
 let env: ReturnType<typeof makeEnv>;
 let now: Date;
 let ids = 0;
@@ -43,8 +43,8 @@ async function pair() {
 
 beforeEach(() => {
   fake = new FakeChaster();
-  kv = new MemoryKV();
-  env = makeEnv(kv);
+  db = new FakeD1();
+  env = makeEnv(db);
   now = new Date('2026-06-01T10:30:00.000Z');
   fake.addSession('s1', config);
   fake.mainTokens.set('wearer-token', { role: 'wearer', sessionId: 's1' });
@@ -59,8 +59,8 @@ describe('F14 pairing', () => {
     const cfg = JSON.parse(atob(decodeURIComponent(p.link.split('inline=')[1]!)));
     expect(cfg).toMatchObject({ mode: 3, url: p.url, username: p.username, password: p.password, cmd: true });
     expect(p.view.tracking.paired).toBe(true);
-    const stored = JSON.parse(kv.map.get(`DEVICE:${p.username}`)!);
-    expect(stored.sessionId).toBe('s1');
+    const stored = db.rows('devices').find((r) => r.username === p.username)!;
+    expect(stored.session_id).toBe('s1');
     expect(JSON.stringify(stored)).not.toContain(p.password);
   });
 
@@ -109,7 +109,7 @@ describe('F14 ingest', () => {
     expect(fake.actionCalls().map((c) => c.body.action)).toEqual([{ name: 'add_time', params: 3600 }]);
     const logs = fake.calls.filter((c) => c.path.endsWith('/logs/custom')).map((c) => c.body.title);
     expect(logs).toContain('GPS background update: Bar');
-    const history = JSON.parse(kv.map.get('HISTORY:s1')!);
+    const history = historyOf(db, 's1');
     expect(history[0].source).toBe('tracked');
     expect(history[0].lat).toBeUndefined(); // zone_only privacy by default
   });
@@ -137,7 +137,7 @@ describe('F14 ingest', () => {
     const p = await pair();
     const r = await post('/webhook', { event: 'extension_session.deleted', data: { session: { sessionId: 's1' } } }, basic('hook', 'secret'));
     expect(r.status).toBe(204);
-    expect(kv.map.has(`DEVICE:${p.username}`)).toBe(false);
+    expect(db.rows('devices').some((r) => r.username === p.username)).toBe(false);
   });
 });
 

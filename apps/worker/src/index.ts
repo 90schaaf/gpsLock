@@ -1,8 +1,9 @@
 /** Cloudflare Worker entry: HTTP API, Chaster webhooks and cron. */
 import { z } from 'zod';
 import { ChasterClient, sessionIdOf, type ChasterSession, type FetchLike } from './chaster.js';
+import { Ntfy } from './notify.js';
 import { LockationService } from './service.js';
-import { DeviceStore, HistoryStore, parseBasicAuth, safeEqual } from './store.js';
+import { parseBasicAuth, safeEqual, Store } from './store.js';
 import { HttpError, type Env, type ExecutionContextLike } from './types.js';
 
 export const VERSION = '0.1.0';
@@ -26,6 +27,8 @@ const bodies = {
 
 export interface Overrides {
   fetch?: FetchLike;
+  /** Separate fetch for ntfy (tests). Defaults to `fetch`. */
+  ntfyFetch?: FetchLike;
   now?: () => Date;
   rng?: () => number;
   newId?: () => string;
@@ -33,7 +36,10 @@ export interface Overrides {
 
 export function createService(env: Env, o: Overrides = {}) {
   const client = new ChasterClient(env.CHASTER_TOKEN, env.CHASTER_API_BASE ?? 'https://api.chaster.app', o.fetch);
-  return { client, service: new LockationService({ client, history: new HistoryStore(env.KV), devices: new DeviceStore(env.KV), now: o.now, rng: o.rng, newId: o.newId }) };
+  const store = new Store(env.DB);
+  const ntfy = Ntfy.from(env, o.ntfyFetch ?? o.fetch ?? ((i, init) => fetch(i, init)));
+  const service = new LockationService({ client, store, ntfy, appUrl: env.APP_URL, now: o.now, rng: o.rng, newId: o.newId });
+  return { client, store, service };
 }
 
 function corsHeaders(env: Env, origin: string | null): Record<string, string> {
@@ -136,6 +142,18 @@ export async function handleRequest(req: Request, env: Env, o: Overrides = {}): 
         const b = await parseBody(req, bodies.tracking);
         return json(await service.unpairTracking(b.mainToken), 200, cors);
       }
+      case '/api/notify/setup': {
+        const b = await parseBody(req, bodies.session);
+        return json(await service.setupNotifications(b.mainToken), 200, cors);
+      }
+      case '/api/notify/stop': {
+        const b = await parseBody(req, bodies.session);
+        return json(await service.stopNotifications(b.mainToken), 200, cors);
+      }
+      case '/api/notice/ack': {
+        const b = await parseBody(req, bodies.session);
+        return json(await service.ackRulesChanged(b.mainToken), 200, cors);
+      }
       case '/track/owntracks': {
         // F14 – OwnTracks HTTP mode, Basic auth with the device credentials.
         const creds = parseBasicAuth(req.headers.get('Authorization'));
@@ -166,19 +184,41 @@ export async function handleRequest(req: Request, env: Env, o: Overrides = {}): 
   }
 }
 
-/** Cron: walk locked sessions in batches, keeping a cursor in KV (free tier: 50 subrequests). */
-export async function runCron(env: Env, o: Overrides = {}, budget = 40): Promise<{ processed: number; changed: number; done: boolean }> {
+/**
+ * Cron, every minute:
+ * - every 5th minute: full sweep over all locked sessions in batches (cursor in D1; free tier: 50 subrequests);
+ * - otherwise: only sessions whose next due time (penalty, warning, unfreeze …) has come (due index in D1).
+ */
+export async function runCron(env: Env, o: Overrides = {}, budget = 40, opts: { full?: boolean } = {}): Promise<{ processed: number; changed: number; done: boolean; mode: 'full' | 'due' }> {
   let calls = 0;
   const baseFetch: FetchLike = o.fetch ?? ((i, init) => fetch(i, init));
   const counting: FetchLike = (i, init) => {
     calls += 1;
     return baseFetch(i, init);
   };
-  const { client, service } = createService(env, { ...o, fetch: counting });
-  const slug = env.EXTENSION_SLUG ?? 'lockation';
-  let cursor = (await env.KV.get('CRON:cursor')) || null;
+  const { client, store, service } = createService(env, { ...o, fetch: counting });
+  const now = (o.now ?? (() => new Date()))();
+  const full = opts.full ?? now.getUTCMinutes() % 5 === 0;
   let processed = 0;
   let changed = 0;
+
+  if (!full) {
+    // Every Chaster call of one tick costs ~3–6 subrequests; stay well within the budget.
+    const ids = await store.dueSessions(new Date(now.getTime() + 30_000), Math.max(1, Math.floor(budget / 6)));
+    for (const id of ids) {
+      if (calls >= budget) break;
+      try {
+        if (await service.tickSessionById(id)) changed += 1;
+      } catch (e) {
+        console.error('due tick failed', id, e);
+      }
+      processed += 1;
+    }
+    return { processed, changed, done: true, mode: 'due' };
+  }
+
+  const slug = env.EXTENSION_SLUG ?? 'lockation';
+  let cursor = await store.getSetting('cron:cursor');
   let done = false;
   while (calls < budget) {
     const page = await client.searchSessions(slug, cursor);
@@ -198,9 +238,9 @@ export async function runCron(env: Env, o: Overrides = {}, budget = 40): Promise
       break;
     }
   }
-  if (cursor) await env.KV.put('CRON:cursor', cursor, { expirationTtl: 3600 });
-  else await env.KV.delete('CRON:cursor');
-  return { processed, changed, done };
+  await store.setSetting('cron:cursor', cursor);
+  if (done) await store.pruneSent(new Date(now.getTime() - 7 * 86_400_000));
+  return { processed, changed, done, mode: 'full' };
 }
 
 export default {

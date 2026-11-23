@@ -849,6 +849,7 @@ export function evaluateTick(config: LockationConfig, prevState: LockationState,
         priority: 'high',
         key: `required:${slot.key}:warn:${s.nextDeadline}`,
       });
+      plan.event(`Warning: required check-in${slot.zoneIds ? ` at "${slot.name}"` : ''} due in ${left} min.`);
     }
     let n = 0;
     while (n < MAX_MISSED_PER_TICK) {
@@ -886,6 +887,7 @@ export function evaluateTick(config: LockationConfig, prevState: LockationState,
         priority: 'high',
         key: `heartbeat:warn:${state.tracking.nextHeartbeat}`,
       });
+      plan.event(`Warning: no location from the phone – missing-signal penalty in ${left} min.`);
     }
     let n = 0;
     while (n < MAX_MISSED_PER_TICK) {
