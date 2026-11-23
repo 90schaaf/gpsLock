@@ -86,3 +86,14 @@ describe('place limit', () => {
     expect(parseConfig({ zones: Array.from({ length: 21 }, (_, i) => zone(i)) }).ok).toBe(false);
   });
 });
+
+describe('disclaimer', () => {
+  it('is optional for parsing but checked by disclaimerAccepted', async () => {
+    const { disclaimerAccepted, DISCLAIMER_VERSION } = await import('../src/index.js');
+    const old = parseConfig({});
+    expect(old.ok).toBe(true);
+    if (old.ok) expect(disclaimerAccepted(old.config)).toBe(false);
+    expect(disclaimerAccepted({ disclaimer: { version: DISCLAIMER_VERSION, acceptedAt: '2026-11-23T00:00:00Z' } })).toBe(true);
+    expect(disclaimerAccepted({ disclaimer: { version: DISCLAIMER_VERSION - 1 || 0, acceptedAt: 'x' } } as any)).toBe(false);
+  });
+});

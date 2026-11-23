@@ -3,6 +3,7 @@ import {
   buildLogEntry,
   buildSessionView,
   computeMetadata,
+  disclaimerAccepted,
   evaluateCheckin,
   isLiveOnly,
   evaluateTick,
@@ -161,6 +162,9 @@ export class GpsLockService {
     if (!configToken) throw new HttpError(401, 'missing_token', 'configToken is required');
     const parsed = parseConfig(input);
     if (!parsed.ok) throw new HttpError(400, 'invalid_config', 'The configuration is invalid.', parsed.issues);
+    if (!disclaimerAccepted(parsed.config)) {
+      throw new HttpError(400, 'disclaimer_required', 'Please accept the GPS Lock disclaimer before saving.');
+    }
     const current = await this.client.getConfiguration(configToken);
     if (current.sessionId) {
       // F9 AC3: privacy cannot be upgraded while a session is running.

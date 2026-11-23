@@ -24,7 +24,8 @@ This document describes the shape.
               maxDelayMinutes, countsAsCheckin, liveOnly },                        // F14, F16
   antiCheat: { maxAccuracyM, maxFixAgeSeconds, maxSpeedKmh, onImplausible,
                implausibleConsequences, verificationPicture, verificationProbability, minIntervalSeconds },
-  privacy: { coordinates: "zone_only" | "exact" }
+  privacy: { coordinates: "zone_only" | "exact" },
+  disclaimer?: { version, acceptedAt: ISO }   // F18 – required on save (version ≥ DISCLAIMER_VERSION), optional on read
 }
 ```
 
@@ -68,7 +69,7 @@ All endpoints: `POST`, JSON, CORS restricted. Errors: `{error: {code, message}}`
 | `/api/checkin` | `{mainToken, fix}` | `{record, view: SessionView}`; 403 `manual_disabled` in live-only mode (F16) |
 | `/api/privacy` | `{mainToken, coordinates: "zone_only"}` | `SessionView` |
 | `/api/config/get` | `{configToken}` | `{config, role, sessionId, defaults}` |
-| `/api/config/save` | `{configToken, config}` | `{ok:true}` or 400 with zod issues |
+| `/api/config/save` | `{configToken, config}` | `{ok:true}` or 400 with zod issues / `disclaimer_required` (F18) |
 | `/api/capabilities` | `{configToken}` or `{mainToken}` | `{commands:[{id, extension, description, inputSchema}]}` |
 | `/api/tracking/pair` | `{mainToken}` | `{link, url, username, password, view}` (F14) |
 | `/api/tracking/unpair` | `{mainToken}` | `SessionView` |

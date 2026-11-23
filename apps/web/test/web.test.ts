@@ -124,7 +124,8 @@ describe('F13 demo backend', () => {
     await expect(b.checkin({ lat: 0, lng: 0, accuracy: 1, timestamp: Date.now() }, 'general')).rejects.toMatchObject({ status: 403 });
     const { config } = await b.configGet();
     await expect(b.configSave({ ...config, zones: [{ id: 'x', name: 'x', lat: 0, lng: 0, radiusM: 1 }] })).rejects.toBeInstanceOf(ApiError);
-    await b.configSave({ ...config, rules: { ...config.rules, hunt: { ...config.rules.hunt, enabled: false } } });
+    await expect(b.configSave(config)).rejects.toMatchObject({ code: 'disclaimer_required' });
+    await b.configSave({ ...config, disclaimer: { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' }, rules: { ...config.rules, hunt: { ...config.rules.hunt, enabled: false } } });
     expect((await b.session()).hunt).toBeUndefined();
   });
 });
@@ -173,7 +174,7 @@ describe('F16 live tracking only in the demo backend', () => {
     const now = new Date('2026-06-01T10:00:00Z');
     const b = new MockBackend(mem(), () => now);
     const { config } = await b.configGet();
-    await b.configSave({ ...config, tracking: { ...config.tracking, liveOnly: true } });
+    await b.configSave({ ...config, disclaimer: { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' }, tracking: { ...config.tracking, liveOnly: true } });
     const v = await b.session();
     expect(v.liveOnly).toBe(true);
     const home = config.zones[0]!;

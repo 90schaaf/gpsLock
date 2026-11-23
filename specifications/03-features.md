@@ -247,3 +247,20 @@ AC: 1. `liveOnly` without `tracking.enabled` is a validation error. 2. Manual ch
 in the engine) without consequences or history. 3. Tracked positions reset the required deadline even with `countsAsCheckin: false`.
 4. After a missed deadline, the first valid tracked position applies `onSuccess` exactly once. 5. Hunt checkpoints complete via tracking.
 6. View and lock page metadata reflect live-only mode.
+
+## F18 – Disclaimer and safety notice
+
+Decision (2026-11-23): users (keyholders and wearers) must be told clearly that GPS Lock is beta software used at their own risk.
+
+- **Disclaimer page** `docs/guide/disclaimer.md` (version 1): beta / no warranty, own responsibility and limitation of liability
+  "as far as permitted by law", safety first (Chaster emergency unlock, never follow a rule into danger, traffic and laws),
+  GPS inaccuracy, adults only with consent, not affiliated with Chaster, third-party services, MIT licence.
+- Linked from: guide sidebar, footer of every docs page, footer of the check-in and config pages, the wearer's rule summary,
+  the Handlebars configuration description and the extension description in the Chaster developer portal, README.
+- **Keyholder confirmation:** config `disclaimer?: {version, acceptedAt}`. The config page shows the tick box
+  *"I have read the disclaimer and use GPS Lock at my own risk"*; saving is refused while it is not ticked – in the page
+  (Chaster save → `save_failed`), in the worker (`400 disclaimer_required`) and in the demo backend.
+  Reading stored configs without it keeps working. Bumping `DISCLAIMER_VERSION` asks keyholders again on their next save.
+
+AC: 1. Save without accepted disclaimer → refused (page, worker 400 `disclaimer_required`, demo). 2. Save with it → stored.
+3. Old configs without the field still parse. 4. The disclaimer is linked from the docs footer, the app footers and the wearer's rule summary.

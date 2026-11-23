@@ -148,6 +148,8 @@ export const GpsLockConfigSchema = z
     tracking: TrackingSchema,
     antiCheat: AntiCheatSchema,
     privacy: PrivacySchema,
+    /** Keyholder accepted the disclaimer (checked on save, not on read – old configs stay readable). */
+    disclaimer: z.object({ version: z.number().int().min(1), acceptedAt: z.string().max(40) }).optional(),
   })
   .superRefine((cfg, ctx) => {
     const places = cfg.zones.length + cfg.rules.hunt.checkpoints.length;
@@ -203,6 +205,13 @@ export const GpsLockConfigSchema = z
   });
 
 export type GpsLockConfig = z.infer<typeof GpsLockConfigSchema>;
+
+/** Bump when the disclaimer text changes materially – keyholders must accept again on the next save. */
+export const DISCLAIMER_VERSION = 1;
+
+export function disclaimerAccepted(config: Pick<GpsLockConfig, 'disclaimer'>): boolean {
+  return (config.disclaimer?.version ?? 0) >= DISCLAIMER_VERSION;
+}
 export type GpsLockConfigInput = z.input<typeof GpsLockConfigSchema>;
 
 export function isValidTimezone(tz: string): boolean {

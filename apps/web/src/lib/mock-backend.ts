@@ -4,6 +4,7 @@ import {
   buildSessionView,
   evaluateCheckin,
   isLiveOnly,
+  disclaimerAccepted,
   evaluateTick,
   evaluateTracked,
   owntracksConfigLink,
@@ -150,6 +151,7 @@ export class MockBackend implements Backend {
   async configSave(config: GpsLockConfig) {
     const parsed = parseConfig(config);
     if (!parsed.ok) throw new ApiError(400, 'invalid_config', 'The configuration is invalid.', parsed.issues);
+    if (!disclaimerAccepted(parsed.config)) throw new ApiError(400, 'disclaimer_required', 'Please accept the GPS Lock disclaimer before saving.');
     const s = this.load();
     // Restart the demo session with the new configuration.
     this.save({ ...s, config: parsed.config, state: undefined, history: [], log: [] });

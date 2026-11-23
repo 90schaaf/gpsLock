@@ -81,6 +81,12 @@ Full step-by-step guide: [`docs/technical/setup.md`](docs/technical/setup.md).
 - Cross-extension commands use Chaster's experimental extension communication API. Find the key, Jigsaw,
   Reward store and Typing lines don't publish commands yet; they become selectable automatically once they do.
 
+## Disclaimer
+
+GPS Lock is **beta software, provided "as is" without warranty**, and is used entirely at the user's own risk. It is a community
+extension and not affiliated with Chaster. Keyholders must accept the [user disclaimer](docs/guide/disclaimer.md) before saving a
+configuration (enforced by the config page and the worker). If you deploy your own instance, you are responsible for operating it.
+
 ## License
 
 [MIT](LICENSE) © 2026 90schaaf. Map data © OpenStreetMap contributors (ODbL), shown with attribution on every map.

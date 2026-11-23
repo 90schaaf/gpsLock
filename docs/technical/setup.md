@@ -94,12 +94,17 @@ In the developer portal, open your extension and set:
 | Configuration description | see below |
 | Documentation URL | `https://<gh-user>.github.io/<repo>/guide/` |
 | Privacy policy URL | `https://<gh-user>.github.io/<repo>/guide/privacy.html` |
+| Disclaimer (in the description) | `https://<gh-user>.github.io/<repo>/guide/disclaimer.html` |
 
 **Configuration description** (Handlebars, shown on the lock so the wearer knows the rules before accepting):
 
 ```handlebars
-{{#if rules.required.enabled}}GPS check-in every {{rules.required.intervalMinutes}} min. {{/if}}{{#if rules.forbidden.enabled}}Forbidden zones. {{/if}}{{#if rules.reward.enabled}}Reward zones. {{/if}}{{#if rules.travel.enabled}}Travel goals ({{rules.travel.stepKm}} km). {{/if}}{{#if rules.hunt.enabled}}Scavenger hunt ({{rules.hunt.checkpoints.length}} checkpoints). {{/if}}{{#if tracking.enabled}}Background tracking with OwnTracks required{{#if tracking.liveOnly}} (live tracking only, no manual check-ins){{/if}}. {{/if}}{{#if rules.curfew.enabled}}Curfew {{rules.curfew.start}}–{{rules.curfew.end}}. {{/if}}Location sharing: {{privacy.coordinates}}.
+{{#if rules.required.enabled}}GPS check-in every {{rules.required.intervalMinutes}} min. {{/if}}{{#if rules.forbidden.enabled}}Forbidden zones. {{/if}}{{#if rules.reward.enabled}}Reward zones. {{/if}}{{#if rules.travel.enabled}}Travel goals ({{rules.travel.stepKm}} km). {{/if}}{{#if rules.hunt.enabled}}Scavenger hunt ({{rules.hunt.checkpoints.length}} checkpoints). {{/if}}{{#if tracking.enabled}}Background tracking with OwnTracks required{{#if tracking.liveOnly}} (live tracking only, no manual check-ins){{/if}}. {{/if}}{{#if rules.curfew.enabled}}Curfew {{rules.curfew.start}}–{{rules.curfew.end}}. {{/if}}Location sharing: {{privacy.coordinates}}. Beta – use at your own risk, safety first.
 ```
+
+**Extension description** (shown in Chaster's extension list) – include the disclaimer, e.g.:
+*"Beta. Change your lock based on your GPS location. Use at your own risk – never follow a rule into danger. Not affiliated with Chaster.
+Disclaimer: `https://<gh-user>.github.io/<repo>/guide/disclaimer.html`"*
 
 **Webhook events**: subscribe at least to `extension_session.created`, `extension_session.updated`
 and `extension_session.deleted`.

@@ -139,7 +139,7 @@ describe('F9 privacy', () => {
 
   it('upgrade during a running session is refused', async () => {
     fake.configTokens.set('cfg', { config: { ...config, privacy: { coordinates: 'zone_only' } }, role: 'keyholder', sessionId: 's1' });
-    const r = await post('/api/config/save', { configToken: 'cfg', config: { ...config, privacy: { coordinates: 'exact' } } });
+    const r = await post('/api/config/save', { configToken: 'cfg', config: { ...config, privacy: { coordinates: 'exact' }, disclaimer: { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' } } });
     expect(r.status).toBe(403);
   });
 
@@ -166,9 +166,19 @@ describe('F11 configuration endpoints', () => {
     expect(bad.status).toBe(400);
     const err: any = await bad.json();
     expect(err.error.details[0].path).toBe('zones.0.radiusM');
-    const ok = await post('/api/config/save', { configToken: 'cfg', config });
+    const noDisclaimer = await post('/api/config/save', { configToken: 'cfg', config });
+    expect(noDisclaimer.status).toBe(400);
+    expect(((await noDisclaimer.json()) as any).error.code).toBe('disclaimer_required');
+    const ok = await post('/api/config/save', { configToken: 'cfg', config: { ...config, disclaimer: { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' } } });
     expect(ok.status).toBe(200);
     expect((fake.configTokens.get('cfg')!.config as any).antiCheat.maxAccuracyM).toBe(100);
+    expect((fake.configTokens.get('cfg')!.config as any).disclaimer.version).toBe(1);
+  });
+
+  it('stored configs without disclaimer stay readable', async () => {
+    const v: any = await (await post('/api/config/get', { configToken: 'cfg' })).json();
+    expect(v.invalidStoredConfig).toBeUndefined();
+    expect(v.config.disclaimer).toBeUndefined();
   });
 
   it('capabilities: known list without session, live list with session', async () => {

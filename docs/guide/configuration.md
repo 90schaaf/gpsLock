@@ -70,6 +70,12 @@ offer commands yet – as soon as they do, they will appear in the command list 
 
 The wearer sees this before accepting the lock and can always switch to *zones only*. Read more in [Privacy & fairness](./privacy).
 
+## Disclaimer ✅
+
+Before the first save the keyholder must tick **"I have read the disclaimer and use GPS Lock at my own risk"** at the bottom of the
+page. Without it, saving fails. The confirmation is stored with the lock's configuration; if the [disclaimer](./disclaimer) changes
+materially, you are asked again.
+
 ## Example setups
 
 **"Stay home tonight"** – Zone *Home* (150 m). Required check-in in *Home* every 2 h, grace 10 min,

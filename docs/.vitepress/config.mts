@@ -29,6 +29,7 @@ export default defineConfig({
             { text: 'Rules explained', link: '/guide/rules' },
             { text: 'Privacy & fairness', link: '/guide/privacy' },
             { text: 'FAQ & troubleshooting', link: '/guide/faq' },
+            { text: 'Disclaimer', link: '/guide/disclaimer' },
           ],
         },
       ],
@@ -45,6 +46,9 @@ export default defineConfig({
       ],
     },
     search: { provider: 'local' },
-    footer: { message: 'GPS Lock is a community extension and is not affiliated with Chaster.' },
+    footer: {
+      message: `Beta software – use at your own risk. <a href="${base}guide/disclaimer.html">Disclaimer</a> · GPS Lock is a community extension and is not affiliated with Chaster.`,
+      copyright: 'MIT licensed · © 2026 90schaaf',
+    },
   },
 });

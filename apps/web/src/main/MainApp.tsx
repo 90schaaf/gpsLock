@@ -252,6 +252,10 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
         <div class="card">
           <h2>📜 Rules of this lock</h2>
           {view.rules.length === 0 && <p class="muted">No GPS rules are enabled.</p>}
+          <p class="small muted" data-testid="rules-disclaimer" style={{ margin: 0 }}>
+            GPS Lock is beta software and GPS can be wrong. Your safety comes first – never follow a rule into danger. Use at your own risk, see the{' '}
+            <a href="../guide/disclaimer.html" target="_blank" rel="noopener">disclaimer</a>.
+          </p>
           {view.rules.map((r) => (
             <div key={r.rule}>
               <h3>{r.title}</h3>
@@ -313,7 +317,8 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
         </div>
 
         <footer class="small muted">
-          GPS Lock beta · <a href="../guide/" target="_blank" rel="noopener">User guide</a>
+          GPS Lock beta – use at your own risk · <a href="../guide/" target="_blank" rel="noopener">User guide</a> ·{' '}
+          <a href="../guide/disclaimer.html" target="_blank" rel="noopener">Disclaimer</a>
         </footer>
       </div>
     </>

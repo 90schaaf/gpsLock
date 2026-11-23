@@ -1,4 +1,4 @@
-import { MAX_PLACES, MIN_RADIUS_M, MAX_RADIUS_M, parseConfig, type ConfigIssue, type GpsLockConfig } from '@gps-lock/core';
+import { DISCLAIMER_VERSION, disclaimerAccepted, MAX_PLACES, MIN_RADIUS_M, MAX_RADIUS_M, parseConfig, type ConfigIssue, type GpsLockConfig } from '@gps-lock/core';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { LeafletMap, ZONE_COLORS, type MapCircle } from '../components/LeafletMap.js';
 import { ApiError, type Backend, type CommandInfo } from '../lib/backend.js';
@@ -79,6 +79,10 @@ export function ConfigApp({ backend, bridge }: { backend: Backend; bridge: Confi
     if (!v.ok) {
       setSaveMsg('Please fix the problems listed above.');
       throw new Error('invalid');
+    }
+    if (!disclaimerAccepted(v.config)) {
+      setSaveMsg('Please accept the disclaimer at the bottom of the page before saving.');
+      throw new Error('disclaimer');
     }
     try {
       await backend.configSave(v.config);
@@ -462,6 +466,23 @@ export function ConfigApp({ backend, bridge }: { backend: Backend; bridge: Confi
         </div>
       )}
 
+      <div class="card stack" data-testid="disclaimer">
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={disclaimerAccepted(config)}
+            onChange={(e) => {
+              const on = (e.target as HTMLInputElement).checked;
+              edit((d) => { d.disclaimer = on ? { version: DISCLAIMER_VERSION, acceptedAt: new Date().toISOString() } : undefined; });
+            }}
+          />
+          <span>
+            I have read the <a href="../guide/disclaimer.html" target="_blank" rel="noopener">disclaimer</a> and use GPS Lock at my own risk.
+            GPS Lock is beta software without any warranty; safety always comes first.
+          </span>
+        </label>
+      </div>
+
       {(!embedded || backend.demo) && (
         <div class="row">
           <button class="primary" disabled={issues.length > 0} onClick={() => save().catch(() => undefined)}>
@@ -473,7 +494,8 @@ export function ConfigApp({ backend, bridge }: { backend: Backend; bridge: Confi
       )}
       {embedded && !backend.demo && saveMsg && <p class="small">{saveMsg}</p>}
       <footer class="small muted">
-        <a href="../guide/configuration.html" target="_blank" rel="noopener">How to configure GPS Lock</a>
+        <a href="../guide/configuration.html" target="_blank" rel="noopener">How to configure GPS Lock</a> ·{' '}
+        <a href="../guide/disclaimer.html" target="_blank" rel="noopener">Disclaimer</a> · Beta – use at your own risk
       </footer>
     </div>
   );
