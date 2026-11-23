@@ -389,3 +389,30 @@ per point, ack cleared when reasons change, save blocked, service failure → no
 - Shape: `rules.reward.zones: Record<zoneId, { cooldownMinutes?, maxPerDay?, dwellMinutes?, onEnter? }>`; daily count per zone
   (`reward.countToday` becomes per zone; rule-level `maxPerDay` stays as an overall cap across all reward zones).
 - Same expandable per-zone editor as required/forbidden. Tests: per-zone limits independent, overall cap, fallback, dwell per zone.
+
+### Configuration changes during a running lock (decided 2026-11-23, beta)
+
+- Changes apply immediately (as today), but Lockation makes them visible to the wearer:
+  - The worker compares the old and new configuration on save (`configSave` with a running session) and writes a summary to the
+    lock history, e.g. "Lockation rules changed: forbidden zone *Casino* added; *Home* check-in interval 4 h → 2 h".
+  - The wearer gets an ntfy notification with the same summary (if warnings are set up).
+  - The wearer's check-in page shows "Rules changed <time>" with the summary until the wearer opens it once.
+- Diff helper `diffConfig(old, new): string[]` in `packages/core` (zones added/removed/moved/resized, role changes, rule
+  enable/disable, timing values, consequence lists changed – consequences summarised, not listed in full).
+- Hidden hunt checkpoints are never described in the summary ("hunt checkpoints changed").
+- Tests: diff texts for each change type, no output for identical configs, hidden checkpoints not revealed, log + notification on save.
+
+### Beta release plan (decided 2026-11-23)
+
+- **Beta testing with real locks starts after all beta items are built.** Until then: development on `feature/*` branches, the
+  deployed version is a preview only (demo + docs), no testers invited.
+- Beta scope (build order):
+  1. Zone roles + per-zone settings (required incl. stay windows, forbidden escalation incl. repeat scheduling, reward),
+     curfew merge with migration, per-zone matching, config `version: 2` migration.
+  2. Storage on D1; ntfy client with token; wearer warnings, keyholder notifications, change notifications; 1-min timer;
+     OwnTracks mode setting; missing-signal quiet hours; optional warnings before required deadlines.
+  3. Hunt: reveal `all`, order option, wrong guesses off with `all`, checkpoint sync to OwnTracks.
+  4. Reachability safety check (F17).
+  5. Optional random verification pictures in live-tracking-only mode.
+- Before inviting testers: Chaster developer portal set up (slug `lockation`), end-to-end test with a test lock, OwnTracks test
+  on a real iPhone and Android phone, disclaimer/privacy reviewed.
