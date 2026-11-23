@@ -1,8 +1,8 @@
 # Setup & wiring
 
 This guide takes you from a fresh fork to a working beta extension in Chaster.
-Placeholders: `<gh-user>` = your GitHub user, `<repo>` = repository name (e.g. `gpsLock`),
-`<worker>` = your worker URL (e.g. `https://gps-lock.<cf-subdomain>.workers.dev`).
+The values below are for this repository (`90schaaf/gpsLock`). In a fork, replace `90schaaf` with your GitHub user and `gpsLock` with your repository name.
+Placeholder left for you: `<worker>` = your worker URL (e.g. `https://gps-lock.<cf-subdomain>.workers.dev`).
 
 ## 0. Prerequisites
 
@@ -14,8 +14,8 @@ Placeholders: `<gh-user>` = your GitHub user, `<repo>` = repository name (e.g. `
 ## 1. Get the code
 
 ```bash
-git clone https://github.com/<gh-user>/<repo>.git
-cd <repo>
+git clone https://github.com/90schaaf/gpsLock.git
+cd gpsLock
 npm install
 npm test          # all unit tests should pass
 ```
@@ -41,7 +41,7 @@ Copy the printed `id` into `apps/worker/wrangler.toml` (`[[kv_namespaces]]`), an
 
 ```toml
 [vars]
-ALLOWED_ORIGINS = "https://<gh-user>.github.io"
+ALLOWED_ORIGINS = "https://90schaaf.github.io"
 EXTENSION_SLUG  = "gps-lock"
 ```
 
@@ -68,9 +68,9 @@ The cron trigger (`*/5 * * * *`) is created automatically from `wrangler.toml`.
 3. **Settings → Secrets and variables → Actions → Variables** → add:
    - `VITE_API_BASE` = `<worker>` (no trailing slash)
 4. Push to `main` (or run the *Pages* workflow manually). The workflow builds the docs to
-   `https://<gh-user>.github.io/<repo>/` and the app to `https://<gh-user>.github.io/<repo>/app/`.
+   `https://90schaaf.github.io/gpsLock/` and the app to `https://90schaaf.github.io/gpsLock/app/`.
 
-Check: `https://<gh-user>.github.io/<repo>/app/?demo` shows the demo.
+Check: `https://90schaaf.github.io/gpsLock/app/?demo` shows the demo.
 
 ### Optional: deploy the worker from GitHub Actions
 
@@ -84,17 +84,17 @@ In the developer portal, open your extension and set:
 
 | Setting | Value |
 |---------|-------|
-| Main page URL | `https://<gh-user>.github.io/<repo>/app/index.html` |
-| Configuration page URL | `https://<gh-user>.github.io/<repo>/app/config.html` |
+| Main page URL | `https://90schaaf.github.io/gpsLock/app/index.html` |
+| Configuration page URL | `https://90schaaf.github.io/gpsLock/app/config.html` |
 | Webhook URL | `<worker>/webhook` |
 | Webhook username / password | the values from step 3 |
 | Browser capabilities | **geolocation** (lets the embedded page ask for the location) |
 | Available modes | **Unlimited** (GPS Lock rate-limits check-ins itself) |
 | Default configuration | `{}` |
 | Configuration description | see below |
-| Documentation URL | `https://<gh-user>.github.io/<repo>/guide/` |
-| Privacy policy URL | `https://<gh-user>.github.io/<repo>/guide/privacy.html` |
-| Disclaimer (in the description) | `https://<gh-user>.github.io/<repo>/guide/disclaimer.html` |
+| Documentation URL | `https://90schaaf.github.io/gpsLock/guide/` |
+| Privacy policy URL | `https://90schaaf.github.io/gpsLock/guide/privacy.html` |
+| Disclaimer (in the description) | `https://90schaaf.github.io/gpsLock/guide/disclaimer.html` |
 
 **Configuration description** (Handlebars, shown on the lock so the wearer knows the rules before accepting):
 
@@ -104,7 +104,7 @@ In the developer portal, open your extension and set:
 
 **Extension description** (shown in Chaster's extension list) – include the disclaimer, e.g.:
 *"Beta. Change your lock based on your GPS location. Use at your own risk – never follow a rule into danger. Not affiliated with Chaster.
-Disclaimer: `https://<gh-user>.github.io/<repo>/guide/disclaimer.html`"*
+Disclaimer: `https://90schaaf.github.io/gpsLock/guide/disclaimer.html`"*
 
 **Webhook events**: subscribe at least to `extension_session.created`, `extension_session.updated`
 and `extension_session.deleted`.
@@ -121,7 +121,7 @@ position with a short interval and check in from your phone.
 Troubleshooting:
 
 - *"The backend URL is not configured"* → `VITE_API_BASE` variable missing; re-run the Pages workflow.
-- CORS errors → `ALLOWED_ORIGINS` must be exactly `https://<gh-user>.github.io` (no path, no slash).
+- CORS errors → `ALLOWED_ORIGINS` must be exactly `https://90schaaf.github.io` (no path, no slash).
 - 401 from the worker → wrong developer token secret.
 - Webhook deliveries failing → check the delivery log in the developer portal; credentials must match.
 - Location never requested inside Chaster → geolocation browser capability not enabled; the page offers *Open in new tab* as fallback.

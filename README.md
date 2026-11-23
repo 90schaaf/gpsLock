@@ -5,9 +5,9 @@ GPS Lock changes a [Chaster](https://chaster.app) lock based on the wearer's loc
 consequences such as add/remove time, freeze, pillory, tasks, verification pictures and commands
 of other extensions. It works on iPhone and Android in the browser (no app needed).
 
-- 📖 **User guide:** `https://<gh-user>.github.io/<repo>/guide/` (source: [`docs/guide`](docs/guide))
-- 🛠 **Technical docs:** `https://<gh-user>.github.io/<repo>/technical/` (source: [`docs/technical`](docs/technical))
-- 🧪 **Demo:** `https://<gh-user>.github.io/<repo>/app/?demo`
+- 📖 **User guide:** [90schaaf.github.io/gpsLock/guide](https://90schaaf.github.io/gpsLock/guide/) (source: [`docs/guide`](docs/guide))
+- 🛠 **Technical docs:** [90schaaf.github.io/gpsLock/technical](https://90schaaf.github.io/gpsLock/technical/) (source: [`docs/technical`](docs/technical))
+- 🧪 **Demo:** [90schaaf.github.io/gpsLock/app/?demo](https://90schaaf.github.io/gpsLock/app/?demo)
 - 📐 **Specifications:** [`specifications/`](specifications)
 
 ## Architecture
@@ -45,7 +45,7 @@ Full step-by-step guide: [`docs/technical/setup.md`](docs/technical/setup.md).
    cd apps/worker
    npx wrangler login
    npx wrangler kv namespace create GPS_LOCK_KV     # put the id into wrangler.toml
-   # edit ALLOWED_ORIGINS in wrangler.toml → https://<gh-user>.github.io
+   # edit ALLOWED_ORIGINS in wrangler.toml → https://90schaaf.github.io
    npx wrangler secret put CHASTER_TOKEN
    npx wrangler secret put WEBHOOK_USERNAME
    npx wrangler secret put WEBHOOK_PASSWORD
@@ -57,8 +57,8 @@ Full step-by-step guide: [`docs/technical/setup.md`](docs/technical/setup.md).
 
    | Setting | Value |
    |---|---|
-   | Main page | `https://<gh-user>.github.io/<repo>/app/index.html` |
-   | Configuration page | `https://<gh-user>.github.io/<repo>/app/config.html` |
+   | Main page | `https://90schaaf.github.io/gpsLock/app/index.html` |
+   | Configuration page | `https://90schaaf.github.io/gpsLock/app/config.html` |
    | Webhook URL | `https://gps-lock.<subdomain>.workers.dev/webhook` + username/password |
    | Browser capabilities | `geolocation` |
    | Modes | Unlimited |
