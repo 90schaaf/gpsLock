@@ -262,7 +262,6 @@ intentional before the configuration can be saved.
 |---|---|---|
 | Water (lakes, rivers, reservoirs) | OSM Overpass `is_in` → `natural=water`, `waterway=riverbank`, `water=*` | the zone is entirely in water |
 | Sea / ocean | Nominatim reverse (`zoom=10`) returns no land result; OSM has no ocean polygons | centre is offshore |
-| High mountains | Open-Meteo Elevation API (Copernicus DEM, ~90 m) | elevation > 2000 m (configurable later) |
 | Glacier / cliff / bare rock | Overpass `natural=glacier\|cliff\|bare_rock` | the zone is entirely inside / centre on it |
 | Restricted area | Overpass `landuse=military`, `aeroway=aerodrome\|runway`, `railway=rail` within radius | the zone is entirely inside a military area / airport, or the centre lies on a runway or rail track |
 | No access | Overpass: no `highway=*` (road, path, track) within radius + 100 m | nothing walkable nearby |
@@ -271,11 +270,13 @@ intentional before the configuration can be saved.
   samples fail; if some fail, it gets an info note "partly in water" (no confirmation needed).
 - Results are cached per (rounded lat/lng, radius) in `sessionStorage`; requests respect the usage policies
   (Nominatim ≤ 1 req/s with a proper User-Agent/Referer, Overpass fair use; one combined Overpass query per point).
-- Privacy: only the keyholder's zone/checkpoint coordinates are sent to OSM/Open-Meteo services (address search already uses Nominatim),
+- **No altitude limit (decided 2026-11-23):** there is no elevation check – high places are not flagged by altitude; dangerous mountain
+  terrain is still covered by the glacier / cliff / bare rock check. No Open-Meteo dependency.
+- Privacy: only the keyholder's zone/checkpoint coordinates are sent to OSM services (address search already uses Nominatim),
   never wearer locations. Mentioned in the privacy page.
 
 **Confirmation**
-- Flagged points show ⚠ in the zone/checkpoint list and on the map with the reasons ("in a lake", "≈ 2450 m altitude").
+- Flagged points show ⚠ in the zone/checkpoint list and on the map with the reasons ("in a lake", "on a glacier").
 - Each flagged point has its own checkbox **"I know – this place is intentionally hard to reach"**. No bulk confirm.
 - Saving is blocked (and the Chaster save button gets `save_failed` with a message) while any flagged point is unconfirmed.
 - The confirmation is stored in the config: `zone.reachabilityAck?: { reasons: string[], at: ISO }` (same for checkpoints).
