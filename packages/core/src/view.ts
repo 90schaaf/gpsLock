@@ -48,11 +48,43 @@ export interface SessionView {
   travel?: { totalKm: number; pendingKm: number; stepKm: number; kmToday: number; dailyCapKm: number };
   freezeUntil?: string;
   /** F14 – background tracking status. */
-  tracking?: { paired: boolean; pairedAt?: string; lastSeenAt?: string; nextHeartbeat?: string; overdue: boolean; missedCount: number; heartbeatMinutes: number; updates: number };
+  tracking?: {
+    paired: boolean;
+    /**
+     * Real connection state: `not_set_up` (no phone paired), `waiting` (paired, but no location received from this
+     * pairing yet), `connected` (a location arrived within the missing-signal time), `no_signal` (last one is older).
+     */
+    status: TrackingStatus;
+    pairedAt?: string;
+    lastSeenAt?: string;
+    nextHeartbeat?: string;
+    overdue: boolean;
+    missedCount: number;
+    heartbeatMinutes: number;
+    updates: number;
+  };
+  /**
+   * Last accepted position of the wearer. Always included for the wearer (rounded in zone-only mode);
+   * for the keyholder only when exact coordinates are shared. Never for anyone else.
+   */
+  lastPosition?: { lat: number; lng: number; accuracy: number; at: string; approximate: boolean };
   /** Zones the wearer is currently known to be in (from check-ins and tracking). */
   presentZones: string[];
   stats: { checkins: number; accepted: number; lastCheckinAt?: string };
   history: CheckinRecord[];
+}
+
+export type TrackingStatus = 'not_set_up' | 'waiting' | 'connected' | 'no_signal';
+
+/** F14 – connection state derived from what the server actually received, not from the pairing alone. */
+export function trackingStatus(state: LockationState, heartbeatMinutes: number, now: Date): TrackingStatus {
+  const t = state.tracking;
+  if (!t.deviceUser) return 'not_set_up';
+  const seen = t.lastSeenAt ? Date.parse(t.lastSeenAt) : NaN;
+  const paired = t.pairedAt ? Date.parse(t.pairedAt) : NaN;
+  // A message from an earlier pairing doesn't prove the current phone is connected.
+  if (!Number.isFinite(seen) || (Number.isFinite(paired) && seen < paired)) return 'waiting';
+  return now.getTime() - seen <= heartbeatMinutes * MINUTE ? 'connected' : 'no_signal';
 }
 
 const list = (cs: Consequence[]) => (cs.length ? cs.map(describeConsequence).join(', ') : 'nothing');
@@ -183,10 +215,15 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
     history: history.map((h) => (privacy === 'exact' ? h : redactRecord(h))),
     presentZones: config.zones.filter((z) => state.presence[z.id]).map((z) => z.name),
   };
+  const la = state.lastAccepted;
+  if (la && (role === 'wearer' || (role === 'keyholder' && privacy === 'exact'))) {
+    view.lastPosition = { lat: la.lat, lng: la.lng, accuracy: la.accuracy, at: la.at, approximate: privacy !== 'exact' };
+  }
   if (config.tracking.enabled) {
     const nh = state.tracking.nextHeartbeat;
     view.tracking = {
       paired: !!state.tracking.deviceUser,
+      status: trackingStatus(state, config.tracking.heartbeatMinutes, now),
       pairedAt: state.tracking.pairedAt,
       lastSeenAt: state.tracking.lastSeenAt,
       nextHeartbeat: nh,

@@ -76,6 +76,10 @@ export class LockationService {
   private async resolve(mainToken: string): Promise<Resolved> {
     if (!mainToken) throw new HttpError(401, 'missing_token', 'mainToken is required');
     const auth = await this.client.authSession(mainToken);
+    // Security: only the wearer and the keyholder of this lock may see zones, locations and history.
+    if (auth.role !== 'wearer' && auth.role !== 'keyholder') {
+      throw new HttpError(403, 'not_allowed', 'Only the wearer and the keyholder of this lock can open Lockation.');
+    }
     const session = auth.session;
     const config = parseConfigOrDefault(session.config);
     return {

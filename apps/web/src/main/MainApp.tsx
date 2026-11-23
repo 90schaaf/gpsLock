@@ -1,8 +1,8 @@
 import type { CheckinPurpose, CheckinRecord, Fix, SessionView } from '@lockation/core';
-import { useEffect, useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { LeafletMap, ZONE_COLORS, type MapCircle, type MapPoint } from '../components/LeafletMap.js';
 import { ApiError, type Backend } from '../lib/backend.js';
-import { GeoError, getFix } from '../lib/geolocation.js';
+import { GeoError, geolocationGranted, getFix, watchFix } from '../lib/geolocation.js';
 import { isEmbedded } from '../lib/hash.js';
 import type { MockBackend } from '../lib/mock-backend.js';
 import { TrackingCard } from './TrackingCard.js';
@@ -48,6 +48,8 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
   const [myPos, setMyPos] = useState<Fix>();
   const [simulated, setSimulated] = useState<{ lat: number; lng: number }>();
   const [demoTick, setDemoTick] = useState(0);
+  const [watching, setWatching] = useState(false);
+  const stopWatch = useRef<() => void>();
   const now = useNow();
   const embedded = useMemo(isEmbedded, []);
 
@@ -66,6 +68,46 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
     return () => clearInterval(t);
   }, [demoTick]);
 
+  // Live position of the wearer on the own map (local only – never sent to the server by itself).
+  function startWatch() {
+    if (stopWatch.current || backend.demo) return;
+    stopWatch.current = watchFix(
+      (f) => setMyPos(f),
+      () => {
+        stopWatch.current?.();
+        stopWatch.current = undefined;
+        setWatching(false);
+      },
+      embedded,
+    );
+    setWatching(true);
+  }
+  const role = view?.role;
+  useEffect(() => {
+    if (role !== 'wearer' || backend.demo) return;
+    let cancelled = false;
+    // Only start automatically if permission was already granted – never prompt just by opening the page.
+    void geolocationGranted().then((g) => {
+      if (g && !cancelled) startWatch();
+    });
+    return () => {
+      cancelled = true;
+      stopWatch.current?.();
+      stopWatch.current = undefined;
+    };
+  }, [role]);
+
+  async function showMyLocation() {
+    setError(undefined);
+    try {
+      setMyPos(await getFix({ embedded }));
+      startWatch();
+    } catch (e) {
+      if (e instanceof GeoError) setError({ message: e.message, help: e.help, frame: embedded });
+      else setError({ message: String(e) });
+    }
+  }
+
   async function checkin(purpose: CheckinPurpose) {
     setBusy(true);
     setError(undefined);
@@ -74,6 +116,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
       if (backend.demo && simulated) fix = { ...simulated, accuracy: 8, timestamp: Date.now() };
       else fix = await getFix({ embedded });
       setMyPos(fix);
+      startWatch();
       const res = await backend.checkin(fix, purpose);
       setLast(res.record);
       setView(res.view);
@@ -112,8 +155,22 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
         if (h.lat !== undefined && h.lng !== undefined) p.push({ id: h.id, lat: h.lat, lng: h.lng, color: h.outcome === 'accepted' ? '#1e9e5a' : '#d64545', label: fmtTime(h.at, view.timezone) });
       }
     }
+    const live = simulated ?? myPos;
+    const lp = view?.lastPosition;
+    // Last reported position: for the keyholder (exact sharing only) and for the wearer when there is no live position.
+    if (view && lp && (view.role === 'keyholder' || !live)) {
+      const who = view.role === 'keyholder' ? 'Wearer' : 'You';
+      p.push({
+        id: 'last',
+        lat: lp.lat,
+        lng: lp.lng,
+        accuracy: lp.accuracy,
+        color: ZONE_COLORS.last,
+        label: `${who} – last reported ${fmtTime(lp.at, view.timezone)}${lp.approximate ? ' (approx.)' : ''}`,
+      });
+    }
     if (simulated) p.push({ id: 'sim', ...simulated, color: ZONE_COLORS.me, label: 'Simulated position' });
-    else if (myPos) p.push({ id: 'me', lat: myPos.lat, lng: myPos.lng, accuracy: myPos.accuracy, color: ZONE_COLORS.me, label: 'You' });
+    else if (myPos) p.push({ id: 'me', lat: myPos.lat, lng: myPos.lng, accuracy: myPos.accuracy, color: ZONE_COLORS.me, label: 'You (live)' });
     return p;
   }, [view, myPos, simulated]);
 
@@ -239,7 +296,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
         <LeafletMap
           circles={circles}
           points={points}
-          fitKey={`${view.zones.length}-${view.hunt?.index}-${backend.demo ? demoTick : ''}`}
+          fitKey={`${view.zones.length}-${view.hunt?.index}-${backend.demo ? demoTick : ''}-${myPos ? 1 : 0}-${view.lastPosition ? 1 : 0}`}
           onClick={backend.demo && isWearer ? (p) => setSimulated(p) : undefined}
         />
         <div class="row small muted">
@@ -247,7 +304,18 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
           <span><span class="dot" style={{ background: ZONE_COLORS.forbidden }} /> forbidden</span>
           <span><span class="dot" style={{ background: ZONE_COLORS.reward }} /> reward</span>
           <span><span class="dot" style={{ background: ZONE_COLORS.hunt }} /> next checkpoint</span>
+          {(myPos || simulated) && <span><span class="dot" style={{ background: ZONE_COLORS.me }} /> you (live)</span>}
+          {view.lastPosition && <span><span class="dot" style={{ background: ZONE_COLORS.last }} /> last reported</span>}
         </div>
+        {isWearer && !backend.demo && !watching && (
+          <button onClick={() => void showMyLocation()} data-testid="show-location">📍 Show my current location on the map</button>
+        )}
+        {view.role === 'keyholder' && !view.lastPosition && (
+          <p class="small muted" style={{ margin: 0 }}>
+            {view.privacy === 'exact' ? 'No position reported yet.' : "The wearer's position is not shared (zones only)."}
+            {view.presentZones.length > 0 && ` Currently in: ${view.presentZones.join(', ')}.`}
+          </p>
+        )}
 
         <div class="card">
           <h2>📜 Rules of this lock</h2>

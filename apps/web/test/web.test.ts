@@ -197,3 +197,21 @@ describe('travel tab example', () => {
     expect(travelExample(0, 3)).toBe('');
   });
 });
+
+describe('tracking card status badge', () => {
+  it('shows the real connection state', async () => {
+    const { h, render } = await import('preact');
+    const { TrackingCard } = await import('../src/main/TrackingCard.js');
+    const b = new MockBackend((() => { const m = new Map<string, string>(); return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) }; })());
+    const el = document.createElement('div');
+    const show = (view: any) => {
+      render(h(TrackingCard, { view, backend: b, onView: () => undefined, onError: () => undefined }), el);
+      return el.querySelector('[data-testid="tracking-status"]')!.textContent;
+    };
+    const t = { paired: true, overdue: false, missedCount: 0, heartbeatMinutes: 20, updates: 0 };
+    const v = { role: 'wearer', presentZones: [] };
+    expect(show({ ...v, tracking: { ...t, status: 'waiting' } })).toBe('waiting for first location');
+    expect(show({ ...v, tracking: { ...t, status: 'connected' } })).toBe('connected');
+    expect(show({ ...v, tracking: { ...t, paired: false, status: 'not_set_up' } })).toBe('not set up');
+  });
+});

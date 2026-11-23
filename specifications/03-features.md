@@ -264,3 +264,22 @@ Decision (2026-11-23): users (keyholders and wearers) must be told clearly that 
 
 AC: 1. Save without accepted disclaimer → refused (page, worker 400 `disclaimer_required`, demo). 2. Save with it → stored.
 3. Old configs without the field still parse. 4. The disclaimer is linked from the docs footer, the app footers and the wearer's rule summary.
+
+## F19 – Mobile layout, live position, real tracking status, access control (2026-11-23)
+
+- **Layout:** designed for Chaster's extension frame, **max. 618 px** wide (down to ~360 px phones). The page never scrolls
+  horizontally (`overflow-x: hidden`, long texts wrap); the config tab bar scrolls horizontally on its own (swipe).
+- **Live position on the map (wearer):** while the page is open, `watchPosition` shows the wearer's live position (purple, with
+  accuracy circle). Starts automatically only if the permission is already granted, otherwise via *Show my current location*;
+  also starts after a check-in. Local only – nothing is sent to the server by itself.
+- **Last reported position:** `SessionView.lastPosition` (from `state.lastAccepted`) – always for the wearer (rounded in
+  zone-only mode, flagged `approximate`), for the keyholder **only with exact sharing**; otherwise the keyholder sees the names of
+  the zones the wearer is currently in.
+- **Tracking status:** `trackingStatus()` → `not_set_up` | `waiting` (paired, no location from this pairing yet) | `connected`
+  (location within `heartbeatMinutes`) | `no_signal`. Previously "connected" was shown right after pairing.
+- **Access control:** `/api/session` and all main-page endpoints accept only the roles `wearer` and `keyholder`
+  (`403 not_allowed` otherwise).
+
+AC: 1. A role other than wearer/keyholder gets 403 without any zone or position data. 2. Status is `waiting` after pairing and
+`connected` after the first location; a location from an earlier pairing doesn't count. 3. Keyholder sees `lastPosition` only
+with exact sharing; the wearer always (approximate in zone-only mode).

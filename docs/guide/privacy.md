@@ -15,7 +15,12 @@
 - When the lock ends, all Lockation history is deleted.
 - Without [background tracking](./background-tracking) Lockation never sees your position unless you tap *Check in*.
 - With background tracking, OwnTracks sends your location to the Lockation server only. Only the wearer can connect a phone, and the wearer can disconnect it at any time. The keyholder sees zone entries and exits, not a live map (unless exact sharing is enabled, then the coordinates of those events). The phone credentials are stored only as a hash and are deleted when the lock ends.
-- Address search in the configuration page uses OpenStreetMap Nominatim; map tiles come from OpenStreetMap.
+- **Who can see the map and positions:** only the **wearer** and the **keyholder** of the lock. Anyone else who opens
+  Lockation gets "not allowed" – no zones, positions or history. The keyholder sees the wearer's last reported position on the
+  map **only with exact sharing**; in *zones only* mode just the names of the zones the wearer is currently in.
+  The wearer's live position on the own map is computed in the wearer's browser and is not sent to the server by itself.
+- Address search in the configuration page uses OpenStreetMap Nominatim; map tiles come from OpenStreetMap (OpenStreetMap
+  sees which map area is loaded, not your GPS position).
 
 ## Fair play
 

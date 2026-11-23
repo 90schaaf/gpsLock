@@ -21,6 +21,9 @@ See [Background tracking](./background-tracking#live-tracking-only).
   A wrong guess may cost time. A normal check-in never counts as a wrong guess,
   but it still completes a checkpoint if you happen to be there.
 - **Map** – all zones: green = required, red = forbidden, yellow = reward, purple dashed = next checkpoint (if revealed).
+  Your **live position** (purple) is shown while the page is open – automatically if you already allowed location access,
+  otherwise tap **📍 Show my current location**. It stays on your phone; only check-ins and background tracking send positions.
+  Your **last reported position** is shown in grey (approximate in *zones only* mode).
 - **Rules of this lock** – a plain language summary of everything that can happen.
 - **History** – your past check-ins and their consequences.
 

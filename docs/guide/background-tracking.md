@@ -21,7 +21,13 @@ uses the phone's battery-friendly location services.
 4. Give OwnTracks location access:
    - **iPhone:** Settings → OwnTracks → Location → **Always**, *Precise Location* on, and *Background App Refresh* on.
    - **Android:** App info → OwnTracks → Permissions → Location → **Allow all the time**; Battery → **Unrestricted**.
-5. Back in Lockation the card shows **connected** after the first location arrives. OwnTracks also receives
+5. Back in Lockation the card shows the real connection state:
+   - **not set up** – no phone connected;
+   - **waiting for first location** – set up, but nothing has arrived from your phone yet (open OwnTracks once, check "Always");
+   - **connected** – a location arrived within the missing-signal time;
+   - **no signal** – the last location is older than that.
+
+   It turns **connected** only after the first location arrives. OwnTracks also receives
    your lock's zones, so it can report entering and leaving them precisely.
 
 The credentials are shown only once. If you lose them or change phones, tap **Set up again**. This creates new

@@ -10,6 +10,7 @@ import {
   owntracksWaypoints,
   parseConfig,
   parseOwnTracks,
+  trackingStatus,
   type LockationConfig,
   type LockationState,
   type TrackedInput,
@@ -270,5 +271,33 @@ describe('F16 live tracking only', () => {
     expect(meta.homeActions[0]).toMatchObject({ title: 'GPS live tracking', description: 'Set up live tracking!', badge: '!' });
     state.tracking.deviceUser = 'u1';
     expect(computeMetadata(config, state, T0).homeActions[0]!.description).toMatch(/^Be in a required zone by/);
+  });
+});
+
+describe('tracking status and position visibility', () => {
+  const config = cfg({ zones: [zones.home], tracking, privacy: { coordinates: 'zone_only' } });
+  const base = () => initialState(config, T0);
+
+  it('is "connected" only after a location from the current pairing arrived recently', () => {
+    const s = base();
+    expect(trackingStatus(s, 120, T0)).toBe('not_set_up');
+    s.tracking.deviceUser = 'u1';
+    s.tracking.pairedAt = minutes(T0, 10).toISOString();
+    expect(trackingStatus(s, 120, minutes(T0, 11))).toBe('waiting');
+    s.tracking.lastSeenAt = minutes(T0, 5).toISOString(); // from an earlier pairing
+    expect(trackingStatus(s, 120, minutes(T0, 11))).toBe('waiting');
+    s.tracking.lastSeenAt = minutes(T0, 12).toISOString();
+    expect(trackingStatus(s, 120, minutes(T0, 13))).toBe('connected');
+    expect(trackingStatus(s, 120, minutes(T0, 12 + 121))).toBe('no_signal');
+  });
+
+  it('shows the last position to the wearer, to the keyholder only with exact sharing', () => {
+    const s = base();
+    s.lastAccepted = { lat: 47.377, lng: 8.542, accuracy: 12, at: T0.toISOString() };
+    const view = (role: 'wearer' | 'keyholder', c: LockationConfig) => buildSessionView({ role, isSelfLock: false, config: c, state: s, history: [], now: T0 });
+    expect(view('wearer', config).lastPosition).toMatchObject({ lat: 47.377, approximate: true });
+    expect(view('keyholder', config).lastPosition).toBeUndefined();
+    const exact = cfg({ zones: [zones.home], tracking, privacy: { coordinates: 'exact' } });
+    expect(view('keyholder', exact).lastPosition).toMatchObject({ lat: 47.377, approximate: false });
   });
 });
