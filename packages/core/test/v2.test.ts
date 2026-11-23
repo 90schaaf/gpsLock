@@ -382,3 +382,16 @@ describe('diffConfig', () => {
     expect(diffConfig(a, a)).toEqual([]);
   });
 });
+
+describe('"when" on missed lists', () => {
+  it('applies every n-th / only the n-th missed check-in', () => {
+    const c = cfg({
+      version: 2,
+      zones: [zone('home', 'Home', HOME, { roles: ['required'] })],
+      rules: { required: { enabled: true, intervalMinutes: 60, graceMinutes: 0, onMissed: [{ type: 'add_time', seconds: 60 }, { type: 'freeze', when: { nth: 2 } }, { type: 'pillory', durationMinutes: 30, reason: 'x', when: { everyNth: 3 } }] } },
+    });
+    const r = new Run(c);
+    const t = [61, 121, 181].map((m) => types(r.tick(minutes(T0, m))));
+    expect(t).toEqual([['add_time'], ['add_time', 'freeze'], ['add_time', 'pillory']]);
+  });
+});

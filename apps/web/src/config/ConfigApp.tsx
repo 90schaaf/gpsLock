@@ -431,7 +431,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
             <NumberField label="Warn before a deadline" suffix="minutes, empty = off" optional min={5} value={R.required.warnBeforeMinutes} hint="Sent to the wearer's notifications (ntfy) if set up." onChange={(v) => edit((d) => { d.rules.required.warnBeforeMinutes = v; })} />
             <TimeRange label="Quiet hours (no deadline inside)" value={R.required.quietHours} onChange={(v) => edit((d) => { d.rules.required.quietHours = v; })} />
           </div>
-          <ConsequenceEditor label="When a check-in is missed (all zones)" value={R.required.onMissed} commands={commands} onChange={(v) => edit((d) => { d.rules.required.onMissed = v; })} />
+          <ConsequenceEditor label="When a check-in is missed (all zones)" repeating="miss" value={R.required.onMissed} commands={commands} onChange={(v) => edit((d) => { d.rules.required.onMissed = v; })} />
           <ConsequenceEditor label="When checking in outside the required zones" value={R.required.onOutside} commands={commands} onChange={(v) => edit((d) => { d.rules.required.onOutside = v; })} />
           <ConsequenceEditor label="On every successful check-in (all zones)" value={R.required.onSuccess} commands={commands} onChange={(v) => edit((d) => { d.rules.required.onSuccess = v; })} />
 
@@ -468,7 +468,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
                     <button onClick={() => edit((d) => { d.tracking.enabled = true; })}>Enable background tracking</button>
                   </div>
                 )}
-                <ConsequenceEditor label={`Extra when the check-in in ${z.name} is missed`} value={z.required.onMissed} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.required.onMissed = v; })} />
+                <ConsequenceEditor label={`Extra when the check-in in ${z.name} is missed`} repeating="miss" value={z.required.onMissed} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.required.onMissed = v; })} />
                 <ConsequenceEditor label={`Extra on a successful check-in in ${z.name}`} value={z.required.onSuccess} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.required.onSuccess = v; })} />
                 {z.required.stayWindows.length > 0 && (
                   <ConsequenceEditor label={`Extra when outside ${z.name} during a stay window`} value={z.required.onOutsideDuringWindow} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.required.onOutsideDuringWindow = v; })} />
@@ -697,7 +697,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
                   Live tracking only – disable manual check-ins
                 </label>
               </div>
-              <ConsequenceEditor label="When no location arrives in time (phone off, app stopped, not set up)" value={T.onHeartbeatMissed} commands={commands} onChange={(v) => edit((d) => { d.tracking.onHeartbeatMissed = v; })} />
+              <ConsequenceEditor label="When no location arrives in time (phone off, app stopped, not set up)" repeating="missing signal" value={T.onHeartbeatMissed} commands={commands} onChange={(v) => edit((d) => { d.tracking.onHeartbeatMissed = v; })} />
             </>
           )}
         </div>

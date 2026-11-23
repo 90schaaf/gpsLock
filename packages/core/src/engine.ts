@@ -856,8 +856,8 @@ export function evaluateTick(config: LockationConfig, prevState: LockationState,
       const deadline: Date = new Date(s.nextDeadline!);
       if (now.getTime() < deadline.getTime() + slot.graceMinutes * MINUTE) break;
       // Key on slot + deadline → idempotent across retried ticks.
-      plan.addStable('required.onMissed', slot.onMissed, `missed:${slot.key}:${deadline.toISOString()}`);
       s.missedCount += 1;
+      plan.addStable('required.onMissed', slot.onMissed.filter((c) => appliesAt(c, s.missedCount)), `missed:${slot.key}:${deadline.toISOString()}`);
       s.missedSinceValid = true;
       plan.event(`Required check-in${slot.zoneIds ? ` at "${slot.name}"` : ''} missed (due ${formatLocalTime(deadline, config.timezone)}).`);
       plan.notify({ audience: 'keyholder', kind: 'requiredMissed', title: 'Lockation: check-in missed', message: `Required check-in${slot.zoneIds ? ` at "${slot.name}"` : ''} missed.`, key: `missed:${slot.key}:${deadline.toISOString()}` });
@@ -893,8 +893,8 @@ export function evaluateTick(config: LockationConfig, prevState: LockationState,
     while (n < MAX_MISSED_PER_TICK) {
       due = new Date(state.tracking.nextHeartbeat!);
       if (now.getTime() < due.getTime()) break;
-      plan.addStable('tracking.onHeartbeatMissed', tr.onHeartbeatMissed, `heartbeat:${due.toISOString()}`);
       state.tracking.missedCount += 1;
+      plan.addStable('tracking.onHeartbeatMissed', tr.onHeartbeatMissed.filter((c) => appliesAt(c, state.tracking.missedCount)), `heartbeat:${due.toISOString()}`);
       const msg = state.tracking.lastSeenAt ? `No background location received since ${formatLocalTime(new Date(state.tracking.lastSeenAt), config.timezone)}.` : 'Background tracking has not been set up.';
       plan.event(msg);
       plan.notify({ audience: 'keyholder', kind: 'tracking', title: 'Lockation: no signal', message: msg, key: `heartbeat:${due.toISOString()}` });

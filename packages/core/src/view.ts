@@ -1,5 +1,5 @@
 /** View models sent to the browser, Chaster metadata (F12) and privacy helpers (F9). */
-import { activeRoles, forbiddenTimings, type LockationConfig, type ZoneRole, zonesWithRole } from './config.js';
+import { activeRoles, forbiddenTimings, type LockationConfig, owntracksMonitoring, type ZoneRole, zonesWithRole } from './config.js';
 import { describeConsequence, describeWhen, type Consequence } from './consequences.js';
 import { type CheckinRecord, type PlannedConsequence, visibleCheckpoints } from './engine.js';
 import { earliestDeadline, effectivePrivacy, type LockationState, requiredSlots } from './state.js';
@@ -382,10 +382,7 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
 }
 
 function owntracksModeName(config: LockationConfig): 'move' | 'significant' {
-  const m = config.tracking.owntracksMode;
-  if (m !== 'auto') return m;
-  const forbidden = config.rules.forbidden.enabled && zonesWithRole(config, 'forbidden').length > 0;
-  return config.tracking.heartbeatMinutes < 60 || forbidden ? 'move' : 'significant';
+  return owntracksMonitoring(config) === 2 ? 'move' : 'significant';
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;

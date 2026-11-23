@@ -17,6 +17,8 @@ minute for time-based things (deadlines, warnings, forbidden-zone penalties whil
 - A manual check-in **outside all required zones** runs *outside a zone* once. It doesn't reset any deadline.
 - If no valid check-in happens until *deadline + grace*, *missed* runs (rule list + the zone's extra list). The next
   deadline is *old deadline + interval*, so every further missed interval is penalised again (at most 10 at once).
+  Like forbidden-zone penalties, each *missed* consequence can be scheduled *every time / every n-th / only the n-th time*
+  (also for the missing-signal list).
 - **Quiet hours** move a deadline that falls inside them to their end (interval 4 h, last check-in 21:00, quiet 23:00–07:00 → 07:00).
 - Optional **warning** N minutes before a deadline (with [notifications](./notifications)).
 - While a deadline is overdue, Lockation blocks unlocking until the next valid check-in.
