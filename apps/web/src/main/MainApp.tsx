@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { LeafletMap, ZONE_COLORS, type MapCircle, type MapPoint } from '../components/LeafletMap.js';
 import { ApiError, type Backend } from '../lib/backend.js';
 import { GeoError, geolocationGranted, getFix, watchFix } from '../lib/geolocation.js';
+import { formatCountdown, useNow } from '../lib/time-ui.js';
 import { isEmbedded } from '../lib/hash.js';
 import type { MockBackend } from '../lib/mock-backend.js';
 import { NotificationsCard } from './NotificationsCard.js';
@@ -16,27 +17,7 @@ const REASON_TEXT: Record<string, string> = {
   implausible_speed: 'Implausible movement since the last check-in.',
 };
 
-function useNow(intervalMs = 1000) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(t);
-  }, [intervalMs]);
-  return now;
-}
-
-export function formatCountdown(ms: number): string {
-  const neg = ms < 0;
-  let s = Math.floor(Math.abs(ms) / 1000);
-  const d = Math.floor(s / 86400);
-  s -= d * 86400;
-  const h = Math.floor(s / 3600);
-  s -= h * 3600;
-  const m = Math.floor(s / 60);
-  s -= m * 60;
-  const core = `${d ? `${d}d ` : ''}${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  return neg ? `−${core}` : core;
-}
+export { formatCountdown } from '../lib/time-ui.js';
 
 const fmtTime = (iso: string | undefined, tz: string) =>
   iso ? new Intl.DateTimeFormat(undefined, { timeZone: tz, weekday: 'short', hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' }).format(new Date(iso)) : '–';

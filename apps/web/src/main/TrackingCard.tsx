@@ -3,6 +3,7 @@ import type { SessionView, TrackingStatus } from '@lockation/core';
 import qrcode from 'qrcode-generator';
 import { useMemo, useState } from 'preact/hooks';
 import type { Backend, PairingResult } from '../lib/backend.js';
+import { clockTime, formatCountdown, useNow } from '../lib/time-ui.js';
 
 export const OWNTRACKS_IOS = 'https://apps.apple.com/app/owntracks/id692424691';
 export const OWNTRACKS_ANDROID = 'https://play.google.com/store/apps/details?id=org.owntracks.android';
@@ -75,8 +76,12 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
       </h2>
       {t.status === 'waiting' && (
         <div class="small notice" style={{ margin: 0 }}>
-          Set up, but no location has arrived from your phone yet. Open OwnTracks once and check that location access is set to
-          <strong> "Always"</strong>. The status turns <em>connected</em> with the first location.
+          Set up, but no location has arrived from your phone yet. Open OwnTracks, tap <strong>↑</strong> (publish) and check that
+          location access is set to <strong>"Always"</strong>. The status turns <em>connected</em> with the first location.
+          <br />
+          OwnTracks status still shows <code>mqtts://user@host</code>? The setup wasn't imported – on iPhone turn on{' '}
+          <strong>ⓘ → Settings → Remote control → ⓘ → "Allow external configuration"</strong>, then <em>Set up again</em>, or use{' '}
+          <em>Manual setup</em>.
         </div>
       )}
       {t.status === 'no_signal' && (
@@ -89,6 +94,7 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
         Last location: {ago(t.lastSeenAt)} · {t.updates} updates · missing signal after {Math.round(t.heartbeatMinutes / 60 * 10) / 10} h
         {t.missedCount > 0 && ` · missed ${t.missedCount}×`}
       </div>
+      <SignalCountdown view={view} />
       {view.presentZones.length > 0 && <div class="small">Currently in: {view.presentZones.join(', ')}</div>}
       {t.mode && isWearer && (
         <div class="small" data-testid="tracking-mode">
@@ -105,7 +111,11 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
                 Install <strong>OwnTracks</strong> (free): <a href={OWNTRACKS_IOS} target="_blank" rel="noopener">iPhone</a> ·{' '}
                 <a href={OWNTRACKS_ANDROID} target="_blank" rel="noopener">Android</a>
               </li>
-              <li>Tap <em>Set up</em> below and open the link in OwnTracks.</li>
+              <li>
+                <strong>iPhone only, once:</strong> in OwnTracks tap <strong>ⓘ → Settings → Remote control → ⓘ</strong> and turn on{' '}
+                <strong>"Allow external configuration"</strong> (section <em>From device</em>). Otherwise OwnTracks ignores the setup link.
+              </li>
+              <li>Tap <em>Set up</em> below, open the link in OwnTracks and confirm <strong>"Process Configuration"</strong>.</li>
               <li>Allow location <strong>"Always"</strong> and keep precise location on.</li>
             </ol>
           )}
@@ -130,10 +140,16 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
           <p class="small muted" style={{ margin: 0 }}>
             On another device? Scan this code with the phone's camera. The credentials are shown only once.
           </p>
+          <p class="small notice" style={{ margin: 0 }} data-testid="ios-external-config">
+            <strong>iPhone:</strong> if no <em>"Process Configuration"</em> question appears, OwnTracks blocks setup links. In OwnTracks tap{' '}
+            <strong>ⓘ → Settings → Remote control → ⓘ</strong>, turn on <strong>"Allow external configuration"</strong>, then open the link
+            again (you can switch it off afterwards). Check: OwnTracks' status must show an address starting with <code>https://</code>, not{' '}
+            <code>mqtts://user@host</code>.
+          </p>
           <div style={{ maxWidth: '220px', background: '#fff', padding: '6px', borderRadius: '8px' }} dangerouslySetInnerHTML={{ __html: svg }} />
           <details class="small">
             <summary>Manual setup</summary>
-            <p>OwnTracks → Settings → Connection: Mode <strong>HTTP</strong>, then:</p>
+            <p>Works without "Allow external configuration". OwnTracks → ⓘ → Settings: Mode <strong>HTTP</strong>, then:</p>
             <ul>
               <li>URL: <code>{pairing.url}</code></li>
               <li>Authentication on, username <code>{pairing.username}</code>, password <code>{pairing.password}</code></li>
@@ -153,6 +169,37 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
         </div>
       )}
       {!isWearer && !t.paired && <p class="small">The wearer has not connected a phone yet.</p>}
+    </div>
+  );
+}
+
+/**
+ * Live countdown to the latest time the next location must arrive, or – once that has passed – how long it is delayed
+ * and when the next missing-signal penalty is due. Only shown once a phone is set up.
+ */
+export function SignalCountdown({ view, nowMs }: { view: SessionView; nowMs?: number }) {
+  const ticking = useNow(1000);
+  const now = nowMs ?? ticking;
+  const t = view.tracking;
+  if (!t || !t.paired || !t.signalDueAt) return null;
+  const due = Date.parse(t.signalDueAt);
+  const tz = view.timezone;
+  if (now < due) {
+    return (
+      <div class="small" data-testid="signal-countdown">
+        ⏱ Next location expected by <strong>{clockTime(t.signalDueAt, tz, now)}</strong> · in <strong>{formatCountdown(due - now)}</strong>
+      </div>
+    );
+  }
+  const next = t.nextHeartbeat ? Date.parse(t.nextHeartbeat) : NaN;
+  return (
+    <div class="small warn-text" data-testid="signal-countdown">
+      ⚠ Location delayed by <strong>{formatCountdown(now - due)}</strong> (expected by {clockTime(t.signalDueAt, tz, now)})
+      {Number.isFinite(next) && next > now && (
+        <>
+          {' '}· next missing-signal penalty {clockTime(t.nextHeartbeat!, tz, now)} · in {formatCountdown(next - now)}
+        </>
+      )}
     </div>
   );
 }

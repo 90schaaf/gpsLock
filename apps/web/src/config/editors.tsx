@@ -1,6 +1,17 @@
 import { ConsequenceSchema, MAX_WINDOWS, PLANNED_EXTENSIONS, WEEKDAYS, type Consequence, type TimeWindow, type Weekday, type When } from '@lockation/core';
 import { useState } from 'preact/hooks';
 import type { CommandInfo } from '../lib/backend.js';
+import { useFieldIssues } from './issues.js';
+
+/** Inline validation messages of one field. */
+export function FieldErrors({ messages }: { messages: string[] }) {
+  if (!messages.length) return null;
+  return (
+    <span class="field-error" role="alert">
+      {messages.join(' ')}
+    </span>
+  );
+}
 
 export function NumberField(props: {
   label: string;
@@ -14,9 +25,12 @@ export function NumberField(props: {
   hint?: string;
   placeholder?: string;
   disabled?: boolean;
+  /** Config path (e.g. "tracking.warnBeforeMinutes") – shows validation errors of this field inline. */
+  path?: string;
 }) {
+  const errors = useFieldIssues(props.path);
   return (
-    <label class="field">
+    <label class={errors.length ? "field invalid" : "field"}>
       {props.label}
       {props.suffix ? ` (${props.suffix})` : ''}
       <input
@@ -34,6 +48,7 @@ export function NumberField(props: {
         }}
       />
       {props.hint && <span class="small muted">{props.hint}</span>}
+      <FieldErrors messages={errors} />
     </label>
   );
 }
@@ -48,9 +63,11 @@ export function OverrideField(props: {
   max?: number;
   suffix?: string;
   format?: (n: number) => string;
+  path?: string;
 }) {
   return (
     <NumberField
+      path={props.path}
       label={props.label}
       suffix={props.suffix}
       optional
@@ -75,10 +92,12 @@ export function NullableMinutesField(props: {
   max?: number;
   fallback: number;
   inherited?: { value: number | null; format: (v: number | null) => string };
+  path?: string;
 }) {
+  const errors = useFieldIssues(props.path);
   const mode = props.value === undefined ? (props.inherited ? 'inherit' : 'value') : props.value === null ? 'off' : 'value';
   return (
-    <label class="field">
+    <label class={errors.length ? "field invalid" : "field"}>
       {props.label}
       <span class="row nowrap">
         <select
@@ -109,6 +128,7 @@ export function NullableMinutesField(props: {
           />
         )}
       </span>
+      <FieldErrors messages={errors} />
     </label>
   );
 }

@@ -504,4 +504,105 @@ describe('UI smoke tests (jsdom)', () => {
     vi.useRealTimers();
     render(null, el);
   });
+
+  it('shows errors on their tab and field instead of a list on top', async () => {
+    setup();
+    const { h, render } = await import('preact');
+    const { ConfigApp } = await import('../src/config/ConfigApp.js');
+    const b = new MockBackend(memStore());
+    const { config } = await b.configGet();
+    await b.configSave({ ...config, disclaimer: DISCLAIMER });
+    const { win } = fakeWindow();
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(h(ConfigApp, { backend: b, bridge: new ConfigBridge(win), reachCheck: async () => ({ state: 'ok' }) as ReachStatus }), el);
+    await vi.advanceTimersByTimeAsync(200);
+    const name = el.querySelector('input[aria-label="zone name"]') as HTMLInputElement;
+    name.value = '';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(el.querySelector('[data-testid="tab-issues-zones"]')?.textContent).toMatch(/1/);
+    expect(el.querySelector('[data-testid="tab-issues"]')?.textContent).toMatch(/Zone 1 › Name|› Name/);
+    expect(el.querySelector('[data-testid="issue-summary"]')?.textContent).toMatch(/1 problem to fix/);
+    // forbidden rule: first warning not before the first penalty → inline at the field, on the Forbidden tab
+    name.value = 'Home';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    (([...el.querySelectorAll('.tabs button')].find((x) => x.textContent?.includes('Forbidden'))) as HTMLButtonElement).click();
+    await vi.advanceTimersByTimeAsync(100);
+    const warn = el.querySelector('input[aria-label="First warning (minutes)"]') as HTMLInputElement;
+    warn.value = '30';
+    warn.dispatchEvent(new Event('input', { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(el.querySelector('.field.invalid .field-error')?.textContent).toMatch(/before the first penalty/);
+    expect(el.querySelector('[data-testid="tab-issues-forbidden"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="tab-issues"]')).toBeNull(); // shown at the field, not listed again
+    vi.useRealTimers();
+    render(null, el);
+  });
+
+  it('shows the disclaimer only on the Zones tab until accepted; adding places needs it', async () => {
+    setup();
+    const { h, render } = await import('preact');
+    const { ConfigApp } = await import('../src/config/ConfigApp.js');
+    const b = new MockBackend(memStore());
+    const { win } = fakeWindow();
+    const bridge = new ConfigBridge(win);
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(h(ConfigApp, { backend: b, bridge, reachCheck: async () => ({ state: 'ok' }) as ReachStatus }), el);
+    await vi.advanceTimersByTimeAsync(200);
+    const card = el.querySelector('[data-testid="disclaimer"]');
+    expect(card).not.toBeNull();
+    expect(el.querySelector('input[placeholder*="address" i]')).toBeNull(); // no address search yet
+    (card!.querySelector('input[type="checkbox"]') as HTMLInputElement).click();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(el.querySelector('[data-testid="disclaimer"]')).toBeNull();
+    const huntTab = [...el.querySelectorAll('.tabs button')].find((x) => x.textContent?.includes('Hunt')) as HTMLButtonElement;
+    huntTab.click();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(el.querySelector('[data-testid="disclaimer"]')).toBeNull();
+    expect(el.querySelector('[data-testid="disclaimer-hint"]')).toBeNull();
+    vi.useRealTimers();
+    render(null, el);
+  });
+});
+
+describe('signal countdown', () => {
+  it('counts down to the expected location and up when delayed', async () => {
+    const { h, render } = await import('preact');
+    const { SignalCountdown } = await import('../src/main/TrackingCard.js');
+    const el = document.createElement('div');
+    const due = '2026-06-01T10:20:00.000Z';
+    const view: any = { timezone: 'UTC', tracking: { paired: true, signalDueAt: due, nextHeartbeat: '2026-06-01T10:40:00.000Z' } };
+    const show = (now: string) => {
+      render(h(SignalCountdown, { view, nowMs: Date.parse(now) }), el);
+      return el.textContent ?? '';
+    };
+    expect(show('2026-06-01T10:15:30.000Z')).toMatch(/Next location expected by .* in 00:04:30/);
+    const late = show('2026-06-01T10:27:41.000Z');
+    expect(late).toMatch(/Location delayed by 00:07:41/);
+    expect(late).toMatch(/next missing-signal penalty .* in 00:12:19/);
+    view.tracking.paired = false;
+    expect(show('2026-06-01T10:15:00.000Z')).toBe('');
+    render(null, el);
+  });
+});
+
+describe('inline validation', () => {
+  it('assigns issues to tabs and gives readable labels', async () => {
+    const { issueTab, issueLabel } = await import('../src/config/issues.js');
+    const cfg = demoConfig();
+    const bar = cfg.zones.findIndex((z) => z.roles.includes('forbidden'));
+    expect(issueTab(`zones.${bar}.forbidden.firstWarningAfterMinutes`)).toBe('forbidden');
+    expect(issueTab('zones.0.name')).toBe('zones');
+    expect(issueTab('tracking.warnBeforeMinutes')).toBe('tracking');
+    expect(issueTab('antiCheat.maxAccuracyM')).toBe('anticheat');
+    expect(issueLabel(`zones.${bar}.forbidden.firstWarningAfterMinutes`, cfg)).toBe(`${cfg.zones[bar]!.name} › First warning`);
+    expect(issueLabel(`zones.${bar}.forbidden.onEnter.1.seconds`, cfg)).toBe(`${cfg.zones[bar]!.name} › Extra consequences #2 › Time`);
+    expect(issueLabel('rules.hunt.checkpoints.0.radiusM', cfg)).toBe(`${cfg.rules.hunt.checkpoints[0]!.name} › Radius`);
+    expect(issueLabel('rules.forbidden.enabled', cfg)).toBe('');
+  });
+
 });

@@ -25,6 +25,9 @@ A zone does nothing by itself – it gets its meaning from its role and the rule
 
 ## 2. Rules
 
+Problems are shown where they occur: a tab with problems is marked **⚠ n**, the problems are listed at the top of that tab
+(e.g. *Bar › First warning: …*), affected fields are outlined in red, and the Save button area tells you which tabs need attention.
+
 Each tab has an **enabled** switch and lists its zones; open a zone to override the rule values for it. See
 [Rules explained](./rules) for the exact behaviour.
 
@@ -85,8 +88,8 @@ The wearer sees this before accepting the lock and can always switch to *zones o
 
 ## Disclaimer ✅
 
-Before the first save the keyholder must tick **"I have read the disclaimer and use Lockation at my own risk"** at the bottom of the
-page. Without it, saving fails. The confirmation is stored with the lock's configuration; if the [disclaimer](./disclaimer) changes
+The **Zones** tab first shows the disclaimer: tick **"I have read the disclaimer and use Lockation at my own risk"** to start.
+Until then no zones or checkpoints can be added and saving fails; after accepting, the notice disappears. The confirmation is stored with the lock's configuration; if the [disclaimer](./disclaimer) changes
 materially, you are asked again.
 
 ## Example setups

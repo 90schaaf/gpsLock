@@ -15,21 +15,35 @@ uses the phone's battery-friendly location services.
 
 1. Install OwnTracks: [iPhone (App Store)](https://apps.apple.com/app/owntracks/id692424691) ·
    [Android (Google Play)](https://play.google.com/store/apps/details?id=org.owntracks.android).
-2. Open your lock in Chaster → *Lockation* → **📡 Set up background tracking**.
-3. Tap **Open in OwnTracks**. OwnTracks imports the connection settings. Confirm the import if it asks.
-   Opening the page on a computer? Scan the QR code with your phone's camera instead.
-4. Give OwnTracks location access:
+2. **iPhone only, once:** in OwnTracks tap **ⓘ → Settings → Remote control → ⓘ** and turn on
+   **"Allow external configuration"** (section *From device*; the label is English in every language). It is off by default,
+   and without it OwnTracks silently ignores the setup link. You can switch it off again after the import.
+3. Open your lock in Chaster → *Lockation* → **📡 Set up background tracking**.
+4. Tap **Open in OwnTracks** (or scan the QR code with the phone's camera) and confirm **"Process Configuration"**.
+   OwnTracks then switches to the Lockation server.
+
+   ::: tip Check
+   OwnTracks' status screen must show an address starting with `https://` (your Lockation server). If it still shows
+   `mqtts://user@host:8883` and an error like *kCFErrorDomainCFNetwork error 2*, the import didn't happen – see step 2, or use
+   **Manual setup** on the Lockation page (Mode **HTTP**, URL, username, password).
+   :::
+5. Give OwnTracks location access:
    - **iPhone:** Settings → OwnTracks → Location → **Always**, *Precise Location* on, and *Background App Refresh* on.
    - **Android:** App info → OwnTracks → Permissions → Location → **Allow all the time**; Battery → **Unrestricted**.
-5. Back in Lockation the card shows the real connection state:
+6. Tap **↑** (publish) in OwnTracks once. Back in Lockation the card shows the real connection state:
    - **not set up** – no phone connected;
    - **waiting for first location** – set up, but nothing has arrived from your phone yet (open OwnTracks once, check "Always");
    - **connected** – a location arrived within the missing-signal time;
    - **no signal** – the last location is older than that.
 
+   Below it a live counter shows **"Next location expected by 14:32 · in 12:05"** – the latest time the next location must
+   arrive before the missing-signal rule applies (quiet hours respected). If it is late, it switches to **"Location delayed by
+   07:41"** and shows when the next missing-signal penalty is due. OwnTracks doesn't report on a fixed schedule (in battery-saving
+   mode only when you move), so this is a deadline, not a forecast of the next report.
+
    It turns **connected** only after the first location arrives. OwnTracks also receives
    your lock's zones (and the hunt checkpoints you can see), so it can report entering and leaving them precisely.
-6. Keep the OwnTracks **mode** the card tells you (*Move* or *Significant*). Lockation sets it when you connect and
+7. Keep the OwnTracks **mode** the card tells you (*Move* or *Significant*). Lockation sets it when you connect and
    changes it remotely if the keyholder changes the setting.
 
 The credentials are shown only once. If you lose them or change phones, tap **Set up again**. This creates new

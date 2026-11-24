@@ -257,7 +257,8 @@ Decision (2026-11-23): users (keyholders and wearers) must be told clearly that 
   GPS inaccuracy, adults only with consent, not affiliated with Chaster, third-party services, MIT licence.
 - Linked from: guide sidebar, footer of every docs page, footer of the check-in and config pages, the wearer's rule summary,
   the Handlebars configuration description and the extension description in the Chaster developer portal, README.
-- **Keyholder confirmation:** config `disclaimer?: {version, acceptedAt}`. The config page shows the tick box
+- **Keyholder confirmation:** config `disclaimer?: {version, acceptedAt}`. The config page shows the tick box only on the **Zones tab**
+  until it is accepted (2026-11-24: no zones/checkpoints can be added before; the notice disappears afterwards); tick box
   *"I have read the disclaimer and use Lockation at my own risk"*; saving is refused while it is not ticked – in the page
   (Chaster save → `save_failed`), in the worker (`400 disclaimer_required`) and in the demo backend.
   Reading stored configs without it keeps working. Bumping `DISCLAIMER_VERSION` asks keyholders again on their next save.
