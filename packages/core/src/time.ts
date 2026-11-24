@@ -143,3 +143,29 @@ export function formatWindow(w: WindowLike): string {
   const days = w.days?.length && w.days.length < 7 ? ` (${w.days.map((d) => d[0]!.toUpperCase() + d.slice(1)).join(', ')})` : '';
   return `${w.start}–${w.end}${days}`;
 }
+
+/**
+ * Wall-clock time in a timezone ("YYYY-MM-DDTHH:mm", as from <input type="datetime-local">) → UTC instant.
+ * Uses the zone's offset at that moment (DST aware; for a non-existent/ambiguous hour the first match wins).
+ */
+export function zonedWallTimeToUtc(local: string, tz: string): Date | undefined {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(local);
+  if (!m) return undefined;
+  const [y, mo, d, h, mi] = m.slice(1).map(Number) as [number, number, number, number, number];
+  const asUtc = Date.UTC(y, mo - 1, d, h, mi);
+  // Two passes converge for every real offset (also across DST changes).
+  let t = asUtc;
+  for (let i = 0; i < 2; i++) {
+    const p = localParts(new Date(t), tz);
+    const shown = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute);
+    t += asUtc - shown;
+  }
+  return new Date(t);
+}
+
+/** UTC instant → wall-clock "YYYY-MM-DDTHH:mm" in a timezone (for <input type="datetime-local">). */
+export function utcToZonedWallTime(iso: string, tz: string): string {
+  const p = localParts(new Date(iso), tz);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;
+}

@@ -2,7 +2,7 @@ name: Worker
 on:
   push:
     branches: [main]
-    paths: ['apps/worker/**', 'packages/core/**', '.github/workflows/worker.yml']
+    paths: ['apps/worker/**', 'packages/core/**', 'package-lock.json', '.github/workflows/worker.yml']
   workflow_dispatch:
 jobs:
   deploy:
@@ -15,6 +15,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test -w @lockation/core -w @lockation/worker
+      - name: Deployment skipped (no Cloudflare token)
+        if: ${{ env.CLOUDFLARE_API_TOKEN == '' }}
+        run: echo "::warning::CLOUDFLARE_API_TOKEN secret is not set – the worker was NOT deployed. See docs/technical/setup.md."
       - name: Apply D1 migrations
         if: ${{ env.CLOUDFLARE_API_TOKEN != '' }}
         working-directory: apps/worker
@@ -25,7 +28,7 @@ jobs:
       - name: Deploy
         if: ${{ env.CLOUDFLARE_API_TOKEN != '' }}
         working-directory: apps/worker
-        run: npx wrangler deploy
+        run: npx wrangler deploy --var GIT_SHA:${{ github.sha }} --var DEPLOYED_AT:$(date -u +%Y-%m-%dT%H:%M:%SZ)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

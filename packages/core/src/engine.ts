@@ -416,7 +416,7 @@ function runRules(config: LockationConfig, state: LockationState, fix: Fix | und
   evalZoneActions(config, state, entered, left, rctx, plan);
 
   evalHunt(config, state, fix, rctx, plan, o.source === 'manual' ? o.purpose : 'general', o.forcedCheckpoint);
-  if (o.source === 'manual' || config.tracking.checkins !== 'manual') evalRequired(config, state, inside, rctx, plan, o.source);
+  evalRequired(config, state, inside, rctx, plan, o.source);
   if (fix || o.forced) evalStayWindows(config, state, inside, rctx, plan);
   evalForbidden(config, state, inside, left, zones, rctx, plan, o.source, ctx.now);
   evalReward(config, state, inside, left, zones, rctx, plan, o.source);

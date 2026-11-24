@@ -7,16 +7,16 @@ const BAR = { lat: 47.39, lng: 8.515 };
 const NOW = new Date('2026-06-01T12:00:00.000Z');
 
 const config = {
+  version: 2,
   timezone: 'Europe/Zurich',
   zones: [
-    { id: 'home', name: 'Home', ...HOME, radiusM: 100 },
-    { id: 'bar', name: 'Bar', ...BAR, radiusM: 100 },
+    { id: 'home', name: 'Home', ...HOME, radiusM: 100, roles: ['required'] },
+    { id: 'bar', name: 'Bar', ...BAR, radiusM: 100, roles: ['forbidden'] },
   ],
   rules: {
-    required: { enabled: true, zoneIds: ['home'], intervalMinutes: 240, graceMinutes: 0, onMissed: [{ type: 'add_time', seconds: 3600 }] },
+    required: { enabled: true, intervalMinutes: 240, graceMinutes: 0, onMissed: [{ type: 'add_time', seconds: 3600 }] },
     forbidden: {
       enabled: true,
-      zoneIds: ['bar'],
       onEnter: [
         { type: 'pillory', durationMinutes: 30, reason: 'Bar!' },
         { type: 'task', task: 'Write an apology', points: 0 },

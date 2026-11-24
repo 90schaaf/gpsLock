@@ -106,7 +106,7 @@ export async function handleRequest(req: Request, env: Env, o: Overrides = {}): 
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
   const { service } = createService(env, o);
   try {
-    if (req.method === 'GET' && url.pathname === '/health') return json({ ok: true, version: VERSION }, 200, cors);
+    if (req.method === 'GET' && url.pathname === '/health') return json({ ok: true, version: VERSION, commit: env.GIT_SHA ?? 'unknown', deployedAt: env.DEPLOYED_AT }, 200, cors);
     if (req.method !== 'POST') throw new HttpError(405, 'method_not_allowed', 'Use POST.');
 
     switch (url.pathname) {

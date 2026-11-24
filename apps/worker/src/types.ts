@@ -25,19 +25,14 @@ export interface Env {
   NTFY_TOKEN?: string;
   /** URL of the check-in page, used as click target in notifications. */
   APP_URL?: string;
+  /** Set at deploy time (CI: full commit SHA, local: short SHA) – shown by /health. */
+  GIT_SHA?: string;
+  DEPLOYED_AT?: string;
 }
 
 export interface ExecutionContextLike {
   waitUntil(p: Promise<unknown>): void;
 }
 
-export class HttpError extends Error {
-  constructor(
-    public status: number,
-    public code: string,
-    message: string,
-    public details?: unknown,
-  ) {
-    super(message);
-  }
-}
+/** HTTP errors are the shared application errors (status, code, message, details). */
+export { AppError as HttpError } from '@lockation/core';

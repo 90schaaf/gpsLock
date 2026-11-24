@@ -58,10 +58,11 @@ npx wrangler secret put CHASTER_TOKEN      # developer token from step 2
 npx wrangler secret put WEBHOOK_USERNAME   # choose any, e.g. chaster
 npx wrangler secret put WEBHOOK_PASSWORD   # choose a long random string
 npx wrangler secret put NTFY_TOKEN         # optional: ntfy.sh access token, enables notifications
-npx wrangler deploy
+npm run deploy                             # D1 migrations + deploy with the current commit
 ```
 
-Check: `curl <worker>/health` → `{"ok":true,...}`.
+Check: `curl <worker>/health` → `{"ok":true,"version":"0.1.0","commit":"<sha>","deployedAt":"…"}` – the commit tells you
+exactly which code is running (`local`/`-dirty` for a local deploy with uncommitted changes).
 
 The OwnTracks endpoint for background tracking is `<worker>/track/owntracks`. It is derived from the request URL;
 if you use a custom domain, set `PUBLIC_URL` in `[vars]`. No extra setup is needed – wearers pair their phone from the check-in page.
@@ -88,11 +89,19 @@ namespace can be deleted (`npx wrangler kv namespace delete --namespace-id <id>`
 
 Check: `https://90schaaf.github.io/lockation/app/?demo` shows the demo.
 
-### Optional: deploy the worker from GitHub Actions
+### Deploy the worker automatically (recommended)
 
-Add the repository **secret** `CLOUDFLARE_API_TOKEN` (Cloudflare → My Profile → API Tokens →
-template *Edit Cloudflare Workers*) and optionally `CLOUDFLARE_ACCOUNT_ID`. The *Worker* workflow then deploys
-on every push to `main` that touches the worker or core. Secrets set with `wrangler secret put` persist across deploys.
+The *Worker* workflow applies the D1 migrations and deploys on every push to `main` that touches the worker or core –
+once these two repository secrets exist (Settings → Secrets and variables → Actions):
+
+1. **`CLOUDFLARE_API_TOKEN`** – Cloudflare dashboard → My Profile → **API Tokens** → *Create Token* → template
+   **Edit Cloudflare Workers** → add the permission **Account → D1 → Edit** → create, copy the token.
+2. **`CLOUDFLARE_ACCOUNT_ID`** – shown in the Cloudflare dashboard (Workers & Pages → right sidebar) and in the output of
+   `wrangler deploy`.
+
+With the GitHub CLI: `gh secret set CLOUDFLARE_API_TOKEN` and `gh secret set CLOUDFLARE_ACCOUNT_ID` (each prompts for the value).
+Without the token the workflow still runs the tests but shows a warning "worker was NOT deployed". The deployed commit is
+visible at `/health`. Secrets set with `wrangler secret put` persist across deploys.
 
 ## 5. Wire the extension in Chaster
 

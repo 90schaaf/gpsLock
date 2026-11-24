@@ -65,7 +65,6 @@ export function diffConfig(before: LockationConfig, after: LockationConfig): str
     if (rq0.intervalMinutes !== rq1.intervalMinutes) out.push(`Default check-in interval ${fmtMinutes(rq0.intervalMinutes)} → ${fmtMinutes(rq1.intervalMinutes)}.`);
     if (rq0.graceMinutes !== rq1.graceMinutes) out.push(`Default grace period ${fmtMinutes(rq0.graceMinutes)} → ${fmtMinutes(rq1.graceMinutes)}.`);
     if (rq0.anywhere !== rq1.anywhere) out.push(`Check-ins anywhere ${rq1.anywhere ? 'required' : 'no longer required'}.`);
-    if (rq0.combine !== rq1.combine) out.push(rq1.combine === 'each' ? 'Each required zone now has its own deadline.' : 'Required zones now share one deadline.');
     if (!same(rq0.quietHours, rq1.quietHours)) out.push(`Quiet hours: ${rq1.quietHours ? `${rq1.quietHours.start}–${rq1.quietHours.end}` : 'none'}.`);
     if (!same(rq0.onMissed, rq1.onMissed)) out.push(`Missed check-in: ${cons(rq1.onMissed)}.`);
     if (!same(rq0.onSuccess, rq1.onSuccess)) out.push(`Successful check-in: ${cons(rq1.onSuccess)}.`);
@@ -88,7 +87,7 @@ export function diffConfig(before: LockationConfig, after: LockationConfig): str
   if (t1.enabled) {
     if (t0.heartbeatMinutes !== t1.heartbeatMinutes) out.push(`Missing signal after ${fmtMinutes(t0.heartbeatMinutes)} → ${fmtMinutes(t1.heartbeatMinutes)}.`);
     if (!same(t0.onHeartbeatMissed, t1.onHeartbeatMissed)) out.push(`Missing signal: ${cons(t1.onHeartbeatMissed)}.`);
-    if (t0.checkins !== t1.checkins) out.push({ auto: 'Manual check-ins disabled (background tracking only).', both: 'Manual check-ins and background locations count.', manual: 'Required zones need manual check-ins.' }[t1.checkins]);
+    if (t0.checkins !== t1.checkins) out.push(t1.checkins === 'auto' ? 'Manual check-ins disabled (background tracking only).' : 'Manual check-ins and background locations count.');
     if (!same(t0.quietHours, t1.quietHours)) out.push(`Missing-signal quiet hours: ${t1.quietHours ? `${t1.quietHours.start}–${t1.quietHours.end}` : 'none'}.`);
     if (t0.owntracksMode !== t1.owntracksMode) out.push(`OwnTracks mode: ${t1.owntracksMode}.`);
   }

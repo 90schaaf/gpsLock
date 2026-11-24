@@ -17,6 +17,8 @@ import {
   type TrackedInput,
 } from '../src/index.js';
 import { BAR, GYM, HOME, Sim, T0, cfg, fixAt, minutes, north, types, zones, slot0 } from './helpers.js';
+import { fromCompactFixture } from './fixtures.js';
+const parseCompact = (x: Record<string, unknown>) => parseConfig(fromCompactFixture(x));
 
 class Tracker {
   state: LockationState;
@@ -100,11 +102,6 @@ describe('F14 background tracking – evaluation', () => {
     expect(slot0(t.state).nextDeadline).toBe(minutes(T0, 340).toISOString());
     expect(types(t.at(BAR, minutes(T0, 120)))).toEqual([]); // outside: no onOutside, no wrong guess
     expect(types(t.at(GYM, minutes(T0, 130)))).toEqual(['remove_time']); // checkpoint found by tracking
-    const noCount = cfg({ zones: [zones.home], tracking: { ...tracking, countsAsCheckin: false }, rules: { required: { enabled: true, zoneIds: ['home'] } } });
-    const t2 = new Tracker(noCount);
-    const before = slot0(t2.state).nextDeadline;
-    t2.at(HOME, minutes(T0, 10));
-    expect(slot0(t2.state).nextDeadline).toBe(before);
   });
 
   it('AC7 out of order / too old positions are ignored but count as heartbeat', () => {
@@ -172,9 +169,9 @@ describe('F15 curfew', () => {
   });
 
   it('AC3 validation', () => {
-    expect(parseConfig({ zones: [zones.home], rules: { curfew: { enabled: true, zoneIds: ['home'] } } }).ok).toBe(false);
-    expect(parseConfig({ zones: [zones.home], tracking: { enabled: true }, rules: { curfew: { enabled: true, zoneIds: [] } } }).ok).toBe(false);
-    expect(parseConfig({ zones: [zones.home], tracking: { enabled: true }, rules: { curfew: { enabled: true, zoneIds: ['home'] } } }).ok).toBe(true);
+    expect(parseCompact({ zones: [zones.home], rules: { curfew: { enabled: true, zoneIds: ['home'] } } }).ok).toBe(false);
+    expect(parseCompact({ zones: [zones.home], tracking: { enabled: true }, rules: { curfew: { enabled: true, zoneIds: [] } } }).ok).toBe(false);
+    expect(parseCompact({ zones: [zones.home], tracking: { enabled: true }, rules: { curfew: { enabled: true, zoneIds: ['home'] } } }).ok).toBe(true);
   });
 });
 
@@ -215,7 +212,7 @@ describe('F14 OwnTracks format helpers', () => {
 });
 
 describe('F16 live tracking only', () => {
-  const live = { ...tracking, liveOnly: true, countsAsCheckin: false };
+  const live = { ...tracking, liveOnly: true }; // compact fixture shape → checkins: 'auto'
   const liveCfg = () =>
     cfg({
       zones: [zones.home, zones.gym],
@@ -226,15 +223,6 @@ describe('F16 live tracking only', () => {
       },
     });
 
-  it('AC1 old liveOnly flag becomes check-in mode auto; it only applies with tracking on', () => {
-    const off = parseConfig({ tracking: { enabled: false, liveOnly: true } });
-    expect(off.ok && off.config.tracking.checkins).toBe('auto');
-    expect(off.ok && isLiveOnly(off.config)).toBe(false);
-    const on = parseConfig({ tracking: { enabled: true, liveOnly: true } });
-    expect(on.ok && isLiveOnly(on.config)).toBe(true);
-    const legacy = parseConfig({ version: 2, tracking: { enabled: true, countsAsCheckin: false } });
-    expect(legacy.ok && legacy.config.tracking.checkins).toBe('manual');
-  });
 
   it('AC2 manual check-ins are rejected without consequences', () => {
     const config = liveCfg();
@@ -245,7 +233,7 @@ describe('F16 live tracking only', () => {
     expect(r.state.acceptedCount).toBe(0);
   });
 
-  it('AC3 background updates count as required check-ins even if countsAsCheckin is off', () => {
+  it('AC3 background updates count as required check-ins in background-only mode', () => {
     const t = new Tracker(liveCfg());
     t.at(HOME, minutes(T0, 100));
     expect(slot0(t.state).nextDeadline).toBe(minutes(T0, 340).toISOString());

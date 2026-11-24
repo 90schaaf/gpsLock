@@ -1,92 +1,155 @@
-# 04 – Data Model and Worker API
+# 04 – Data Model and Worker API (current state)
 
-The source of truth for the types is `packages/core/src/config.ts` and `state.ts` (zod schemas).
-This document describes the shape.
+The zod schemas in `packages/core/src/config.ts`, `state.ts`, `consequences.ts` and the types in `engine.ts` / `view.ts`
+are the source of truth; this document describes their shape. Defaults are in brackets. Only version 2 exists: there is no
+v1 config or state migration.
 
-## LockationConfig v2 (stored as Chaster extension `config`)
-
-> Since 2026-11-23 the config is **version 2** (zone roles, per-zone settings, no curfew rule). The block below shows the v1 shape
-> for reference; the v2 schema is `packages/core/src/config.ts` (zones: `roles`, `matchMode`, `required`, `forbidden`, `reward`,
-> `reachabilityAck`; rules.required: `anywhere`, `combine`, `warnBeforeMinutes`, `onOutsideDuringWindow`, `windowCooldownMinutes`;
-> rules.forbidden: escalation timings; rules.hunt: `reveal: all`, `order`; tracking: `owntracksMode`, `quietHours`,
-> `warnBeforeMinutes`; `notifications.keyholder`; antiCheat: `liveVerificationEveryHours`). v1 input is migrated by `migrateConfig`.
-> State v2: `required.slots`, `forbidden.visits`, `hunt.found`, `tracking.monitoring/warnedFor`, `rulesChanged`, `nextLiveVerification`.
-
-### v1 shape (historical)
+## LockationConfig (Chaster extension `config`)
 
 ```ts
 {
-  version: 1,
-  timezone: "Europe/Zurich",          // IANA, captured from the configuring browser
-  matchMode: "lenient" | "strict",
-  zones: Zone[],                       // {id, name, lat, lng, radiusM}; zones + hunt checkpoints ≤ 20 (MAX_PLACES)
+  version: 2,
+  timezone: "Europe/Zurich",                 // IANA; all times of day are in this zone
+  matchMode: "lenient" | "strict",           // [lenient], overridable per zone / checkpoint
+  zones: Zone[],                              // zones + hunt checkpoints ≤ 20 (MAX_PLACES)
   rules: {
-    required:  { enabled, zoneIds, intervalMinutes, graceMinutes, quietHours?, onSuccess, onOutside, onMissed },
-    forbidden: { enabled, zoneIds, cooldownMinutes, onEnter },
-    reward:    { enabled, zoneIds, cooldownMinutes, maxPerDay, onEnter },
-    travel:    { enabled, stepKm, maxKmPerCheckin, dailyCapKm, onStep },
-    hunt:      { enabled, checkpoints, reveal, wrongCooldownMinutes, timeLimitMinutes?,
-                 blockUnlockUntilComplete, onCheckpoint, onWrong, onComplete, onTimeout },
-    curfew:    { enabled, zoneIds, start, end, cooldownMinutes, onOutside }          // F15
+    required:  { enabled, anywhere [false], intervalMinutes [240], graceMinutes [5], quietHours?: {start, end},
+                 warnBeforeMinutes?, onSuccess, onOutside, onMissed, onOutsideDuringWindow, windowCooldownMinutes [60] },
+    forbidden: { enabled, firstWarningAfterMinutes [2 | null], firstPenaltyAfterMinutes [10],
+                 repeatEveryMinutes [5, ≥ 5], repeatWarningAfterMinutes [1 | null], onEnter },
+    reward:    { enabled, cooldownMinutes [720], maxPerDay [1, overall], dwellMinutes [0], onEnter },
+    travel:    { enabled, stepKm [1], maxKmPerCheckin [50], dailyCapKm [100], onStep },
+    hunt:      { enabled, checkpoints: Checkpoint[], reveal ["all" | "hint" | "distance" | "map"],
+                 order ["sequence" | "any"], wrongCooldownMinutes [10], timeLimitMinutes?, blockUnlockUntilComplete [false],
+                 start ["auto" | "wearer" | "keyholder" | "scheduled"],
+                 startAt?,                    // ISO instant (UTC); the config page enters it in the lock timezone
+                 startAfterMinutes?, pauseBy ["keyholder" | "nobody" | "both"], wearerCanAbort [false],
+                 onAbort, onCheckpoint, onWrong, onComplete, onTimeout }
   },
-  tracking: { enabled, heartbeatMinutes, onHeartbeatMissed, entryConfirmMinutes,
-              maxDelayMinutes, countsAsCheckin, liveOnly },                        // F14, F16
-  antiCheat: { maxAccuracyM, maxFixAgeSeconds, maxSpeedKmh, onImplausible,
-               implausibleConsequences, verificationPicture, verificationProbability, minIntervalSeconds },
-  privacy: { coordinates: "zone_only" | "exact" },
-  disclaimer?: { version, acceptedAt: ISO }   // F18 – required on save (version ≥ DISCLAIMER_VERSION), optional on read
+  tracking: { enabled [false], checkins ["both" | "auto"], heartbeatMinutes [20, ≥ 15], onHeartbeatMissed,
+              maxDelayMinutes [1440], owntracksMode ["auto" | "move" | "significant"], quietHours?,
+              warnBeforeMinutes? /* 10 ≤ N < heartbeatMinutes */ },
+  antiCheat: { maxAccuracyM [100], maxFixAgeSeconds [120], maxSpeedKmh [200],
+               onImplausible ["reject" | "reject_and_penalize" | "accept_and_verify"], implausibleConsequences,
+               verificationPicture ["never" | "always" | "random"], verificationProbability [0.2],
+               minIntervalSeconds [60], liveVerificationEveryHours? /* needs checkins "auto" */ },
+  privacy: { coordinates: "zone_only" | "exact" },  // [zone_only]
+  notifications: { keyholder: { penalty [on], forbiddenEntered [on], tracking [on], requiredMissed [on],
+                                requiredDone [off], hunt [on], reward [off], verification [on] } },
+  disclaimer?: { version, acceptedAt }       // required on save (≥ DISCLAIMER_VERSION), optional on read
 }
+
+Zone = {
+  id, name, lat, lng, radiusM /* 20 … 50 000 */,
+  roles: ("required" | "reward" | "forbidden")[],   // [] = neutral; forbidden excludes others
+  matchMode?,
+  required: { intervalCheckins [true], intervalMinutes?, graceMinutes?, stayWindows: Window[],
+              onMissed, onSuccess, onOutsideDuringWindow },          // extras on top of the rule lists
+  forbidden: { windows: Window[] /* [] = always */, firstWarningAfterMinutes?, firstPenaltyAfterMinutes?,
+               repeatEveryMinutes?, repeatWarningAfterMinutes?, onEnter },
+  reward: { cooldownMinutes?, maxPerDay?, dwellMinutes?, onEnter },
+  actions: { onEnter, onLeave, minStayMinutes [0], cooldownMinutes [0] },
+  reachabilityAck?: { reasons: string[], at }
+}
+Checkpoint = { id, name, lat, lng, radiusM, hint, matchMode?, reachabilityAck? }
+Window     = { start: "HH:MM", end: "HH:MM", days?: ("mon" | … | "sun")[] }   // ≤ 10 per zone, may cross midnight
+Consequence = ({type: "add_time" | "remove_time", seconds} | {type: "freeze", durationMinutes?} | {type: "unfreeze"}
+              | {type: "pillory", durationMinutes, reason} | {type: "log", message}
+              | {type: "task", task, points, verificationRequired, durationMinutes?} | {type: "verification_picture"}
+              | {type: "command", commandId, input, label?})
+              & { when?: {every: true} | {everyNth: n} | {nth: n} }
 ```
 
-## LockationState (stored in Chaster session `data.lockation`)
+Main validation rules: roles (no duplicates, `forbidden` alone); an enabled rule needs zones of its role (required:
+or `anywhere`); warnings before penalties; required interval ≥ 3 min when background locations count, else ≥ 5 min;
+`warnBeforeMinutes` shorter than the interval / heartbeat; stay windows need tracking; scheduled hunt needs `startAt` or
+`startAfterMinutes`; hunt with checkpoints; unique ids; valid timezone.
+
+## LockationState (Chaster session `data.lockation`)
 
 ```ts
 {
-  v: 1,
-  startedAt: ISO,
-  lastAttemptAt?: ISO,
-  lastAccepted?: { lat, lng, accuracy, at },     // rounded in zone_only mode
+  v: 2,
+  startedAt, lastAttemptAt?,
+  lastAccepted?: { lat, lng, accuracy, at },          // rounded to 3 decimals in zone-only mode
   privacyOverride?: "zone_only",
-  required: { lastValidAt?: ISO, nextDeadline?: ISO, missedCount, missedSinceValid? },   // missedSinceValid: F16 recovery
-  forbidden: { lastTriggered: Record<zoneId, ISO> },
-  reward:    { lastTriggered: Record<zoneId, ISO>, day: "YYYY-MM-DD", countToday },
-  travel:    { pendingKm, totalKm, day, kmToday },
-  hunt:      { index, status: "active"|"completed"|"failed", lastWrongAt?, lastDistanceBand? },
-  presence:  Record<zoneId, { since: ISO, lastSeen: ISO }>,                     // F14
-  tracking:  { deviceUser?, pairedAt?, lastSeenAt?, nextHeartbeat?, missedCount, waypointsHash?, trackedCount },
-  curfew:    { lastTriggered? },
-  freezeUntil?: ISO,
+  required: { slots: Record<"*" | zoneId, { lastValidAt?, nextDeadline?, missedCount, missedSinceValid?, warnedFor? }>,
+              windowLastTriggered? },
+  forbidden: { visits: Record<zoneId, { since, lastInside, leftAt?, penalties, lastPenaltyAt?, warnedStep }> },
+  reward: { lastTriggered: Record<zoneId, ISO>, day, countToday, countByZone: Record<zoneId, number> },
+  travel: { pendingKm, totalKm, day, kmToday },
+  hunt: { index, found: string[], status: "not_started" | "active" | "paused" | "completed" | "failed" | "aborted",
+          startedAt?, pausedAt?, pausedMs, lastWrongAt?, lastDistanceBand? },
+  zoneActions: Record<zoneId, { lastEnter?, lastLeave? }>,
+  presence: Record<zoneId, { since, lastSeen }>,
+  tracking: { deviceUser?, pairedAt?, verifiedAt?, lastSeenAt?, nextHeartbeat?, missedCount, warnedFor?,
+              waypointsHash?, trackedCount, monitoring?, locatorInterval? },
+  nextLiveVerification?,
+  rulesChanged?: { at, summary: string[] },
+  freezeUntil?,
   checkinCount, acceptedCount
 }
 ```
 
-## CheckinRecord (KV history)
+Slots are synced to the config on every load (new required zones get a deadline from now, removed ones are dropped).
+Missing or corrupt state is replaced by a fresh initial state.
+
+## CheckinRecord (D1 `history`)
 
 ```ts
-{ id, at, outcome: "accepted"|"rejected", reason?, accuracy, lat?, lng?,
-  zones: string[] /* names matched */, events: string[] /* human readable */,
-  consequences: { type, ok, error? }[], flagged?: "implausible_speed" }
+{ id, at, outcome: "accepted" | "rejected",
+  reason?: "rate_limited" | "stale_fix" | "future_fix" | "poor_accuracy" | "implausible_speed" | "out_of_order" | "manual_disabled",
+  accuracy, lat?, lng? /* only with exact sharing */, purpose: "general" | "hunt", source?: "manual" | "tracked",
+  zones: string[], events: string[], flagged?: "implausible_speed",
+  consequences: { type, source, description, ok?, error? }[] }
 ```
+
+## SessionView (highlights)
+
+| Field | Content |
+|---|---|
+| `role`, `isSelfLock`, `timezone`, `privacy`, `privacyLocked`, `matchMode`, `maxAccuracyM` | basics |
+| `liveOnly` | tracking on with `checkins: "auto"` (no manual check-ins) |
+| `zones[]` | `{id, name, lat, lng, radiusM, kinds, windows, windowActive, reachabilityNote?}` |
+| `rules[]` | rule summary for the wearer (`{rule, title, lines}`) |
+| `required`, `requiredSlots[]` | earliest deadline; per slot `{key, name, nextDeadline, overdue, missedCount, lastValidAt, graceMinutes}` |
+| `forbiddenVisits[]` | `{zone, since, penalties, nextPenaltyAt}` |
+| `hunt` | `status`, `actions` (allowed for the viewer), `start`, `scheduledStartAt`, `index`/`total`, `reveal`, `order`, `hint`, `distanceBand`, `target`, `checkpoints[]` (visible only), `openHints`, `guessesAllowed`, `terrainNote`, `deadline` |
+| `tracking` | `paired`, `status`, `receiving`, `pairedAt`, `lastSeenAt`, `signalDueAt`, `nextHeartbeat`, `overdue`, `missedCount`, `heartbeatMinutes`, `mode`, `updates` |
+| `lastPosition` | wearer always (approximate in zone-only mode); keyholder only with exact sharing |
+| `presentZones`, `travel`, `freezeUntil`, `rulesChanged`, `notifications {available, subscribed}`, `stats`, `history` | |
 
 ## Worker HTTP API
 
-All endpoints: `POST`, JSON, CORS restricted. Errors: `{error: {code, message}}` with status 400/401/403/409/429/500.
+All `/api/*` endpoints: `POST`, JSON, CORS restricted. Errors: `{error: {code, message, details?}}` with status
+400 / 401 / 403 / 404 / 405 / 409 / 500 / 503. Main-page endpoints accept only the roles wearer and keyholder.
 
 | Endpoint | Body | Response |
 |---|---|---|
-| `/api/session` | `{mainToken}` | `SessionView` (role, config summary, state view, history if allowed) |
-| `/api/checkin` | `{mainToken, fix}` | `{record, view: SessionView}`; 403 `manual_disabled` in live-only mode (F16) |
+| `/api/session` | `{mainToken}` | `SessionView` |
+| `/api/checkin` | `{mainToken, fix: {lat, lng, accuracy, timestamp}, purpose?: "general" \| "hunt"}` (wearer) | `{record, view}`; 403 `manual_disabled` with `checkins: auto` |
 | `/api/privacy` | `{mainToken, coordinates: "zone_only"}` | `SessionView` |
 | `/api/config/get` | `{configToken}` | `{config, role, sessionId, defaults}` |
-| `/api/config/save` | `{configToken, config}` | `{ok:true}` or 400 with zod issues / `disclaimer_required` (F18) |
-| `/api/capabilities` | `{configToken}` or `{mainToken}` | `{commands:[{id, extension, description, inputSchema}]}` |
-| `/api/tracking/pair` | `{mainToken}` | `{link, url, username, password, view}` (F14) |
+| `/api/config/save` | `{configToken, config}` | `{ok: true}`; 400 with issues or `disclaimer_required` |
+| `/api/capabilities` | `{configToken}` or `{mainToken}` | `{commands: [{id, extension, description, inputSchema}]}` |
+| `/api/tracking/pair` | `{mainToken}` (wearer) | `{link, url, username, password, view}` |
 | `/api/tracking/unpair` | `{mainToken}` | `SessionView` |
-| `/api/notify/setup` | `{mainToken}` | `{topic, url, deepLink, view}` (503 without ntfy token) |
+| `/api/notify/setup` | `{mainToken}` | `{topic, url, deepLink, view}`; sends a test message; 503 without `NTFY_TOKEN` |
+| `/api/notify/test` | `{mainToken}` | `{ok: true}`; 409 not subscribed, 503 without token |
 | `/api/notify/stop` | `{mainToken}` | `SessionView` |
-| `/api/notify/test` | `{mainToken}` | `{ok:true}`; 409 not subscribed, 503 without token |
-| `/api/hunt` | `{mainToken, action: start\|pause\|resume\|abort}` | `SessionView`; 403 `hunt_action_not_allowed` |
-| `/api/notice/ack` | `{mainToken}` (wearer) | `SessionView` |
-| `/track/owntracks` | OwnTracks message (Basic auth) | `[]`, `[setWaypoints cmd]` and/or `[setConfiguration cmd]` |
-| `/webhook` | Chaster webhook | `204` |
-| `/health` | GET | `{ok:true, version}` |
+| `/api/notice/ack` | `{mainToken}` (wearer) | `SessionView` (clears `rulesChanged`) |
+| `/api/hunt` | `{mainToken, action: "start" \| "pause" \| "resume" \| "abort"}` | `SessionView`; 403 `hunt_action_not_allowed` |
+| `/track/owntracks` | OwnTracks message, Basic auth with device credentials | `[]`, `setWaypoints` and/or `setConfiguration` commands; 401 on wrong credentials |
+| `/webhook` | Chaster webhook, Basic auth | `204` |
+| `/health` | `GET` | `{ok: true, version, commit}` |
+
+## D1 tables (`apps/worker/migrations/0001_init.sql`)
+
+| Table | Columns | Purpose |
+|---|---|---|
+| `history` | `session_id, id, at, record` (PK session_id + id) | last 200 records per session |
+| `devices` | `username` (PK), `session_id` (unique), `hash`, `created_at` | OwnTracks credentials (SHA-256 of the password) |
+| `topics` | `session_id, role, topic, created_at` (PK session_id + role) | ntfy topics, role `wearer` / `keyholder` |
+| `due` | `session_id` (PK), `next_at` (indexed) | next time a session needs a tick (1-minute cron) |
+| `sent` | `session_id, key, at` (PK session_id + key) | notification dedupe and rate limit, pruned after 7 days |
+| `kv` | `key` (PK), `value` | small settings (`cron:cursor`) |

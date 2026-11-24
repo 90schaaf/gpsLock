@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { distanceBand, haversineM, isInside, parseConfig, roundCoord, defaultConfig, ConsequenceSchema } from '../src/index.js';
 import { BERN, HOME, north } from './helpers.js';
+import { fromCompactFixture } from './fixtures.js';
+const parseCompact = (x: Record<string, unknown>) => parseConfig(fromCompactFixture(x));
 
 describe('F1 geo', () => {
   it('AC1 haversine matches reference distances', () => {
@@ -41,11 +43,11 @@ describe('F1/F11 config validation', () => {
   });
 
   it('AC3 rejects too small / too large radius and duplicate ids', () => {
-    const small = parseConfig({ zones: [{ id: 'a', name: 'A', lat: 0, lng: 0, radiusM: 10 }] });
+    const small = parseCompact({ zones: [{ id: 'a', name: 'A', lat: 0, lng: 0, radiusM: 10 }] });
     expect(small.ok).toBe(false);
-    const big = parseConfig({ zones: [{ id: 'a', name: 'A', lat: 0, lng: 0, radiusM: 60_000 }] });
+    const big = parseCompact({ zones: [{ id: 'a', name: 'A', lat: 0, lng: 0, radiusM: 60_000 }] });
     expect(big.ok).toBe(false);
-    const dup = parseConfig({
+    const dup = parseCompact({
       zones: [
         { id: 'a', name: 'A', lat: 0, lng: 0, radiusM: 100 },
         { id: 'a', name: 'B', lat: 1, lng: 1, radiusM: 100 },
@@ -57,12 +59,12 @@ describe('F1/F11 config validation', () => {
 
   it('rejects unknown zone references, bad timezone and required+forbidden overlap', () => {
     const z = [{ id: 'a', name: 'A', lat: 0, lng: 0, radiusM: 100 }];
-    expect(parseConfig({ zones: z, rules: { required: { enabled: true, zoneIds: ['x'] } } }).ok).toBe(false);
-    expect(parseConfig({ timezone: 'Mars/Olympus' }).ok).toBe(false);
+    expect(parseCompact({ zones: z, rules: { required: { enabled: true, zoneIds: ['x'] } } }).ok).toBe(false);
+    expect(parseCompact({ timezone: 'Mars/Olympus' }).ok).toBe(false);
     expect(
-      parseConfig({ zones: z, rules: { required: { enabled: true, zoneIds: ['a'] }, forbidden: { enabled: true, zoneIds: ['a'] } } }).ok,
+      parseCompact({ zones: z, rules: { required: { enabled: true, zoneIds: ['a'] }, forbidden: { enabled: true, zoneIds: ['a'] } } }).ok,
     ).toBe(false);
-    expect(parseConfig({ rules: { hunt: { enabled: true } } }).ok).toBe(false);
+    expect(parseCompact({ rules: { hunt: { enabled: true } } }).ok).toBe(false);
   });
 
   it('F7 consequence schema validates ranges and command ids', () => {
@@ -78,19 +80,19 @@ describe('place limit', () => {
   const zone = (i: number) => ({ id: `z${i}`, name: `Z${i}`, lat: 47 + i / 100, lng: 8, radiusM: 100 });
   const cp = (i: number) => ({ id: `c${i}`, name: `C${i}`, lat: 46 + i / 100, lng: 8, radiusM: 80, hint: '' });
   it('allows at most 20 zones and hunt checkpoints in total', () => {
-    const ok = parseConfig({ zones: Array.from({ length: 15 }, (_, i) => zone(i)), rules: { hunt: { checkpoints: Array.from({ length: 5 }, (_, i) => cp(i)) } } });
+    const ok = parseCompact({ zones: Array.from({ length: 15 }, (_, i) => zone(i)), rules: { hunt: { checkpoints: Array.from({ length: 5 }, (_, i) => cp(i)) } } });
     expect(ok.ok).toBe(true);
-    const tooMany = parseConfig({ zones: Array.from({ length: 15 }, (_, i) => zone(i)), rules: { hunt: { checkpoints: Array.from({ length: 6 }, (_, i) => cp(i)) } } });
+    const tooMany = parseCompact({ zones: Array.from({ length: 15 }, (_, i) => zone(i)), rules: { hunt: { checkpoints: Array.from({ length: 6 }, (_, i) => cp(i)) } } });
     expect(tooMany.ok).toBe(false);
     if (!tooMany.ok) expect(JSON.stringify(tooMany.issues)).toMatch(/at most 20 zones and hunt checkpoints in total \(currently 21\)/);
-    expect(parseConfig({ zones: Array.from({ length: 21 }, (_, i) => zone(i)) }).ok).toBe(false);
+    expect(parseCompact({ zones: Array.from({ length: 21 }, (_, i) => zone(i)) }).ok).toBe(false);
   });
 });
 
 describe('disclaimer', () => {
   it('is optional for parsing but checked by disclaimerAccepted', async () => {
     const { disclaimerAccepted, DISCLAIMER_VERSION } = await import('../src/index.js');
-    const old = parseConfig({});
+    const old = parseCompact({});
     expect(old.ok).toBe(true);
     if (old.ok) expect(disclaimerAccepted(old.config)).toBe(false);
     expect(disclaimerAccepted({ disclaimer: { version: DISCLAIMER_VERSION, acceptedAt: '2026-11-23T00:00:00Z' } })).toBe(true);
@@ -101,7 +103,7 @@ describe('disclaimer', () => {
 describe('radius limits', () => {
   it('accepts 20 m and rejects smaller radii', () => {
     const z = (r: number) => ({ zones: [{ id: 'a', name: 'A', lat: 47, lng: 8, radiusM: r }] });
-    expect(parseConfig(z(20)).ok).toBe(true);
-    expect(parseConfig(z(19)).ok).toBe(false);
+    expect(parseCompact(z(20)).ok).toBe(true);
+    expect(parseCompact(z(19)).ok).toBe(false);
   });
 });
