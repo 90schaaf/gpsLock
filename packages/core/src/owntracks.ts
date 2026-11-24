@@ -22,6 +22,8 @@ export interface OwnTracksConfigOptions {
   password: string;
   /** 1 = significant changes (battery saving), 2 = move (frequent). Default 1. */
   monitoring?: 1 | 2;
+  /** Report interval in seconds (move mode). Default 300. */
+  locatorInterval?: number;
 }
 
 /** `.otrc` configuration for HTTP mode (mode 3); monitoring 1 (significant) or 2 (move). */
@@ -37,7 +39,7 @@ export function owntracksConfiguration(o: OwnTracksConfigOptions) {
     tid: 'LO',
     monitoring: o.monitoring ?? 1,
     locatorDisplacement: 100,
-    locatorInterval: 300,
+    locatorInterval: o.locatorInterval ?? 300,
     extendedData: false,
     // Needed so the app accepts the `setWaypoints` command we return in HTTP responses.
     cmd: true,
@@ -99,8 +101,8 @@ export function owntracksWaypoints(config: LockationConfig, state?: LockationSta
 }
 
 /** Remote configuration change (e.g. switch between move and significant mode without pairing again). */
-export function owntracksSetMonitoring(monitoring: 1 | 2) {
-  return { _type: 'cmd', action: 'setConfiguration', configuration: { _type: 'configuration', monitoring } };
+export function owntracksSetMonitoring(monitoring: 1 | 2, locatorInterval?: number) {
+  return { _type: 'cmd', action: 'setConfiguration', configuration: { _type: 'configuration', monitoring, ...(locatorInterval ? { locatorInterval } : {}) } };
 }
 
 interface OwnTracksMessage {
@@ -111,6 +113,7 @@ interface OwnTracksMessage {
   tst?: unknown;
   event?: unknown;
   desc?: unknown;
+  t?: unknown;
 }
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
@@ -130,7 +133,8 @@ export function parseOwnTracks(body: unknown, config: LockationConfig): TrackedI
     lat !== undefined && lng !== undefined && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
       ? { lat, lng, accuracy: num(m.acc) ?? 0, timestamp: Math.round(tst * 1000) }
       : undefined;
-  if (m._type === 'location') return fix ? { fix } : undefined;
+  // OwnTracks trigger "u" = the user tapped publish (manual send).
+  if (m._type === 'location') return fix ? { fix, ...(m.t === 'u' ? { manual: true } : {}) } : undefined;
   if (m._type === 'transition') {
     const event = m.event === 'enter' || m.event === 'leave' ? m.event : undefined;
     if (!event) return fix ? { fix } : undefined;

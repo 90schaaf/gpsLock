@@ -1,7 +1,7 @@
 /** F14 – background tracking status and OwnTracks pairing. */
 import type { SessionView, TrackingStatus } from '@lockation/core';
 import qrcode from 'qrcode-generator';
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { Backend, PairingResult } from '../lib/backend.js';
 import { clockTime, formatCountdown, useNow } from '../lib/time-ui.js';
 
@@ -74,10 +74,17 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
         📡 Background tracking
         <span class={`badge ${STATUS[t.status].cls}`} data-testid="tracking-status">{STATUS[t.status].label}</span>
       </h2>
-      {t.status === 'waiting' && (
+      {t.status === 'waiting' && t.receiving && (
+        <div class="small notice" style={{ margin: 0 }} data-testid="tracking-receiving">
+          Locations are arriving – <strong>tap ↑ (publish) once in OwnTracks</strong> to finish the setup. The status turns{' '}
+          <em>connected</em> with that manual send.
+        </div>
+      )}
+      {t.status === 'waiting' && !t.receiving && (
         <div class="small notice" style={{ margin: 0 }}>
-          Set up, but no location has arrived from your phone yet. Open OwnTracks, tap <strong>↑</strong> (publish) and check that
-          location access is set to <strong>"Always"</strong>. The status turns <em>connected</em> with the first location.
+          Set up, but no location has arrived from your phone yet. Open OwnTracks and tap <strong>↑</strong> (publish) to send
+          your position once, and check that location access is set to <strong>"Always"</strong>. The setup is complete with that
+          first manual send.
           <br />
           OwnTracks status still shows <code>mqtts://user@host</code>? The setup wasn't imported – on iPhone turn on{' '}
           <strong>ⓘ → Settings → Remote control → ⓘ → "Allow external configuration"</strong>, then <em>Set up again</em>, or use{' '}
@@ -116,6 +123,7 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
                 <strong>"Allow external configuration"</strong> (section <em>From device</em>). Otherwise OwnTracks ignores the setup link.
               </li>
               <li>Tap <em>Set up</em> below, open the link in OwnTracks and confirm <strong>"Process Configuration"</strong>.</li>
+              <li>In OwnTracks tap <strong>↑</strong> (publish) once – the setup is complete when this first manual location arrives.</li>
               <li>Allow location <strong>"Always"</strong> and keep precise location on.</li>
             </ol>
           )}
@@ -132,6 +140,7 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
         </>
       )}
 
+      {isWearer && pairing && <PairingWatcher backend={backend} onView={onView} connected={t.status === 'connected'} />}
       {isWearer && pairing && (
         <div class="stack">
           <a class="btn primary" href={pairing.link} style={{ justifyContent: 'center' }}>
@@ -201,5 +210,28 @@ export function SignalCountdown({ view, nowMs }: { view: SessionView; nowMs?: nu
         </>
       )}
     </div>
+  );
+}
+
+/** While the setup panel is open: reload every 5 s until the first manual location arrives, then show the success. */
+export function PairingWatcher({ backend, onView, connected, intervalMs = 5000 }: { backend: Backend; onView: (v: SessionView) => void; connected: boolean; intervalMs?: number }) {
+  useEffect(() => {
+    if (connected) return;
+    const t = setInterval(() => {
+      backend.session().then(onView, () => undefined);
+    }, intervalMs);
+    return () => clearInterval(t);
+  }, [connected, intervalMs]);
+  if (connected) {
+    return (
+      <div class="card small" data-testid="tracking-setup-ok" style={{ borderColor: 'var(--ok)' }}>
+        ✅ <strong>Setup complete</strong> – your phone sent its first location. Lockation now receives your position in the background.
+      </div>
+    );
+  }
+  return (
+    <p class="small muted" style={{ margin: 0 }} data-testid="tracking-setup-wait">
+      ⏳ Waiting for the first manual location from OwnTracks (tap ↑ in the app)…
+    </p>
   );
 }

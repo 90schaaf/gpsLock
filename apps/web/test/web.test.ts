@@ -189,7 +189,7 @@ describe('F16 live tracking only in the demo backend', () => {
     const now = new Date('2026-06-01T10:00:00Z');
     const b = new MockBackend(mem(), () => now);
     const { config } = await b.configGet();
-    await b.configSave({ ...config, disclaimer: { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' }, tracking: { ...config.tracking, liveOnly: true } });
+    await b.configSave({ ...config, disclaimer: { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' }, tracking: { ...config.tracking, checkins: 'auto' } });
     const v = await b.session();
     expect(v.liveOnly).toBe(true);
     const home = config.zones[0]!;
@@ -493,7 +493,7 @@ describe('UI smoke tests (jsdom)', () => {
       throw new Error('unused');
     });
     expect(ok).toBe(false);
-    (el.querySelector('[data-testid="reach-flag"] input') as HTMLInputElement).click();
+    (el.querySelector('[data-testid="reach-ack-all"]') as HTMLInputElement).click(); // one confirmation for all flagged places
     await vi.advanceTimersByTimeAsync(200);
     expect(el.querySelector('[data-testid="reach-blocker"]')).toBeNull();
     // Required tab lists only required zones
@@ -605,4 +605,81 @@ describe('inline validation', () => {
     expect(issueLabel('rules.forbidden.enabled', cfg)).toBe('');
   });
 
+});
+
+describe('hunt control, test notification, setup confirmation, settings file (demo)', () => {
+  const mem = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) };
+  };
+  const DISC = { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' };
+
+  it('keyholder-started hunt: wearer cannot start, keyholder can; pause by keyholder', async () => {
+    const b = new MockBackend(mem());
+    const { config } = await b.configGet();
+    await b.configSave({ ...config, disclaimer: DISC, rules: { ...config.rules, hunt: { ...config.rules.hunt, start: 'keyholder' } } });
+    b.setRole('wearer');
+    let v = await b.session();
+    expect(v.hunt).toMatchObject({ status: 'not_started', actions: [] });
+    await expect(b.huntAction('start')).rejects.toMatchObject({ status: 403 });
+    b.setRole('keyholder');
+    v = await b.huntAction('start');
+    expect(v.hunt?.status).toBe('active');
+    v = await b.huntAction('pause');
+    expect(v.hunt).toMatchObject({ status: 'paused', actions: ['resume', 'abort'] });
+  });
+
+  it('test notification needs a subscription; demo track() confirms the tracking setup', async () => {
+    const b = new MockBackend(mem());
+    await expect(b.testNotification()).rejects.toMatchObject({ status: 409 });
+    await b.setupNotifications();
+    await expect(b.testNotification()).resolves.toEqual({ ok: true });
+    expect(b.demoLog().some((l) => /test notification/.test(l.title))).toBe(true);
+    await b.pairTracking();
+    expect((await b.session()).tracking?.status).toBe('waiting');
+    const home = (await b.configGet()).config.zones[0]!;
+    await b.track({ lat: home.lat, lng: home.lng, accuracy: 10, timestamp: Date.now() });
+    expect((await b.session()).tracking?.status).toBe('connected');
+  });
+
+  it('settings file: export/import round trip, invalid files rejected', async () => {
+    const { importConfigText } = await import('../src/config/ConfigApp.js');
+    const cfg = demoConfig();
+    const ok = importConfigText(JSON.stringify(cfg));
+    expect(ok.ok && ok.config.zones.map((z) => z.name)).toEqual(cfg.zones.map((z) => z.name));
+    expect(importConfigText('not json')).toMatchObject({ ok: false, error: expect.stringContaining('not JSON') });
+    const bad = importConfigText(JSON.stringify({ ...cfg, zones: [{ ...cfg.zones[0], radiusM: 1 }] }));
+    expect(bad).toMatchObject({ ok: false, error: expect.stringMatching(/Radius/) });
+  });
+});
+
+describe('check-in mode selector', () => {
+  it('maps tracking on/off and checkins to one mode and back', async () => {
+    const { checkinMode, setCheckinMode } = await import('../src/config/ConfigApp.js');
+    const c = demoConfig();
+    setCheckinMode(c, 'manual');
+    expect([c.tracking.enabled, checkinMode(c.tracking)]).toEqual([false, 'manual']);
+    setCheckinMode(c, 'auto');
+    expect([c.tracking.enabled, c.tracking.checkins, checkinMode(c.tracking)]).toEqual([true, 'auto', 'auto']);
+    c.antiCheat.liveVerificationEveryHours = 4;
+    setCheckinMode(c, 'both');
+    expect([c.tracking.checkins, c.antiCheat.liveVerificationEveryHours]).toEqual(['both', undefined]);
+    c.tracking.checkins = 'manual';
+    expect(checkinMode(c.tracking)).toBe('legacy');
+  });
+});
+
+describe('demo: map clicks as fake background locations', () => {
+  it('accepts far jumps when sent from a map click (speed check off), rejects them otherwise', async () => {
+    const m = new Map<string, string>();
+    const b = new MockBackend({ getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) });
+    await b.pairTracking();
+    const z = (await b.configGet()).config.zones;
+    const t = Date.now();
+    await b.track({ lat: z[0]!.lat, lng: z[0]!.lng, accuracy: 10, timestamp: t }, { ignoreSpeed: true });
+    const far = { lat: z[0]!.lat + 0.5, lng: z[0]!.lng, accuracy: 10, timestamp: t + 2000 };
+    expect((await b.track(far, { ignoreSpeed: true })).record.outcome).toBe('accepted');
+    const back = { lat: z[0]!.lat, lng: z[0]!.lng, accuracy: 10, timestamp: t + 4000 };
+    expect((await b.track(back)).record.reason).toBe('implausible_speed');
+  });
 });

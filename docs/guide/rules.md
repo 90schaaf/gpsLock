@@ -11,7 +11,11 @@ minute for time-based things (deadlines, warnings, forbidden-zone penalties whil
 
 - **Each required zone has its own deadline** ("Home every 4 h **and** Work every 8 h"). A check-in at Home doesn't reset Work.
   The interval and grace period can be set per zone; otherwise the rule defaults apply (interval 4 h, grace **5 min**).
-- Optional **check-in anywhere**: an extra deadline that any accepted location satisfies.
+- **Shortest interval:** **5 min** with manual check-ins; **3 min** when background locations count as check-ins. With short
+  intervals Lockation asks OwnTracks to report every half interval, at most every **2 min** (Move mode) – this uses more battery.
+- Optional **check-in anywhere**: an extra deadline that doesn't depend on a zone – the wearer must check in somewhere at
+  least once per interval, so their position is known regularly (useful together with forbidden zones). With background
+  tracking every location counts.
 - The first deadline is *lock start + interval*. A check-in inside the zone resets it to *now + interval* and runs
   *successful check-in* (rule list + the zone's extra list).
 - A manual check-in **outside all required zones** runs *outside a zone* once. It doesn't reset any deadline.
@@ -92,12 +96,32 @@ Time amounts are multiplied by the number of steps. Movements flagged as implaus
   (*wrong turn* consequences, at most once per cooldown).
 - With background tracking, the checkpoints you can see are synced to OwnTracks, so reaching one is reported immediately.
 - Optional **time limit** (hunt fails, *time limit* runs once) and **block unlocking** until completed.
+- **Start**: automatically with the lock (default), by the **wearer** (*Start hunt* button), by the **keyholder**, or at a
+  **scheduled time** (date/time or minutes after the lock start). Before the start, checkpoints are hidden and don't count.
+  The keyholder can always start the hunt early (*Start now*).
+- **Pause / resume**: *nobody*, *keyholder only* (default) or *wearer and keyholder*. While paused the time limit stops and
+  checkpoints don't count; the paused time is added to the time limit.
+- **Ending early**: the keyholder can always end the hunt – without consequences. If allowed, the wearer can **give up** – the
+  hunt counts as failed and *wearer gives up* runs (e.g. add 1 day). Unlocking is no longer blocked by the hunt afterwards.
+- The other side is notified when someone starts, pauses, resumes or ends the hunt.
+
+## Zone actions (enter / leave)
+
+Every zone – whatever its role, neutral too – can run consequences **when entering** and/or **when leaving** it
+(Zones tab → zone → *⚡ Actions on enter / leave*):
+
+- *Leaving counts only after at least … minutes inside* – e.g. **Gym**: leaving after at least 45 min → **unfreeze**.
+- *Cooldown* – minimum time between two runs of the same action.
+- With background tracking the actions run as soon as the wearer is inside / clearly outside (accuracy taken into account);
+  with manual check-ins only at the next check-in inside / outside.
+- The stay is counted from the first to the last location inside, so for "leaving after 45 min" keep tracking running.
 
 ## Background tracking
 
 See [Background tracking](./background-tracking): background locations are evaluated like check-ins, a missing signal is
 penalised like a missed check-in (optionally not during quiet hours, with a warning before), and with **live tracking only**
-manual check-ins are disabled.
+manual check-ins are disabled. The *check-in mode* (Tracking tab) decides: **manual only**, **manual + background** (both
+count for required zones) or **background only**.
 
 ## Changes during a lock
 

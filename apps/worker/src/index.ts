@@ -23,6 +23,7 @@ const bodies = {
   configSave: z.object({ configToken: z.string().min(1), config: z.unknown() }),
   capabilities: z.object({ mainToken: z.string().optional(), configToken: z.string().optional() }),
   tracking: z.object({ mainToken: z.string().min(1) }),
+  hunt: z.object({ mainToken: z.string().min(1), action: z.enum(['start', 'pause', 'resume', 'abort']) }),
 };
 
 export interface Overrides {
@@ -145,6 +146,14 @@ export async function handleRequest(req: Request, env: Env, o: Overrides = {}): 
       case '/api/notify/setup': {
         const b = await parseBody(req, bodies.session);
         return json(await service.setupNotifications(b.mainToken), 200, cors);
+      }
+      case '/api/notify/test': {
+        const b = await parseBody(req, bodies.session);
+        return json(await service.testNotification(b.mainToken), 200, cors);
+      }
+      case '/api/hunt': {
+        const b = await parseBody(req, bodies.hunt);
+        return json(await service.huntAction(b.mainToken, b.action), 200, cors);
       }
       case '/api/notify/stop': {
         const b = await parseBody(req, bodies.session);

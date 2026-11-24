@@ -17,6 +17,11 @@ The demo runs `packages/core` in the browser and keeps everything in `localStora
 tap the map to simulate a position, switch between wearer and keyholder, and look at the simulated
 Chaster history. Use "Reset around me" to centre the demo zones on your real location.
 
+**Fake GPS by mouse:** with background tracking enabled in the demo config, every click on the map sends a fake background
+location there (like OwnTracks, including the manual-send setup confirmation; the speed check is skipped for clicks). The
+demo bar button *🖱 Map click* switches between "send location" and "only set position" (then the click only sets the
+position for the next check-in or *Demo: send as background update*).
+
 ## Against the real Chaster API
 
 1. `cp apps/worker/.dev.vars.example apps/worker/.dev.vars` and fill in your developer token and webhook credentials.

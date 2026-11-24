@@ -80,7 +80,10 @@ export function LeafletMap(props: LeafletMapProps) {
       if (c.label) circle.bindTooltip(c.label, { permanent: !!c.permanentLabel, direction: c.permanentLabel ? 'center' : 'top', className: c.permanentLabel ? 'map-label' : undefined });
       circle.on('click', (e: L.LeafletMouseEvent) => {
         L.DomEvent.stopPropagation(e);
-        handlers.current.onCircleClick?.(c.id);
+        // Pages that select zones (config) get the zone; elsewhere a click inside a zone is a normal map click
+        // (e.g. the demo sets the fake position there).
+        if (handlers.current.onCircleClick) handlers.current.onCircleClick(c.id);
+        else handlers.current.onClick?.({ lat: e.latlng.lat, lng: e.latlng.lng });
       });
       if (c.draggable) {
         const handle = L.marker([c.lat, c.lng], {

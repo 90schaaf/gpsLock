@@ -50,7 +50,7 @@ const ZoneRequiredSchema = z
   .object({
     /** Interval check-ins for this zone (false = only stay windows, e.g. a migrated curfew zone). */
     intervalCheckins: z.boolean().default(true),
-    intervalMinutes: z.number().int().min(15).max(43_200).optional(),
+    intervalMinutes: z.number().int().min(1).max(43_200).optional(),
     graceMinutes: minutes(1440).optional(),
     /** "Must stay inside" windows (former curfew). Needs background tracking. */
     stayWindows: z.array(WindowSchema).max(MAX_WINDOWS).default([]),
@@ -85,6 +85,18 @@ const ZoneRewardSchema = z
   })
   .default({});
 
+/** Actions when entering / leaving a zone – independent of the zone's role (neutral zones too). */
+const ZoneActionsSchema = z
+  .object({
+    onEnter: ConsequenceListSchema,
+    onLeave: ConsequenceListSchema,
+    /** "On leave" only after at least this long inside (e.g. 45 min at the gym). */
+    minStayMinutes: minutes(1440).default(0),
+    /** Minimum time between two runs of the same action. */
+    cooldownMinutes: minutes(10_080).default(0),
+  })
+  .default({});
+
 export const ZoneSchema = z.object({
   id,
   name: z.string().min(1).max(60),
@@ -98,6 +110,7 @@ export const ZoneSchema = z.object({
   required: ZoneRequiredSchema,
   forbidden: ZoneForbiddenSchema,
   reward: ZoneRewardSchema,
+  actions: ZoneActionsSchema,
   reachabilityAck: ReachabilityAckSchema.optional(),
 });
 export type Zone = z.infer<typeof ZoneSchema>;
@@ -121,7 +134,7 @@ const RequiredRuleSchema = z
     anywhere: z.boolean().default(false),
     /** `each` = every required zone has its own deadline; `any` = one shared deadline (v1 behaviour). */
     combine: z.enum(['each', 'any']).default('each'),
-    intervalMinutes: z.number().int().min(15).max(43_200).default(240),
+    intervalMinutes: z.number().int().min(1).max(43_200).default(240),
     graceMinutes: minutes(1440).default(5),
     quietHours: z.object({ start: hhmm, end: hhmm }).optional(),
     /** Optional warning N minutes before a required deadline. */
@@ -163,9 +176,12 @@ export const TrackingSchema = z
     heartbeatMinutes: z.number().int().min(15).max(10_080).default(20),
     onHeartbeatMissed: ConsequenceListSchema,
     maxDelayMinutes: z.number().int().min(1).max(10_080).default(1440),
-    countsAsCheckin: z.boolean().default(true),
-    /** F16 – live tracking only: manual check-ins are disabled, every rule runs on background updates. */
-    liveOnly: z.boolean().default(false),
+    /**
+     * How check-ins happen when tracking is on: `both` = manual check-ins and background locations count (default),
+     * `auto` = background locations only (manual check-ins disabled, former "live tracking only"),
+     * `manual` = background locations are used for the other rules, but required zones need manual check-ins (legacy).
+     */
+    checkins: z.enum(['manual', 'both', 'auto']).default('both'),
     /** OwnTracks monitoring mode provisioned on pairing. `auto` → move if heartbeat < 60 min or forbidden zones exist. */
     owntracksMode: z.enum(['auto', 'move', 'significant']).default('auto'),
     /** No missing-signal penalties or warnings during these hours. */
@@ -195,6 +211,17 @@ const HuntRuleSchema = z
     wrongCooldownMinutes: minutes(1440).default(10),
     timeLimitMinutes: z.number().int().min(10).max(525_600).optional(),
     blockUnlockUntilComplete: z.boolean().default(false),
+    /** How the hunt starts: with the lock, by the wearer, by the keyholder, or at a scheduled time. Keyholder can always force-start. */
+    start: z.enum(['auto', 'wearer', 'keyholder', 'scheduled']).default('auto'),
+    /** Scheduled start: absolute time (ISO) … */
+    startAt: z.string().max(40).optional(),
+    /** … or minutes after the lock started. */
+    startAfterMinutes: z.number().int().min(0).max(525_600).optional(),
+    /** Who may pause and resume a running hunt. A pause stops the time limit; checkpoints don't count while paused. */
+    pauseBy: z.enum(['nobody', 'keyholder', 'both']).default('keyholder'),
+    /** The wearer may abort the hunt (counts as failed and applies `onAbort`). The keyholder can always abort without consequences. */
+    wearerCanAbort: z.boolean().default(false),
+    onAbort: ConsequenceListSchema,
     onCheckpoint: ConsequenceListSchema,
     onWrong: ConsequenceListSchema,
     onComplete: ConsequenceListSchema,
@@ -301,18 +328,30 @@ export const LockationConfigSchema = z
     if (R.forbidden.repeatWarningAfterMinutes !== null && R.forbidden.repeatWarningAfterMinutes >= R.forbidden.repeatEveryMinutes) {
       issue(['rules', 'forbidden', 'repeatWarningAfterMinutes'], 'the repeat warning must come before the next penalty');
     }
+    // Interval minimum: 1 min when background locations count as check-ins (automatic), else 5 min (manual check-ins).
+    const minInterval = minRequiredInterval(cfg);
+    if (R.required.intervalMinutes < minInterval) {
+      issue(['rules', 'required', 'intervalMinutes'], `at least ${minInterval} min${minInterval === 3 ? '' : ' (3 min when background locations count as check-ins)'}`);
+    }
+    cfg.zones.forEach((z, i) => {
+      const v = z.required.intervalMinutes;
+      if (z.roles.includes('required') && v !== undefined && v < minInterval) issue(['zones', i, 'required', 'intervalMinutes'], `at least ${minInterval} min`);
+    });
     if (R.required.warnBeforeMinutes !== undefined && R.required.warnBeforeMinutes >= R.required.intervalMinutes) {
       issue(['rules', 'required', 'warnBeforeMinutes'], 'the warning must be shorter than the check-in interval');
     }
     const tr = cfg.tracking;
-    if (tr.liveOnly && !tr.enabled) issue(['tracking', 'liveOnly'], 'live tracking only needs background tracking to be enabled');
     if (tr.warnBeforeMinutes !== undefined && tr.warnBeforeMinutes >= tr.heartbeatMinutes) {
       issue(['tracking', 'warnBeforeMinutes'], 'the warning must come before the missing-signal penalty');
     }
-    if (cfg.antiCheat.liveVerificationEveryHours !== undefined && !tr.liveOnly) {
+    if (cfg.antiCheat.liveVerificationEveryHours !== undefined && !(tr.enabled && tr.checkins === 'auto')) {
       issue(['antiCheat', 'liveVerificationEveryHours'], 'random verification pictures need "live tracking only"');
     }
     if (R.hunt.enabled && R.hunt.checkpoints.length === 0) issue(['rules', 'hunt', 'checkpoints'], 'add at least one checkpoint');
+    if (R.hunt.start === 'scheduled' && !R.hunt.startAt && R.hunt.startAfterMinutes === undefined) {
+      issue(['rules', 'hunt', 'startAt'], 'set a start time or a delay after the lock start');
+    }
+    if (R.hunt.startAt !== undefined && !Number.isFinite(Date.parse(R.hunt.startAt))) issue(['rules', 'hunt', 'startAt'], 'invalid date/time');
     const cpIds = new Set<string>();
     R.hunt.checkpoints.forEach((c, i) => {
       if (cpIds.has(c.id)) issue(['rules', 'hunt', 'checkpoints', i, 'id'], `duplicate checkpoint id "${c.id}"`);
@@ -376,6 +415,16 @@ export function enabledRules(cfg: LockationConfig): string[] {
 
 // ---------- helpers used by engine, view and UI ----------
 
+/** Background locations count as required check-ins (tracking on, check-in mode `both` or `auto`). */
+export function backgroundCounts(cfg: Pick<LockationConfig, 'tracking'>): boolean {
+  return cfg.tracking.enabled && cfg.tracking.checkins !== 'manual';
+}
+
+/** Smallest allowed required interval: 3 min if background locations count as check-ins, otherwise 5 min (manual check-ins). */
+export function minRequiredInterval(cfg: Pick<LockationConfig, 'tracking'>): number {
+  return backgroundCounts(cfg) ? 3 : 5;
+}
+
 export function zonesWithRole(cfg: LockationConfig, role: ZoneRole): Zone[] {
   return cfg.zones.filter((z) => z.roles.includes(role));
 }
@@ -407,13 +456,29 @@ export function forbiddenTimings(cfg: LockationConfig, z: Zone): ForbiddenTiming
   };
 }
 
+/**
+ * OwnTracks report interval (seconds, move mode): half the shortest required interval when background locations count as
+ * check-ins, between 120 s (every 2 min – e.g. for a 3-minute interval) and 300 s.
+ */
+export function owntracksLocatorInterval(cfg: LockationConfig): number {
+  if (!backgroundCounts(cfg) || !cfg.rules.required.enabled) return 300;
+  const intervals = [
+    ...(cfg.rules.required.anywhere || cfg.rules.required.combine === 'any' ? [cfg.rules.required.intervalMinutes] : []),
+    ...zonesWithRole(cfg, 'required')
+      .filter((z) => z.required.intervalCheckins)
+      .map((z) => z.required.intervalMinutes ?? cfg.rules.required.intervalMinutes),
+  ];
+  if (!intervals.length) return 300;
+  return Math.max(120, Math.min(300, Math.floor((Math.min(...intervals) * 60) / 2)));
+}
+
 /** Effective OwnTracks monitoring: 2 = move (frequent), 1 = significant (battery saving). */
 export function owntracksMonitoring(cfg: LockationConfig): 1 | 2 {
   const m = cfg.tracking.owntracksMode;
   if (m === 'move') return 2;
   if (m === 'significant') return 1;
   const forbidden = cfg.rules.forbidden.enabled && zonesWithRole(cfg, 'forbidden').length > 0;
-  return cfg.tracking.heartbeatMinutes < 60 || forbidden ? 2 : 1;
+  return cfg.tracking.heartbeatMinutes < 60 || forbidden || owntracksLocatorInterval(cfg) < 300 ? 2 : 1;
 }
 
 // ---------- v1 → v2 migration ----------
@@ -439,7 +504,20 @@ const strs = (v: unknown): string[] => arr(v).filter((x): x is string => typeof 
  */
 export function migrateConfig(input: unknown): unknown {
   if (!isObj(input)) return input;
-  if (input.version === CONFIG_VERSION) return input;
+  if (input.version === CONFIG_VERSION) return normalizeTracking(input);
+  return normalizeTracking(migrateV1(input));
+}
+
+/** `countsAsCheckin` / `liveOnly` (until 2026-11-24) → `checkins`. */
+function normalizeTracking(input: unknown): unknown {
+  if (!isObj(input) || !isObj(input.tracking)) return input;
+  const t = input.tracking;
+  if (t.checkins !== undefined || (t.liveOnly === undefined && t.countsAsCheckin === undefined)) return input;
+  const { liveOnly, countsAsCheckin, ...rest } = t;
+  return { ...input, tracking: { ...rest, checkins: liveOnly === true ? 'auto' : countsAsCheckin === false ? 'manual' : 'both' } };
+}
+
+function migrateV1(input: Obj): unknown {
   if (input.version !== undefined && input.version !== 1) return input; // let the schema report it
 
   const rules: Obj = isObj(input.rules) ? input.rules : {};

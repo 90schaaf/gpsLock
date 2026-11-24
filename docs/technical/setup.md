@@ -115,7 +115,7 @@ In the developer portal, open your extension and set:
 **Configuration description** (Handlebars, shown on the lock so the wearer knows the rules before accepting):
 
 ```handlebars
-{{#if rules.required.enabled}}Required zones / check-ins (default every {{rules.required.intervalMinutes}} min). {{/if}}{{#if rules.forbidden.enabled}}Forbidden zones (penalty after {{rules.forbidden.firstPenaltyAfterMinutes}} min inside, then every {{rules.forbidden.repeatEveryMinutes}} min). {{/if}}{{#if rules.reward.enabled}}Reward zones. {{/if}}{{#if rules.travel.enabled}}Travel goals ({{rules.travel.stepKm}} km). {{/if}}{{#if rules.hunt.enabled}}Scavenger hunt ({{rules.hunt.checkpoints.length}} checkpoints). {{/if}}{{#if tracking.enabled}}Background tracking with OwnTracks required{{#if tracking.liveOnly}} (live tracking only, no manual check-ins){{/if}}. {{/if}}Location sharing: {{privacy.coordinates}}. Beta – use at your own risk, safety first.
+{{#if rules.required.enabled}}Required zones / check-ins (default every {{rules.required.intervalMinutes}} min). {{/if}}{{#if rules.forbidden.enabled}}Forbidden zones (penalty after {{rules.forbidden.firstPenaltyAfterMinutes}} min inside, then every {{rules.forbidden.repeatEveryMinutes}} min). {{/if}}{{#if rules.reward.enabled}}Reward zones. {{/if}}{{#if rules.travel.enabled}}Travel goals ({{rules.travel.stepKm}} km). {{/if}}{{#if rules.hunt.enabled}}Scavenger hunt ({{rules.hunt.checkpoints.length}} checkpoints). {{/if}}{{#if tracking.enabled}}Background tracking with OwnTracks required (check-ins: {{tracking.checkins}}). {{/if}}Location sharing: {{privacy.coordinates}}. Beta – use at your own risk, safety first.
 ```
 
 **Extension description** (shown in Chaster's extension list) – include the disclaimer, e.g.:

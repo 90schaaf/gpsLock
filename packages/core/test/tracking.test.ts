@@ -6,6 +6,7 @@ import {
   evaluateTick,
   evaluateTracked,
   initialState,
+  isLiveOnly,
   owntracksConfigLink,
   owntracksWaypoints,
   parseConfig,
@@ -225,10 +226,14 @@ describe('F16 live tracking only', () => {
       },
     });
 
-  it('AC1 needs background tracking enabled', () => {
-    const bad = parseConfig({ tracking: { enabled: false, liveOnly: true } });
-    expect(bad.ok).toBe(false);
-    expect(parseConfig({ tracking: { enabled: true, liveOnly: true } }).ok).toBe(true);
+  it('AC1 old liveOnly flag becomes check-in mode auto; it only applies with tracking on', () => {
+    const off = parseConfig({ tracking: { enabled: false, liveOnly: true } });
+    expect(off.ok && off.config.tracking.checkins).toBe('auto');
+    expect(off.ok && isLiveOnly(off.config)).toBe(false);
+    const on = parseConfig({ tracking: { enabled: true, liveOnly: true } });
+    expect(on.ok && isLiveOnly(on.config)).toBe(true);
+    const legacy = parseConfig({ version: 2, tracking: { enabled: true, countsAsCheckin: false } });
+    expect(legacy.ok && legacy.config.tracking.checkins).toBe('manual');
   });
 
   it('AC2 manual check-ins are rejected without consequences', () => {
@@ -288,6 +293,8 @@ describe('tracking status and position visibility', () => {
     s.tracking.lastSeenAt = minutes(T0, 5).toISOString(); // from an earlier pairing
     expect(trackingStatus(s, 120, minutes(T0, 11))).toBe('waiting');
     s.tracking.lastSeenAt = minutes(T0, 12).toISOString();
+    expect(trackingStatus(s, 120, minutes(T0, 13))).toBe('waiting'); // locations arrive, but no manual send yet
+    s.tracking.verifiedAt = minutes(T0, 12).toISOString();
     expect(trackingStatus(s, 120, minutes(T0, 13))).toBe('connected');
     expect(trackingStatus(s, 120, minutes(T0, 12 + 121))).toBe('no_signal');
   });

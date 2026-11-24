@@ -78,8 +78,10 @@ input, select, textarea {
 }
 textarea { font-family: ui-monospace, monospace; font-size: 0.85rem; }
 label.field { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; color: var(--muted); }
-label.check { display: inline-flex; gap: 8px; align-items: center; cursor: pointer; }
-label.check input { width: auto; }
+label.check { display: inline-flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+/* Checkboxes and radios as large as the text next to them, aligned with its first line. */
+input[type='checkbox'], input[type='radio'] { width: 1.1em; height: 1.1em; min-width: 1.1em; padding: 0; margin: 0.18em 0 0; flex: none; accent-color: var(--accent); cursor: pointer; }
+label.check input { width: 1.1em; }
 
 .map { width: 100%; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--border); z-index: 0; }
 .map-handle span { display: block; width: 22px; height: 22px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4); }
@@ -94,7 +96,7 @@ ul.plain { list-style: none; padding: 0; margin: 0; display: flex; flex-directio
 .progress > span { display: block; height: 100%; background: var(--accent); }
 .countdown { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .demo-bar { background: var(--accent); color: var(--accent-text); padding: 8px 16px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 0.9rem; }
-.demo-bar button { padding: 4px 10px; }
+.demo-bar button, .demo-bar .btn { padding: 4px 10px; font-size: inherit; line-height: 1.45; border-radius: 10px; }
 /* The tab bar itself may scroll horizontally (swipe) when the tabs don't fit. */
 .tabs { display: flex; gap: 6px; overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; scrollbar-width: thin; padding-bottom: 4px; max-width: 100%; }
 .tabs button { flex: none; white-space: nowrap; }

@@ -30,6 +30,20 @@ export function NotificationsCard({ view, backend, onView, onError }: { view: Se
     }
   }
 
+  const [testMsg, setTestMsg] = useState<string>();
+  async function test() {
+    setBusy(true);
+    setTestMsg(undefined);
+    try {
+      await backend.testNotification();
+      setTestMsg('Test notification sent – it should appear in ntfy within a few seconds.');
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function stop() {
     if (!confirm(isWearer ? 'Stop notifications? You will no longer be warned before penalties.' : 'Stop notifications about this lock?')) return;
     setBusy(true);
@@ -60,12 +74,18 @@ export function NotificationsCard({ view, backend, onView, onError }: { view: Se
             {n.subscribed ? '🔁 Set up again' : '🔔 Set up notifications'}
           </button>
           {n.subscribed && (
+            <button disabled={busy} onClick={test} data-testid="notify-test">
+              📨 Send test notification
+            </button>
+          )}
+          {n.subscribed && (
             <button class="danger" disabled={busy} onClick={stop} data-testid="notify-stop">
               Stop notifications
             </button>
           )}
         </div>
       )}
+      {testMsg && <p class="small" data-testid="notify-test-ok" style={{ margin: 0 }}>✅ {testMsg}</p>}
       {setup && (
         <div class="stack">
           <ol class="small" style={{ margin: 0, paddingLeft: '18px' }}>
@@ -74,6 +94,10 @@ export function NotificationsCard({ view, backend, onView, onError }: { view: Se
               <a href={NTFY_ANDROID} target="_blank" rel="noopener">Android</a>
             </li>
             <li>Tap <em>Open in ntfy</em> below (or scan the code), then subscribe and allow notifications.</li>
+            <li>
+              A <strong>"✅ Lockation test notification"</strong> was just sent. Didn't get it after subscribing? Tap{' '}
+              <em>Send test notification</em>.
+            </li>
             <li>
               Manually: in ntfy tap <em>+</em>, server <code>ntfy.sh</code>, topic <code data-testid="notify-topic">{setup.topic}</code>.
             </li>
@@ -85,7 +109,12 @@ export function NotificationsCard({ view, backend, onView, onError }: { view: Se
           <p class="small muted" style={{ margin: 0 }}>
             Web: <a href={setup.url} target="_blank" rel="noopener">{setup.url}</a>. Keep the topic secret – anyone who knows it can read the messages.
           </p>
-          <button class="link" onClick={() => setSetup(undefined)}>Done</button>
+          <div class="row">
+            <button disabled={busy} onClick={test} data-testid="notify-test">
+              📨 Send test notification
+            </button>
+            <button class="link" onClick={() => setSetup(undefined)}>Done</button>
+          </div>
         </div>
       )}
     </div>

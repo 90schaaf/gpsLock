@@ -1,4 +1,4 @@
-import type { CheckinPurpose, CheckinRecord, Fix, SessionView } from '@lockation/core';
+import type { CheckinPurpose, CheckinRecord, Fix, SessionView, HuntAction } from '@lockation/core';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { LeafletMap, ZONE_COLORS, type MapCircle, type MapPoint } from '../components/LeafletMap.js';
 import { ApiError, type Backend } from '../lib/backend.js';
@@ -33,6 +33,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
   const [last, setLast] = useState<CheckinRecord>();
   const [myPos, setMyPos] = useState<Fix>();
   const [simulated, setSimulated] = useState<{ lat: number; lng: number }>();
+  const [clickSends, setClickSends] = useState(() => mock?.mapClickSends ?? false);
   const [demoTick, setDemoTick] = useState(0);
   const [watching, setWatching] = useState(false);
   const stopWatch = useRef<() => void>();
@@ -205,6 +206,20 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
     }
   }
 
+  /** Demo: a click on the map moves the fake GPS there and (with tracking) sends it like OwnTracks would. */
+  async function demoMapClick(p: { lat: number; lng: number }) {
+    setSimulated(p);
+    if (!mock || !view?.tracking || !clickSends) return;
+    try {
+      if (!view.tracking.paired) await mock.pairTracking();
+      const res = await mock.track({ ...p, accuracy: 10, timestamp: Date.now() }, { ignoreSpeed: true });
+      setLast(res.record);
+      setView(res.view);
+    } catch (e) {
+      setError({ message: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
   return (
     <>
       {mock && (
@@ -213,6 +228,12 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
           role={view.role}
           simulating={!!simulated}
           onClearSim={() => setSimulated(undefined)}
+          clickSends={clickSends}
+          onToggleClickSends={() => {
+            if (mock) mock.mapClickSends = !clickSends;
+            setClickSends(!clickSends);
+          }}
+          trackingOn={!!view.tracking}
           onChange={() => {
             setLast(undefined);
             setDemoTick((n) => n + 1);
@@ -305,7 +326,8 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
 
         {view.hunt && (
           <div class="card" data-testid="hunt-card">
-            <h2>🧭 Scavenger hunt <span class={`badge ${view.hunt.status === 'completed' ? 'ok' : view.hunt.status === 'failed' ? 'bad' : ''}`}>{view.hunt.status}</span></h2>
+            <h2>🧭 Scavenger hunt <span class={`badge ${view.hunt.status === 'completed' ? 'ok' : view.hunt.status === 'failed' ? 'bad' : view.hunt.status === 'paused' || view.hunt.status === 'not_started' ? 'warn' : ''}`}>{HUNT_STATUS[view.hunt.status]}</span></h2>
+            <HuntControls view={view} backend={backend} onView={setView} onError={(message) => setError({ message })} />
             <div class="progress" aria-label="hunt progress"><span style={{ width: `${(view.hunt.index / Math.max(1, view.hunt.total)) * 100}%` }} /></div>
             <p class="small muted">
               {view.hunt.index} of {view.hunt.total} checkpoints found · {view.hunt.order === 'any' ? 'any order' : 'in order'}
@@ -371,7 +393,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
                 {busy ? 'Getting your position…' : simulated ? '📍 Check in (simulated position)' : '📍 Check in now'}
               </button>
             )}
-            {mock && view.tracking && simulated && (
+            {mock && view.tracking && simulated && !clickSends && (
               <button
                 disabled={busy}
                 onClick={async () => {
@@ -391,7 +413,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
             <p class="small muted" style={{ margin: 0 }}>
               {view.liveOnly ? 'Hunt checkpoints are found automatically when you walk into them.' : `Your accuracy must be ±${view.maxAccuracyM} m or better. Outdoors works best.`}
               {huntActive && !view.liveOnly && !view.hunt?.guessesAllowed && ' Check in at a checkpoint to find it.'}
-              {backend.demo && ' Demo: tap the map to simulate a position.'}
+              {backend.demo && (view.tracking && clickSends ? ' Demo: click the map to send a fake background location there (like OwnTracks; speed check off).' : ' Demo: click the map to set a fake position for the next check-in.')}
             </p>
           </div>
         )}
@@ -403,7 +425,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
           circles={circles}
           points={points}
           fitKey={`${view.zones.length}-${view.hunt?.index}-${view.hunt?.checkpoints.length ?? 0}-${backend.demo ? demoTick : ''}-${myPos ? 1 : 0}-${view.lastPosition ? 1 : 0}`}
-          onClick={backend.demo && isWearer ? (p) => setSimulated(p) : undefined}
+          onClick={backend.demo && isWearer ? (p) => void demoMapClick(p) : undefined}
         />
         <div class="row small muted">
           <span><span class="dot" style={{ background: ZONE_COLORS.required }} /> required</span>
@@ -547,7 +569,25 @@ function ResultCard({ record }: { record: CheckinRecord }) {
   );
 }
 
-function DemoBar({ mock, role, simulating, onClearSim, onChange }: { mock: MockBackend; role: string; simulating: boolean; onClearSim: () => void; onChange: () => void }) {
+function DemoBar({
+  mock,
+  role,
+  simulating,
+  onClearSim,
+  onChange,
+  clickSends,
+  onToggleClickSends,
+  trackingOn,
+}: {
+  mock: MockBackend;
+  role: string;
+  simulating: boolean;
+  onClearSim: () => void;
+  onChange: () => void;
+  clickSends: boolean;
+  onToggleClickSends: () => void;
+  trackingOn: boolean;
+}) {
   const [showLog, setShowLog] = useState(false);
   return (
     <div>
@@ -557,6 +597,11 @@ function DemoBar({ mock, role, simulating, onClearSim, onChange }: { mock: MockB
         <span class="grow" />
         <button onClick={() => { mock.setRole(role === 'wearer' ? 'keyholder' : 'wearer'); onChange(); }}>View as {role === 'wearer' ? 'keyholder' : 'wearer'}</button>
         {simulating && <button onClick={onClearSim}>Use real GPS</button>}
+        {trackingOn && role === 'wearer' && (
+          <button onClick={onToggleClickSends} aria-pressed={clickSends} data-testid="demo-click-sends" title="What a click on the map does">
+            🖱 Map click: {clickSends ? 'send location' : 'only set position'}
+          </button>
+        )}
         <button
           onClick={() =>
             getFix()
@@ -584,6 +629,70 @@ function DemoBar({ mock, role, simulating, onClearSim, onChange }: { mock: MockB
               ))}
             </ul>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const HUNT_STATUS: Record<NonNullable<SessionView['hunt']>['status'], string> = {
+  not_started: 'not started',
+  active: 'running',
+  paused: 'paused',
+  completed: 'completed',
+  failed: 'failed',
+  aborted: 'ended',
+};
+
+/** Start / pause / resume / abort buttons for the scavenger hunt (only the actions this viewer may use). */
+export function HuntControls({ view, backend, onView, onError }: { view: SessionView; backend: Backend; onView: (v: SessionView) => void; onError: (m: string) => void }) {
+  const h = view.hunt;
+  const [busy, setBusy] = useState(false);
+  if (!h) return null;
+  const isKh = view.role === 'keyholder';
+  const run = async (a: HuntAction) => {
+    if (a === 'abort') {
+      const msg = isKh && !view.isSelfLock ? 'End the scavenger hunt? It ends without consequences.' : 'Give up the scavenger hunt? It counts as failed and may have consequences.';
+      if (!confirm(msg)) return;
+    }
+    setBusy(true);
+    try {
+      onView(await backend.huntAction(a));
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const label: Record<HuntAction, string> = {
+    start: isKh && h.start !== 'keyholder' && !view.isSelfLock ? '▶ Start now (force)' : '▶ Start hunt',
+    pause: '⏸ Pause',
+    resume: '▶ Resume',
+    abort: isKh && !view.isSelfLock ? '⏹ End hunt' : '🏳 Give up',
+  };
+  return (
+    <div class="stack" data-testid="hunt-controls">
+      {h.status === 'not_started' && (
+        <p class="small" style={{ margin: 0 }}>
+          {h.start === 'scheduled' && h.scheduledStartAt
+            ? `Starts automatically ${fmtTime(h.scheduledStartAt, view.timezone)}.`
+            : h.start === 'wearer'
+              ? isKh
+                ? 'Waiting for the wearer to start the hunt.'
+                : 'Start the hunt when you are ready – the checkpoints appear then.'
+              : isKh
+                ? 'Start the hunt when the wearer should begin.'
+                : 'The keyholder starts the hunt.'}
+        </p>
+      )}
+      {h.status === 'paused' && <p class="small warn-text" style={{ margin: 0 }}>Paused{h.pausedAt ? ` since ${fmtTime(h.pausedAt, view.timezone)}` : ''} – the time limit is stopped and checkpoints don't count.</p>}
+      {h.actions.length > 0 && (
+        <div class="row">
+          {h.actions.map((a) => (
+            <button key={a} class={a === 'start' || a === 'resume' ? 'primary' : a === 'abort' ? 'danger' : ''} disabled={busy} onClick={() => void run(a)}>
+              {label[a]}
+            </button>
+          ))}
         </div>
       )}
     </div>

@@ -17,11 +17,13 @@ The configuration can be edited later while the lock is running (as far as Chast
   - *Lenient* (default): the position must be inside the zone.
   - *Strict*: the whole accuracy circle must be inside – fairer for forbidden zones (suggested automatically for them), harder for required zones.
 - **Safety check**: every zone and checkpoint is checked against OpenStreetMap (water, sea, glacier/cliff, military areas,
-  runways/railways, no road or path nearby). A place flagged as *out of reach* must be confirmed individually ("I know – this
-  place is intentionally hard to reach") before you can save. The wearer sees the confirmed note.
+  runways/railways, no road or path nearby). Places flagged as *out of reach* are listed at the top of the page; **one**
+  confirmation ("I know – these places are intentionally hard to reach") covers all of them. Moving a place checks it again.
+  The wearer sees the confirmed note.
 - **Timezone**: used for windows, quiet hours and daily limits. It is set automatically from your browser.
 
-A zone does nothing by itself – it gets its meaning from its role and the rules below.
+A zone does nothing by itself – it gets its meaning from its role and the rules below. Independent of the role, each zone can
+run **actions on enter / leave** (e.g. unfreeze after leaving the gym) – see [Rules explained](./rules#zone-actions-enter-leave).
 
 ## 2. Rules
 
@@ -41,9 +43,10 @@ Each tab has an **enabled** switch and lists its zones; open a zone to override 
 - 🚶 **Travel** – *step size* = km per reward; *max per check-in* = the most one check-in can add (stops a train ride from collecting many rewards); *daily cap* = km counted per day. The tab shows a worked example for your values; details in [Rules explained](./rules#travel-goals).
 - 🧭 **Hunt** – tap the map to place checkpoints **in order** and give each a hint. Choose *in order* or *any order* and the
   reveal mode (default *hint + pin all on the map*, which has no wrong guesses).
-- 📡 **Tracking** – enable [background tracking](./background-tracking): missing-signal time and consequences, optional
+- 📡 **Tracking** – **How is the location collected?** *Manual check-ins only*, *manual check-ins + background tracking*
+  (default with tracking; both count) or *background tracking only* (no check-in button). With [background tracking](./background-tracking): missing-signal time and consequences, optional
   **quiet hours** (no missing-signal penalties at night) and a **warning** before the penalty, **OwnTracks mode** (*Auto* /
-  *Move* / *Significant*), whether background locations count as required check-ins, and **Live tracking only**.
+  *Move* / *Significant*).
 - 🔔 **Notifications** – which events the keyholder gets as push notifications (see [Notifications](./notifications)).
 
 ## 3. Consequences
@@ -85,6 +88,12 @@ offer commands yet – as soon as they do, they will appear in the command list 
 - **Exact**: the keyholder can see each check-in on a map.
 
 The wearer sees this before accepting the lock and can always switch to *zones only*. Read more in [Privacy & fairness](./privacy).
+
+## Settings file 💾
+
+In the tab **💾 Import / Export**: **Export** downloads all settings as `lockation-config.json` – e.g. to reuse a setup for another lock or as a backup.
+**Import** loads such a file into the page (it is validated; older files are converted). Nothing is saved until you save; the
+disclaimer acceptance of the current lock is kept.
 
 ## Disclaimer ✅
 
