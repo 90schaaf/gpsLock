@@ -168,7 +168,7 @@ describe('OwnTracks v2', () => {
     sess.config = { ...config, tracking: { ...config.tracking, owntracksMode: 'significant' } };
     now = at(1);
     const res = (await (await post('/track/owntracks', loc(HOME, now), basic(p.username, p.password))).json()) as any[];
-    expect(res).toContainEqual({ _type: 'cmd', action: 'setConfiguration', configuration: { _type: 'configuration', monitoring: 1 } });
+    expect(res).toContainEqual({ _type: 'cmd', action: 'setConfiguration', configuration: { _type: 'configuration', monitoring: 1, locatorInterval: 300 } });
   });
 });
 

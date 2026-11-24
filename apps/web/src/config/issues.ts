@@ -127,7 +127,7 @@ export function issueLabel(path: string, config: LockationConfig | undefined): s
 /** Rule-level fields that render their own error message (when their section is visible). */
 const INLINE: { re: RegExp; visible: (c: LockationConfig) => boolean }[] = [
   { re: /^rules\.forbidden\.(firstWarningAfterMinutes|repeatWarningAfterMinutes)$/, visible: (c) => c.rules.forbidden.enabled },
-  { re: /^rules\.required\.warnBeforeMinutes$/, visible: (c) => c.rules.required.enabled },
+  { re: /^rules\.required\.(warnBeforeMinutes|intervalMinutes)$/, visible: (c) => c.rules.required.enabled },
   { re: /^tracking\.(heartbeatMinutes|warnBeforeMinutes)$/, visible: (c) => c.tracking.enabled },
   { re: /^antiCheat\.liveVerificationEveryHours$/, visible: () => true },
 ];

@@ -1,4 +1,5 @@
 import {
+  minRequiredInterval,
   DISCLAIMER_VERSION,
   disclaimerAccepted,
   fmtMinutes,
@@ -477,9 +478,15 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
         <Section title="Required zones" enabled={R.required.enabled} onToggle={(v) => edit((d) => { d.rules.required.enabled = v; })}
           help={'The wearer must check in regularly inside each required zone (and/or anywhere). Required zones can also have "must stay inside" time windows.'}>
           <div class="grid2">
-            <label class="check">
+            <label class="check" style={{ alignItems: 'flex-start' }}>
               <input type="checkbox" checked={R.required.anywhere} onChange={(e) => edit((d) => { d.rules.required.anywhere = checked(e); })} />
-              Also require a check-in anywhere (proves the position)
+              <span>
+                Also require a check-in anywhere (proves the position)
+                <span class="small muted" style={{ display: 'block' }}>
+                  An extra deadline that doesn't depend on a zone: the wearer must check in somewhere at least once per interval, so their
+                  position is known regularly (useful with forbidden zones). With background tracking every location counts.
+                </span>
+              </span>
             </label>
             <label class="field">
               Several required zones
@@ -488,7 +495,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
                 <option value="any">One shared deadline – any zone counts (OR)</option>
               </select>
             </label>
-            <NumberField label="Interval (default)" suffix="minutes" min={15} value={R.required.intervalMinutes} hint={fmtMinutes(R.required.intervalMinutes)} onChange={(v) => edit((d) => { d.rules.required.intervalMinutes = v ?? 240; })} />
+            <NumberField path="rules.required.intervalMinutes" label="Interval (default)" suffix="minutes" min={minRequiredInterval(config)} value={R.required.intervalMinutes} hint={`${fmtMinutes(R.required.intervalMinutes)} · minimum ${minRequiredInterval(config)} min (${minRequiredInterval(config) === 1 ? 'background locations count as check-ins' : 'manual check-ins; 1 min with background tracking'})`} onChange={(v) => edit((d) => { d.rules.required.intervalMinutes = v ?? 240; })} />
             <NumberField label="Grace period (default)" suffix="minutes" min={0} value={R.required.graceMinutes} onChange={(v) => edit((d) => { d.rules.required.graceMinutes = v ?? 0; })} />
             <NumberField path="rules.required.warnBeforeMinutes" label="Warn before a deadline" suffix="minutes, empty = off" optional min={5} value={R.required.warnBeforeMinutes} hint="Sent to the wearer's notifications (ntfy) if set up." onChange={(v) => edit((d) => { d.rules.required.warnBeforeMinutes = v; })} />
             <TimeRange label="Quiet hours (no deadline inside)" value={R.required.quietHours} onChange={(v) => edit((d) => { d.rules.required.quietHours = v; })} />
@@ -518,7 +525,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
                 </label>
                 {z.required.intervalCheckins && (
                   <div class="grid2">
-                    <OverrideField label="Interval" suffix="minutes" min={15} value={z.required.intervalMinutes} inherited={R.required.intervalMinutes} format={fmtMinutes} onChange={(v) => editZone(z.id, (x) => { x.required.intervalMinutes = v; })} />
+                    <OverrideField path={`zones.${config.zones.indexOf(z)}.required.intervalMinutes`} label="Interval" suffix="minutes" min={minRequiredInterval(config)} value={z.required.intervalMinutes} inherited={R.required.intervalMinutes} format={fmtMinutes} onChange={(v) => editZone(z.id, (x) => { x.required.intervalMinutes = v; })} />
                     <OverrideField label="Grace period" suffix="minutes" min={0} value={z.required.graceMinutes} inherited={R.required.graceMinutes} format={fmtMinutes} onChange={(v) => editZone(z.id, (x) => { x.required.graceMinutes = v; })} />
                   </div>
                 )}

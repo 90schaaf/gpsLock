@@ -90,6 +90,8 @@ export const LockationStateSchema = z.object({
       trackedCount: z.number().default(0),
       /** OwnTracks monitoring mode last sent to the phone (1 significant, 2 move). */
       monitoring: z.number().int().optional(),
+      /** OwnTracks report interval (s) last sent to the phone. */
+      locatorInterval: z.number().int().optional(),
       /** Heartbeat deadline for which the missing-signal warning was sent. */
       warnedFor: iso.optional(),
       /** First manual send (OwnTracks ↑) after pairing – completes the setup. */

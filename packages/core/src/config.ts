@@ -50,7 +50,7 @@ const ZoneRequiredSchema = z
   .object({
     /** Interval check-ins for this zone (false = only stay windows, e.g. a migrated curfew zone). */
     intervalCheckins: z.boolean().default(true),
-    intervalMinutes: z.number().int().min(15).max(43_200).optional(),
+    intervalMinutes: z.number().int().min(1).max(43_200).optional(),
     graceMinutes: minutes(1440).optional(),
     /** "Must stay inside" windows (former curfew). Needs background tracking. */
     stayWindows: z.array(WindowSchema).max(MAX_WINDOWS).default([]),
@@ -121,7 +121,7 @@ const RequiredRuleSchema = z
     anywhere: z.boolean().default(false),
     /** `each` = every required zone has its own deadline; `any` = one shared deadline (v1 behaviour). */
     combine: z.enum(['each', 'any']).default('each'),
-    intervalMinutes: z.number().int().min(15).max(43_200).default(240),
+    intervalMinutes: z.number().int().min(1).max(43_200).default(240),
     graceMinutes: minutes(1440).default(5),
     quietHours: z.object({ start: hhmm, end: hhmm }).optional(),
     /** Optional warning N minutes before a required deadline. */
@@ -312,6 +312,15 @@ export const LockationConfigSchema = z
     if (R.forbidden.repeatWarningAfterMinutes !== null && R.forbidden.repeatWarningAfterMinutes >= R.forbidden.repeatEveryMinutes) {
       issue(['rules', 'forbidden', 'repeatWarningAfterMinutes'], 'the repeat warning must come before the next penalty');
     }
+    // Interval minimum: 1 min when background locations count as check-ins (automatic), else 5 min (manual check-ins).
+    const minInterval = minRequiredInterval(cfg);
+    if (R.required.intervalMinutes < minInterval) {
+      issue(['rules', 'required', 'intervalMinutes'], `at least ${minInterval} min ${minInterval === 1 ? '' : '(1 min with background tracking counting as check-ins)'}`.trim());
+    }
+    cfg.zones.forEach((z, i) => {
+      const v = z.required.intervalMinutes;
+      if (z.roles.includes('required') && v !== undefined && v < minInterval) issue(['zones', i, 'required', 'intervalMinutes'], `at least ${minInterval} min`);
+    });
     if (R.required.warnBeforeMinutes !== undefined && R.required.warnBeforeMinutes >= R.required.intervalMinutes) {
       issue(['rules', 'required', 'warnBeforeMinutes'], 'the warning must be shorter than the check-in interval');
     }
@@ -391,6 +400,12 @@ export function enabledRules(cfg: LockationConfig): string[] {
 
 // ---------- helpers used by engine, view and UI ----------
 
+/** Smallest allowed required interval: 1 min if background locations count as check-ins, otherwise 5 min (manual check-ins). */
+export function minRequiredInterval(cfg: Pick<LockationConfig, 'tracking'>): number {
+  const t = cfg.tracking;
+  return t.enabled && (t.countsAsCheckin || t.liveOnly) ? 1 : 5;
+}
+
 export function zonesWithRole(cfg: LockationConfig, role: ZoneRole): Zone[] {
   return cfg.zones.filter((z) => z.roles.includes(role));
 }
@@ -422,13 +437,30 @@ export function forbiddenTimings(cfg: LockationConfig, z: Zone): ForbiddenTiming
   };
 }
 
+/**
+ * OwnTracks report interval (seconds, move mode): half the shortest required interval when background locations count as
+ * check-ins (so a 1-minute deadline gets a report every 30 s), at most 300 s, at least 30 s.
+ */
+export function owntracksLocatorInterval(cfg: LockationConfig): number {
+  const t = cfg.tracking;
+  if (!t.enabled || !(t.countsAsCheckin || t.liveOnly) || !cfg.rules.required.enabled) return 300;
+  const intervals = [
+    ...(cfg.rules.required.anywhere || cfg.rules.required.combine === 'any' ? [cfg.rules.required.intervalMinutes] : []),
+    ...zonesWithRole(cfg, 'required')
+      .filter((z) => z.required.intervalCheckins)
+      .map((z) => z.required.intervalMinutes ?? cfg.rules.required.intervalMinutes),
+  ];
+  if (!intervals.length) return 300;
+  return Math.max(30, Math.min(300, Math.floor((Math.min(...intervals) * 60) / 2)));
+}
+
 /** Effective OwnTracks monitoring: 2 = move (frequent), 1 = significant (battery saving). */
 export function owntracksMonitoring(cfg: LockationConfig): 1 | 2 {
   const m = cfg.tracking.owntracksMode;
   if (m === 'move') return 2;
   if (m === 'significant') return 1;
   const forbidden = cfg.rules.forbidden.enabled && zonesWithRole(cfg, 'forbidden').length > 0;
-  return cfg.tracking.heartbeatMinutes < 60 || forbidden ? 2 : 1;
+  return cfg.tracking.heartbeatMinutes < 60 || forbidden || owntracksLocatorInterval(cfg) < 300 ? 2 : 1;
 }
 
 // ---------- v1 → v2 migration ----------

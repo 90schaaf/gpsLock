@@ -22,6 +22,8 @@ export interface OwnTracksConfigOptions {
   password: string;
   /** 1 = significant changes (battery saving), 2 = move (frequent). Default 1. */
   monitoring?: 1 | 2;
+  /** Report interval in seconds (move mode). Default 300. */
+  locatorInterval?: number;
 }
 
 /** `.otrc` configuration for HTTP mode (mode 3); monitoring 1 (significant) or 2 (move). */
@@ -37,7 +39,7 @@ export function owntracksConfiguration(o: OwnTracksConfigOptions) {
     tid: 'LO',
     monitoring: o.monitoring ?? 1,
     locatorDisplacement: 100,
-    locatorInterval: 300,
+    locatorInterval: o.locatorInterval ?? 300,
     extendedData: false,
     // Needed so the app accepts the `setWaypoints` command we return in HTTP responses.
     cmd: true,
@@ -99,8 +101,8 @@ export function owntracksWaypoints(config: LockationConfig, state?: LockationSta
 }
 
 /** Remote configuration change (e.g. switch between move and significant mode without pairing again). */
-export function owntracksSetMonitoring(monitoring: 1 | 2) {
-  return { _type: 'cmd', action: 'setConfiguration', configuration: { _type: 'configuration', monitoring } };
+export function owntracksSetMonitoring(monitoring: 1 | 2, locatorInterval?: number) {
+  return { _type: 'cmd', action: 'setConfiguration', configuration: { _type: 'configuration', monitoring, ...(locatorInterval ? { locatorInterval } : {}) } };
 }
 
 interface OwnTracksMessage {

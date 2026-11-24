@@ -13,6 +13,7 @@ import {
   loadState,
   migrateConfig,
   nextDueAt,
+  owntracksLocatorInterval,
   owntracksMonitoring,
   owntracksWaypoints,
   parseConfig,
@@ -495,5 +496,24 @@ describe('hunt control', () => {
   it('self-lock: the wearer may start but has no penalty-free abort', () => {
     const r = new Run(config({ start: 'keyholder' }));
     expect(allowedHuntActions(r.config, r.state, 'wearer', true)).toEqual(['start']);
+  });
+});
+
+describe('required interval minimum and OwnTracks report interval', () => {
+  const req = (tr: Record<string, unknown>, interval: number) =>
+    parseConfig({ version: 2, timezone: 'Europe/Zurich', zones: [zone('home', 'Home', HOME, { roles: ['required'] })], tracking: tr, rules: { required: { enabled: true, intervalMinutes: interval } } });
+  it('1 min with background check-ins, 5 min with manual check-ins only', () => {
+    expect(req({ enabled: true }, 1).ok).toBe(true);
+    expect(req({ enabled: true, countsAsCheckin: false }, 1).ok).toBe(false);
+    expect(req({ enabled: false }, 4).ok).toBe(false);
+    expect(req({ enabled: false }, 5).ok).toBe(true);
+  });
+  it('OwnTracks reports every half interval (30–300 s) and switches to move mode', () => {
+    const c = cfg({ version: 2, zones: [zone('home', 'Home', HOME, { roles: ['required'] })], tracking: { enabled: true, heartbeatMinutes: 180 }, rules: { required: { enabled: true, intervalMinutes: 2 } } });
+    expect(owntracksLocatorInterval(c)).toBe(60);
+    expect(owntracksMonitoring(c)).toBe(2);
+    const slow = cfg({ version: 2, zones: [zone('home', 'Home', HOME, { roles: ['required'] })], tracking: { enabled: true, heartbeatMinutes: 180 }, rules: { required: { enabled: true, intervalMinutes: 240 } } });
+    expect(owntracksLocatorInterval(slow)).toBe(300);
+    expect(owntracksMonitoring(slow)).toBe(1);
   });
 });

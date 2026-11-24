@@ -18,6 +18,7 @@ import {
   nextDueAt,
   type Notice,
   owntracksConfigLink,
+  owntracksLocatorInterval,
   owntracksMonitoring,
   owntracksSetMonitoring,
   owntracksWaypoints,
@@ -366,9 +367,10 @@ export class LockationService {
     const now = this.now();
     const creds = await this.store.createDevice(r.sessionId, now);
     const monitoring = owntracksMonitoring(r.config);
+    const locatorInterval = owntracksLocatorInterval(r.config);
     const state: LockationState = {
       ...r.state,
-      tracking: { ...r.state.tracking, deviceUser: creds.username, pairedAt: now.toISOString(), waypointsHash: undefined, monitoring },
+      tracking: { ...r.state.tracking, deviceUser: creds.username, pairedAt: now.toISOString(), waypointsHash: undefined, monitoring, locatorInterval },
     };
     await this.persist(r, state);
     await this.client
@@ -376,7 +378,7 @@ export class LockationService {
       .catch(() => undefined);
     await this.notify(r, [{ audience: 'keyholder', kind: 'tracking', title: 'Lockation: tracking set up', message: 'The wearer set up background tracking (waiting for the first location).', priority: 'default', key: `tracking:paired:${now.toISOString()}` }]);
     const opts = { url: endpointUrl, username: creds.username, password: creds.password };
-    return { link: owntracksConfigLink({ ...opts, monitoring }), ...opts, view: await this.view(r, state) };
+    return { link: owntracksConfigLink({ ...opts, monitoring, locatorInterval }), ...opts, view: await this.view(r, state) };
   }
 
   async unpairTracking(mainToken: string): Promise<SessionView> {
@@ -442,9 +444,10 @@ export class LockationService {
       state = { ...state, tracking: { ...state.tracking, waypointsHash: wp.hash } };
     }
     const monitoring = owntracksMonitoring(c.config);
-    if (state.tracking.monitoring !== monitoring) {
-      response.push(owntracksSetMonitoring(monitoring));
-      state = { ...state, tracking: { ...state.tracking, monitoring } };
+    const locatorInterval = owntracksLocatorInterval(c.config);
+    if (state.tracking.monitoring !== monitoring || (state.tracking.locatorInterval ?? 300) !== locatorInterval) {
+      response.push(owntracksSetMonitoring(monitoring, locatorInterval));
+      state = { ...state, tracking: { ...state.tracking, monitoring, locatorInterval } };
     }
     await this.persist(c, state);
     await this.notify(c, notices);
