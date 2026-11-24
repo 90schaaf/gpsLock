@@ -1,5 +1,6 @@
 import { render } from 'preact';
 import '../styles.css';
+import '../lib/iframe-height.js';
 import { CHASTER_ORIGINS, createBackend } from '../lib/bootstrap.js';
 import { ConfigBridge } from '../lib/config-bridge.js';
 import { ConfigApp } from './ConfigApp.js';
