@@ -395,3 +395,16 @@ describe('"when" on missed lists', () => {
     expect(t).toEqual([['add_time'], ['add_time', 'freeze'], ['add_time', 'pillory']]);
   });
 });
+
+describe('tracking view: signal due time', () => {
+  it('is last location + missing-signal time, respecting quiet hours', () => {
+    const c = cfg({ version: 2, tracking: { ...tracking, heartbeatMinutes: 60, quietHours: { start: '23:00', end: '07:00' } } });
+    const s = initialState(c, T0); // 12:00 Zurich
+    s.tracking.deviceUser = 'u';
+    s.tracking.lastSeenAt = minutes(T0, 30).toISOString();
+    const v = (st: LockationState) => buildSessionView({ role: 'wearer', isSelfLock: true, config: c, state: st, history: [], now: T0 }).tracking!;
+    expect(v(s).signalDueAt).toBe(minutes(T0, 90).toISOString());
+    s.tracking.lastSeenAt = '2026-06-01T20:30:00.000Z'; // 22:30 Zurich → due 23:30 is quiet → 07:00 + 60 min = 06:00Z
+    expect(v(s).signalDueAt).toBe('2026-06-02T06:00:00.000Z');
+  });
+});

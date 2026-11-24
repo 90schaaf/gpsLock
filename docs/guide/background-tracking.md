@@ -36,6 +36,11 @@ uses the phone's battery-friendly location services.
    - **connected** – a location arrived within the missing-signal time;
    - **no signal** – the last location is older than that.
 
+   Below it a live counter shows **"Next location expected by 14:32 · in 12:05"** – the latest time the next location must
+   arrive before the missing-signal rule applies (quiet hours respected). If it is late, it switches to **"Location delayed by
+   07:41"** and shows when the next missing-signal penalty is due. OwnTracks doesn't report on a fixed schedule (in battery-saving
+   mode only when you move), so this is a deadline, not a forecast of the next report.
+
    It turns **connected** only after the first location arrives. OwnTracks also receives
    your lock's zones (and the hunt checkpoints you can see), so it can report entering and leaving them precisely.
 7. Keep the OwnTracks **mode** the card tells you (*Move* or *Significant*). Lockation sets it when you connect and

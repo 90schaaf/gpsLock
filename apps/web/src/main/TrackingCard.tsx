@@ -3,6 +3,7 @@ import type { SessionView, TrackingStatus } from '@lockation/core';
 import qrcode from 'qrcode-generator';
 import { useMemo, useState } from 'preact/hooks';
 import type { Backend, PairingResult } from '../lib/backend.js';
+import { clockTime, formatCountdown, useNow } from '../lib/time-ui.js';
 
 export const OWNTRACKS_IOS = 'https://apps.apple.com/app/owntracks/id692424691';
 export const OWNTRACKS_ANDROID = 'https://play.google.com/store/apps/details?id=org.owntracks.android';
@@ -93,6 +94,7 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
         Last location: {ago(t.lastSeenAt)} · {t.updates} updates · missing signal after {Math.round(t.heartbeatMinutes / 60 * 10) / 10} h
         {t.missedCount > 0 && ` · missed ${t.missedCount}×`}
       </div>
+      <SignalCountdown view={view} />
       {view.presentZones.length > 0 && <div class="small">Currently in: {view.presentZones.join(', ')}</div>}
       {t.mode && isWearer && (
         <div class="small" data-testid="tracking-mode">
@@ -167,6 +169,37 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
         </div>
       )}
       {!isWearer && !t.paired && <p class="small">The wearer has not connected a phone yet.</p>}
+    </div>
+  );
+}
+
+/**
+ * Live countdown to the latest time the next location must arrive, or – once that has passed – how long it is delayed
+ * and when the next missing-signal penalty is due. Only shown once a phone is set up.
+ */
+export function SignalCountdown({ view, nowMs }: { view: SessionView; nowMs?: number }) {
+  const ticking = useNow(1000);
+  const now = nowMs ?? ticking;
+  const t = view.tracking;
+  if (!t || !t.paired || !t.signalDueAt) return null;
+  const due = Date.parse(t.signalDueAt);
+  const tz = view.timezone;
+  if (now < due) {
+    return (
+      <div class="small" data-testid="signal-countdown">
+        ⏱ Next location expected by <strong>{clockTime(t.signalDueAt, tz, now)}</strong> · in <strong>{formatCountdown(due - now)}</strong>
+      </div>
+    );
+  }
+  const next = t.nextHeartbeat ? Date.parse(t.nextHeartbeat) : NaN;
+  return (
+    <div class="small warn-text" data-testid="signal-countdown">
+      ⚠ Location delayed by <strong>{formatCountdown(now - due)}</strong> (expected by {clockTime(t.signalDueAt, tz, now)})
+      {Number.isFinite(next) && next > now && (
+        <>
+          {' '}· next missing-signal penalty {clockTime(t.nextHeartbeat!, tz, now)} · in {formatCountdown(next - now)}
+        </>
+      )}
     </div>
   );
 }

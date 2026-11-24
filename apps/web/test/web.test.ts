@@ -532,3 +532,24 @@ describe('UI smoke tests (jsdom)', () => {
     render(null, el);
   });
 });
+
+describe('signal countdown', () => {
+  it('counts down to the expected location and up when delayed', async () => {
+    const { h, render } = await import('preact');
+    const { SignalCountdown } = await import('../src/main/TrackingCard.js');
+    const el = document.createElement('div');
+    const due = '2026-06-01T10:20:00.000Z';
+    const view: any = { timezone: 'UTC', tracking: { paired: true, signalDueAt: due, nextHeartbeat: '2026-06-01T10:40:00.000Z' } };
+    const show = (now: string) => {
+      render(h(SignalCountdown, { view, nowMs: Date.parse(now) }), el);
+      return el.textContent ?? '';
+    };
+    expect(show('2026-06-01T10:15:30.000Z')).toMatch(/Next location expected by .* in 00:04:30/);
+    const late = show('2026-06-01T10:27:41.000Z');
+    expect(late).toMatch(/Location delayed by 00:07:41/);
+    expect(late).toMatch(/next missing-signal penalty .* in 00:12:19/);
+    view.tracking.paired = false;
+    expect(show('2026-06-01T10:15:00.000Z')).toBe('');
+    render(null, el);
+  });
+});

@@ -2,7 +2,7 @@
 import { activeRoles, forbiddenTimings, type LockationConfig, owntracksMonitoring, type ZoneRole, zonesWithRole } from './config.js';
 import { describeConsequence, describeWhen, type Consequence } from './consequences.js';
 import { type CheckinRecord, type PlannedConsequence, visibleCheckpoints } from './engine.js';
-import { earliestDeadline, effectivePrivacy, type LockationState, requiredSlots } from './state.js';
+import { earliestDeadline, effectivePrivacy, type LockationState, nextHeartbeatFrom, requiredSlots } from './state.js';
 import { activeWindowStart, formatLocalTime, formatWindow, MINUTE } from './time.js';
 
 export type Role = 'wearer' | 'keyholder';
@@ -100,6 +100,11 @@ export interface SessionView {
     missedCount: number;
     heartbeatMinutes: number;
     updates: number;
+    /**
+     * Latest time the next location must arrive (last location + missing-signal time, quiet hours respected).
+     * After it the signal counts as delayed; `nextHeartbeat` is the next missing-signal penalty.
+     */
+    signalDueAt: string;
     /** OwnTracks mode the phone should use. */
     mode: 'move' | 'significant';
   };
@@ -298,6 +303,7 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
       missedCount: state.tracking.missedCount,
       heartbeatMinutes: config.tracking.heartbeatMinutes,
       updates: state.tracking.trackedCount,
+      signalDueAt: nextHeartbeatFrom(config, new Date(state.tracking.lastSeenAt ?? state.startedAt)).toISOString(),
       mode: owntracksModeName(config),
     };
   }
