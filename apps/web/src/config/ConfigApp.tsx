@@ -1,95 +1,52 @@
 import {
-  minRequiredInterval,
   DISCLAIMER_VERSION,
   disclaimerAccepted,
-  fmtMinutes,
-  forbiddenTimings,
-  MAX_PLACES,
-  MIN_RADIUS_M,
-  SMALL_RADIUS_HINT_M,
   MAX_RADIUS_M,
-  owntracksMonitoring,
+  MIN_RADIUS_M,
   parseConfig,
-  zonesWithRole,
   type ConfigIssue,
-  type KeyholderNotifyKind,
   type LockationConfig,
   type Zone,
-  type ZoneRole,
 } from '@lockation/core';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { LeafletMap, ZONE_COLORS, type MapCircle } from '../components/LeafletMap.js';
 import { ApiError, type Backend, type CommandInfo } from '../lib/backend.js';
 import { ConfigBridge } from '../lib/config-bridge.js';
 import { isEmbedded } from '../lib/hash.js';
-import { ackStillValid, createReachabilityChecker, needsConfirmation, statusText, unconfirmedPlaces, type ReachabilityAck, type ReachStatus } from '../lib/reachability.js';
+import { ackStillValid, createReachabilityChecker, needsConfirmation, unconfirmedPlaces } from '../lib/reachability.js';
 import { countByTab, issueLabel, issuesForTab, IssuesContext } from './issues.js';
-import { ConsequenceEditor, NullableMinutesField, NumberField, OverrideField, TimeRange, WindowsEditor } from './editors.js';
-import { applyRoles, droppedRolesWithSettings, forbiddenTimeline, heartbeatWarningText, toggleRole, type RoleChoice } from './helpers.js';
+import { checked, IssueSummary, newId, placesFull as placesLimitReached, TABS, val, zoneColor, type Tab, type TabProps } from './shared.js';
 import { useReachability, type PlaceRef, type ReachCheck } from './useReachability.js';
+import { AntiCheatTab } from './tabs/AntiCheatTab.js';
+import { FileTab } from './tabs/FileTab.js';
+import { ForbiddenTab } from './tabs/ForbiddenTab.js';
+import { HuntTab } from './tabs/HuntTab.js';
+import { NotificationsTab } from './tabs/NotificationsTab.js';
+import { PrivacyTab } from './tabs/PrivacyTab.js';
+import { RequiredTab } from './tabs/RequiredTab.js';
+import { RewardTab } from './tabs/RewardTab.js';
+import { TrackingTab } from './tabs/TrackingTab.js';
+import { TravelTab } from './tabs/TravelTab.js';
+import { ZonesTab } from './tabs/ZonesTab.js';
 
-type Tab = 'zones' | 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'tracking' | 'notify' | 'anticheat' | 'privacy' | 'file';
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'zones', label: '🗺 Zones' },
-  { id: 'required', label: '⏱ Required' },
-  { id: 'forbidden', label: '⛔ Forbidden' },
-  { id: 'reward', label: '🏆 Reward' },
-  { id: 'travel', label: '🚶 Travel' },
-  { id: 'hunt', label: '🧭 Hunt' },
-  { id: 'tracking', label: '📡 Tracking' },
-  { id: 'notify', label: '🔔 Notifications' },
-  { id: 'anticheat', label: '🛡 Anti-cheat' },
-  { id: 'privacy', label: '🔒 Privacy' },
-  { id: 'file', label: '💾 Import / Export' },
-];
+export { ReachNote } from './shared.js';
+export { travelExample } from './tabs/TravelTab.js';
+export { importConfigText, SettingsFile } from './tabs/FileTab.js';
+export { checkinMode, setCheckinMode, type CheckinMode } from './tabs/TrackingTab.js';
 
-const ROLE_CHIPS: { id: RoleChoice; label: string }[] = [
-  { id: 'required', label: '⏱ Required' },
-  { id: 'reward', label: '🏆 Reward' },
-  { id: 'forbidden', label: '⛔ Forbidden' },
-  { id: 'neutral', label: 'Neutral' },
-];
-
-const KEYHOLDER_SWITCHES: { id: KeyholderNotifyKind; label: string; help: string }[] = [
-  { id: 'penalty', label: 'Penalty applied', help: 'Any rule added a penalty, e.g. "Bar: +1 h".' },
-  { id: 'forbiddenEntered', label: 'Forbidden zone entered', help: 'At the first warning time – before the first penalty.' },
-  { id: 'tracking', label: 'Background tracking', help: 'Missing signal, tracking set up or stopped.' },
-  { id: 'requiredMissed', label: 'Required check-in missed', help: 'A required check-in deadline passed.' },
-  { id: 'requiredDone', label: 'Required check-in done', help: 'Every successful required check-in.' },
-  { id: 'hunt', label: 'Scavenger hunt', help: 'Checkpoint found, hunt completed or failed.' },
-  { id: 'reward', label: 'Reward earned', help: 'The wearer earned a reward in a reward zone.' },
-  { id: 'verification', label: 'Verification picture', help: 'A verification picture was requested.' },
-];
-
-const newId = (prefix: string) => `${prefix}${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
-
-const km = (n: number) => `${Math.round(n * 100) / 100} km`;
-const rewards = (n: number) => `${n} reward${n === 1 ? '' : 's'}`;
-const offOr = (v: number | null) => (v === null ? 'off' : fmtMinutes(v));
-const val = (e: Event) => (e.target as HTMLInputElement).value;
-const checked = (e: Event) => (e.target as HTMLInputElement).checked;
-
-/** Worked example for the travel tab, built from the current settings. */
-export function travelExample(stepKm: number, maxKmPerCheckin: number): string {
-  if (!(stepKm > 0) || !(maxKmPerCheckin > 0)) return '';
-  const moved = stepKm * 2.5;
-  const counted = Math.min(moved, maxKmPerCheckin);
-  const steps = Math.floor(counted / stepKm + 1e-9);
-  const rest = counted - steps * stepKm;
-  const first =
-    `Example: moving ${km(moved)} between two check-ins counts ${km(counted)} → ${rewards(steps)}` +
-    (rest > 1e-9 ? `, ${km(rest)} carried over.` : '.');
-  const jump = Math.max(40, Math.ceil(maxKmPerCheckin * 4));
-  const second = ` A ${km(jump)} train ride counts only ${km(maxKmPerCheckin)} → ${rewards(Math.floor(maxKmPerCheckin / stepKm + 1e-9))}.`;
-  return first + second;
-}
-
-function zoneColor(z: Zone): string {
-  if (z.roles.includes('forbidden')) return ZONE_COLORS.forbidden;
-  if (z.roles.includes('required')) return ZONE_COLORS.required;
-  if (z.roles.includes('reward')) return ZONE_COLORS.reward;
-  return ZONE_COLORS.neutral;
-}
+const TAB_COMPONENTS: Record<Tab, (p: TabProps) => preact.JSX.Element> = {
+  zones: ZonesTab,
+  required: RequiredTab,
+  forbidden: ForbiddenTab,
+  reward: RewardTab,
+  travel: TravelTab,
+  hunt: HuntTab,
+  tracking: TrackingTab,
+  notify: NotificationsTab,
+  anticheat: AntiCheatTab,
+  privacy: PrivacyTab,
+  file: FileTab,
+};
 
 function defaultReachCheck(): ReachCheck | null {
   return typeof fetch === 'function' ? createReachabilityChecker() : null;
@@ -218,14 +175,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
 
   const accepted = disclaimerAccepted(config);
   const tabIssues = issuesForTab(issues, tab, config);
-  const placeCount = config.zones.length + R.hunt.checkpoints.length;
-  const placesFull = placeCount >= MAX_PLACES;
-  const placesInfo = (
-    <p class={`small ${placesFull ? 'warn-text' : 'muted'}`} data-testid="place-count" style={{ margin: 0 }}>
-      {placeCount} / {MAX_PLACES} places used (zones + hunt checkpoints).
-      {placesFull && ' Limit reached – delete a zone or checkpoint to add a new one.'}
-    </p>
-  );
+  const placesFull = placesLimitReached(config);
 
   function addAt(p: { lat: number; lng: number }, name?: string) {
     if (!accepted) {
@@ -262,19 +212,6 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
     });
   }
 
-  function changeRole(z: Zone, choice: RoleChoice) {
-    const next = toggleRole(z.roles, choice);
-    const lost = droppedRolesWithSettings(z, next);
-    if (lost.length && !confirm(`Remove the ${lost.join(' and ')} settings of "${z.name}"? Its per-zone ${lost.join('/')} settings will be lost.`)) return;
-    edit((d) => {
-      const i = d.zones.findIndex((x) => x.id === z.id);
-      if (i < 0) return;
-      d.zones[i] = applyRoles(d.zones[i]!, next);
-      // Marking the first zone with a role switches the matching rule on.
-      for (const r of next) if (!z.roles.includes(r) && !d.rules[r].enabled && zonesWithRole(d, r).length === 1) d.rules[r].enabled = true;
-    });
-  }
-
   /** One confirmation for all currently flagged places. */
   function ackAll() {
     const at = new Date().toISOString();
@@ -286,29 +223,9 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
     });
   }
 
-  function setAck(kind: 'zone' | 'checkpoint', id: string, status: ReachStatus | undefined, on: boolean) {
-    edit((d) => {
-      const p = kind === 'zone' ? d.zones.find((x) => x.id === id) : d.rules.hunt.checkpoints.find((x) => x.id === id);
-      if (!p) return;
-      if (on && status?.state === 'out_of_reach') p.reachabilityAck = { reasons: status.reasons.slice(0, 10), at: new Date().toISOString() };
-      else delete p.reachabilityAck;
-    });
-  }
-
   const mapUsable = tab === 'zones' || tab === 'hunt';
-  const roleZones = (r: ZoneRole) => zonesWithRole(config, r);
-  const noZonesHint = (r: string) => (
-    <p class="small muted" style={{ margin: 0 }}>
-      No zone has the {r} role yet – mark zones as <strong>{r}</strong> in the <button class="link" onClick={() => setTab('zones')}>Zones tab</button>.
-    </p>
-  );
-  const stayWindowsUsed = roleZones('required').some((z) => z.required.stayWindows.length > 0);
-  const ruleTimings = {
-    firstWarning: R.forbidden.firstWarningAfterMinutes,
-    firstPenalty: R.forbidden.firstPenaltyAfterMinutes,
-    repeatEvery: R.forbidden.repeatEveryMinutes,
-    repeatWarning: R.forbidden.repeatWarningAfterMinutes,
-  };
+  const TabContent = TAB_COMPONENTS[tab];
+  const tabProps: TabProps = { config, edit, editZone, commands, reach, selected, setSelected, setTab, running };
 
   return (
     <IssuesContext.Provider value={issues}>
@@ -410,521 +327,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
         </div>
       )}
 
-      {tab === 'zones' && (
-        <div class="card">
-          <h2>Zones</h2>
-          {placesInfo}
-          <ul class="plain zone-list">
-            {config.zones.map((z, i) => (
-              <li key={z.id} class={z.id === selected ? 'selected' : ''} onClick={() => setSelected(z.id)} data-testid="zone-item">
-                <span class="dot" style={{ background: zoneColor(z) }} />
-                <input value={z.name} maxLength={60} aria-label="zone name" onInput={(e) => edit((d) => { d.zones[i]!.name = val(e); })} />
-                <input type="number" style={{ width: '90px' }} min={MIN_RADIUS_M} max={MAX_RADIUS_M} value={z.radiusM} aria-label="radius" onInput={(e) => edit((d) => { d.zones[i]!.radiusM = Number(val(e)); })} />
-                <span class="small muted">m</span>
-                <button class="link danger" aria-label="delete zone" onClick={(e) => { e.stopPropagation(); edit((d) => { d.zones.splice(i, 1); }); }}>✕</button>
-                <div class="chips full" role="group" aria-label="zone role">
-                  {ROLE_CHIPS.map((c) => {
-                    const on = c.id === 'neutral' ? z.roles.length === 0 : z.roles.includes(c.id);
-                    return (
-                      <button key={c.id} type="button" class={`chip${on ? ' active' : ''}`} aria-pressed={on} onClick={(e) => { e.stopPropagation(); changeRole(z, c.id); }}>
-                        {c.label}
-                      </button>
-                    );
-                  })}
-                  <select
-                    class="chip-select"
-                    aria-label="zone matching"
-                    value={z.matchMode ?? ''}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => edit((d) => { const v = (e.target as HTMLSelectElement).value; if (v) d.zones[i]!.matchMode = v as 'strict'; else delete d.zones[i]!.matchMode; })}
-                  >
-                    <option value="">Matching: default ({config.matchMode})</option>
-                    <option value="lenient">Matching: lenient</option>
-                    <option value="strict">Matching: strict</option>
-                  </select>
-                </div>
-                {(z.required.stayWindows.length > 0 && z.roles.includes('required')) || (z.forbidden.windows.length > 0 && z.roles.includes('forbidden')) ? (
-                  <span class="small muted full">🕑 {z.roles.includes('required') ? 'stay inside' : 'forbidden'} {(z.roles.includes('required') ? z.required.stayWindows : z.forbidden.windows).map((w) => `${w.start}–${w.end}`).join(', ')}</span>
-                ) : null}
-                {z.radiusM < SMALL_RADIUS_HINT_M && (
-                  <span class="small muted full" data-testid="small-radius-hint">
-                    ⚠ Small zone: phone GPS indoors is often less precise than {z.radiusM} m – check-ins may be judged "outside".
-                  </span>
-                )}
-                <ReachNote status={reach[z.id]} ack={z.reachabilityAck} onAck={(on) => setAck('zone', z.id, reach[z.id], on)} />
-                <details class="zone-details full" data-testid="zone-actions" onClick={(e) => e.stopPropagation()} open={z.actions.onEnter.length + z.actions.onLeave.length > 0 && z.id === selected}>
-                  <summary class="small">
-                    ⚡ Actions on enter / leave{z.actions.onEnter.length + z.actions.onLeave.length ? ` (${z.actions.onEnter.length + z.actions.onLeave.length})` : ''}
-                  </summary>
-                  <div class="stack">
-                    <p class="small muted" style={{ margin: 0 }}>
-                      Independent of the role – also for neutral zones. Leaving counts once the wearer is clearly outside (with background tracking at
-                      once, otherwise at the next check-in outside).
-                    </p>
-                    <ConsequenceEditor label="When entering" value={z.actions.onEnter} commands={commands} onChange={(v) => edit((d) => { d.zones[i]!.actions.onEnter = v; })} />
-                    <ConsequenceEditor label="When leaving" value={z.actions.onLeave} commands={commands} onChange={(v) => edit((d) => { d.zones[i]!.actions.onLeave = v; })} />
-                    <div class="grid2">
-                      <NumberField path={`zones.${i}.actions.minStayMinutes`} label="Leaving counts only after at least" suffix="minutes inside" min={0} value={z.actions.minStayMinutes} hint="E.g. 45 min at the gym before 'unfreeze'." onChange={(v) => edit((d) => { d.zones[i]!.actions.minStayMinutes = v ?? 0; })} />
-                      <NumberField path={`zones.${i}.actions.cooldownMinutes`} label="Cooldown" suffix="minutes" min={0} value={z.actions.cooldownMinutes} hint="Minimum time between two runs of the same action." onChange={(v) => edit((d) => { d.zones[i]!.actions.cooldownMinutes = v ?? 0; })} />
-                    </div>
-                  </div>
-                </details>
-              </li>
-            ))}
-          </ul>
-          {config.zones.length === 0 && <p class="muted">No zones yet – tap the map or search an address.</p>}
-          <p class="small muted">
-            Roles: <strong>Required</strong> and/or <strong>Reward</strong>, or <strong>Forbidden</strong>, or <strong>Neutral</strong> (no rule – for orientation or zone actions). The rule tabs list the zones of their role. Every zone can also run <strong>actions on enter / leave</strong>.
-          </p>
-          <div class="grid2" style={{ marginTop: '10px' }}>
-            <label class="field">
-              Zone matching (default)
-              <select value={config.matchMode} onChange={(e) => edit((d) => { d.matchMode = (e.target as HTMLSelectElement).value as 'lenient' | 'strict'; })}>
-                <option value="lenient">Lenient – position inside zone</option>
-                <option value="strict">Strict – whole accuracy circle inside</option>
-              </select>
-            </label>
-            <label class="field">
-              Timezone (for time windows, quiet hours & daily limits)
-              <input value={config.timezone} onInput={(e) => edit((d) => { d.timezone = val(e); })} />
-            </label>
-          </div>
-        </div>
-      )}
-
-      {tab === 'required' && (
-        <Section title="Required zones" enabled={R.required.enabled} onToggle={(v) => edit((d) => { d.rules.required.enabled = v; })}
-          help={'The wearer must check in regularly inside each required zone (and/or anywhere). Required zones can also have "must stay inside" time windows.'}>
-          <div class="grid2">
-            <label class="check" style={{ alignItems: 'flex-start' }}>
-              <input type="checkbox" checked={R.required.anywhere} onChange={(e) => edit((d) => { d.rules.required.anywhere = checked(e); })} />
-              <span>
-                Also require a check-in anywhere (proves the position)
-                <span class="small muted" style={{ display: 'block' }}>
-                  An extra deadline that doesn't depend on a zone: the wearer must check in somewhere at least once per interval, so their
-                  position is known regularly (useful with forbidden zones). With background tracking every location counts.
-                </span>
-              </span>
-            </label>
-            <NumberField path="rules.required.intervalMinutes" label="Interval (default)" suffix="minutes" min={minRequiredInterval(config)} value={R.required.intervalMinutes} hint={`${fmtMinutes(R.required.intervalMinutes)} · minimum ${minRequiredInterval(config)} min (${minRequiredInterval(config) === 3 ? 'background tracking' : 'manual check-ins; 3 min with background tracking'})`} onChange={(v) => edit((d) => { d.rules.required.intervalMinutes = v ?? 240; })} />
-            <NumberField label="Grace period (default)" suffix="minutes" min={0} value={R.required.graceMinutes} onChange={(v) => edit((d) => { d.rules.required.graceMinutes = v ?? 0; })} />
-            <NumberField path="rules.required.warnBeforeMinutes" label="Warn before a deadline" suffix="minutes, empty = off" optional min={5} value={R.required.warnBeforeMinutes} hint="Sent to the wearer's notifications (ntfy) if set up." onChange={(v) => edit((d) => { d.rules.required.warnBeforeMinutes = v; })} />
-            <TimeRange label="Quiet hours (no deadline inside)" value={R.required.quietHours} onChange={(v) => edit((d) => { d.rules.required.quietHours = v; })} />
-          </div>
-          <ConsequenceEditor label="When a check-in is missed (all zones)" repeating="miss" value={R.required.onMissed} commands={commands} onChange={(v) => edit((d) => { d.rules.required.onMissed = v; })} />
-          <ConsequenceEditor label="When checking in outside the required zones" value={R.required.onOutside} commands={commands} onChange={(v) => edit((d) => { d.rules.required.onOutside = v; })} />
-          <ConsequenceEditor label="On every successful check-in (all zones)" value={R.required.onSuccess} commands={commands} onChange={(v) => edit((d) => { d.rules.required.onSuccess = v; })} />
-
-          <h3>Required zones</h3>
-          {roleZones('required').length === 0 && noZonesHint('required')}
-          {roleZones('required').map((z) => (
-            <details class="zone-details" key={z.id} open={z.id === selected} data-testid="required-zone">
-              <summary>
-                <span class="dot" style={{ background: zoneColor(z) }} /> <strong>{z.name}</strong>{' '}
-                <span class="small muted">
-                  {z.required.intervalCheckins ? `every ${fmtMinutes(z.required.intervalMinutes ?? R.required.intervalMinutes)}` : 'no interval check-ins'}
-                  {z.required.stayWindows.length > 0 && ` · stay inside ${z.required.stayWindows.map((w) => `${w.start}–${w.end}`).join(', ')}`}
-                </span>
-              </summary>
-              <div class="stack">
-                <label class="check">
-                  <input type="checkbox" checked={z.required.intervalCheckins} onChange={(e) => editZone(z.id, (x) => { x.required.intervalCheckins = checked(e); })} />
-                  Interval check-ins in this zone
-                </label>
-                {z.required.intervalCheckins && (
-                  <div class="grid2">
-                    <OverrideField path={`zones.${config.zones.indexOf(z)}.required.intervalMinutes`} label="Interval" suffix="minutes" min={minRequiredInterval(config)} value={z.required.intervalMinutes} inherited={R.required.intervalMinutes} format={fmtMinutes} onChange={(v) => editZone(z.id, (x) => { x.required.intervalMinutes = v; })} />
-                    <OverrideField label="Grace period" suffix="minutes" min={0} value={z.required.graceMinutes} inherited={R.required.graceMinutes} format={fmtMinutes} onChange={(v) => editZone(z.id, (x) => { x.required.graceMinutes = v; })} />
-                  </div>
-                )}
-                <div class="small"><strong>Must stay inside during</strong> <span class="muted">(e.g. 22:00–06:00 = stay home at night)</span></div>
-                <WindowsEditor value={z.required.stayWindows} addLabel="Add stay-inside window" onChange={(v) => editZone(z.id, (x) => { x.required.stayWindows = v; })} />
-                {z.required.stayWindows.length > 0 && !T.enabled && (
-                  <div class="notice small" data-testid="needs-tracking">
-                    Stay-inside windows need background tracking (the wearer's phone reports the location with OwnTracks).{' '}
-                    <button onClick={() => edit((d) => { d.tracking.enabled = true; })}>Enable background tracking</button>
-                  </div>
-                )}
-                <ConsequenceEditor label={`Extra when the check-in in ${z.name} is missed`} repeating="miss" value={z.required.onMissed} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.required.onMissed = v; })} />
-                <ConsequenceEditor label={`Extra on a successful check-in in ${z.name}`} value={z.required.onSuccess} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.required.onSuccess = v; })} />
-                {z.required.stayWindows.length > 0 && (
-                  <ConsequenceEditor label={`Extra when outside ${z.name} during a stay window`} value={z.required.onOutsideDuringWindow} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.required.onOutsideDuringWindow = v; })} />
-                )}
-              </div>
-            </details>
-          ))}
-          {stayWindowsUsed && (
-            <>
-              <h3>Stay-inside windows (all zones)</h3>
-              <NumberField label="At most once every" suffix="minutes" min={0} value={R.required.windowCooldownMinutes} onChange={(v) => edit((d) => { d.rules.required.windowCooldownMinutes = v ?? 60; })} />
-              <ConsequenceEditor label="When outside during a stay window" value={R.required.onOutsideDuringWindow} commands={commands} onChange={(v) => edit((d) => { d.rules.required.onOutsideDuringWindow = v; })} />
-            </>
-          )}
-        </Section>
-      )}
-
-      {tab === 'forbidden' && (
-        <Section title="Forbidden zones" enabled={R.forbidden.enabled} onToggle={(v) => edit((d) => { d.rules.forbidden.enabled = v; })}
-          help="Staying inside a forbidden zone escalates: a warning, then a first penalty, then a penalty at regular intervals until the wearer has left. The timeline needs background tracking – a manual check-in inside is penalised immediately.">
-          {!T.enabled && <p class="small notice" style={{ margin: 0 }}>Without background tracking only manual check-ins inside are penalised (at most once per repeat interval).</p>}
-          <div class="grid2">
-            <NullableMinutesField path="rules.forbidden.firstWarningAfterMinutes" label="First warning" value={R.forbidden.firstWarningAfterMinutes} fallback={2} min={0} onChange={(v) => edit((d) => { d.rules.forbidden.firstWarningAfterMinutes = v ?? null; })} />
-            <NumberField label="First penalty after" suffix="minutes inside" min={0} value={R.forbidden.firstPenaltyAfterMinutes} onChange={(v) => edit((d) => { d.rules.forbidden.firstPenaltyAfterMinutes = v ?? 0; })} />
-            <NumberField label="Then a penalty every" suffix="minutes, min. 5" min={5} value={R.forbidden.repeatEveryMinutes} onChange={(v) => edit((d) => { d.rules.forbidden.repeatEveryMinutes = v ?? 5; })} />
-            <NullableMinutesField path="rules.forbidden.repeatWarningAfterMinutes" label="Warning after each penalty" value={R.forbidden.repeatWarningAfterMinutes} fallback={1} min={0} onChange={(v) => edit((d) => { d.rules.forbidden.repeatWarningAfterMinutes = v ?? null; })} />
-          </div>
-          <p class="small muted" data-testid="forbidden-timeline" style={{ margin: 0 }}>Default timeline: {forbiddenTimeline(ruleTimings)}</p>
-          <ConsequenceEditor label="Penalty (all forbidden zones)" repeating="penalty" value={R.forbidden.onEnter} commands={commands} onChange={(v) => edit((d) => { d.rules.forbidden.onEnter = v; })} />
-
-          <h3>Forbidden zones</h3>
-          {roleZones('forbidden').length === 0 && noZonesHint('forbidden')}
-          {roleZones('forbidden').map((z) => {
-            const t = forbiddenTimings(config, z);
-            const always = z.forbidden.windows.length === 0;
-            return (
-              <details class="zone-details" key={z.id} open={z.id === selected} data-testid="forbidden-zone">
-                <summary>
-                  <span class="dot" style={{ background: zoneColor(z) }} /> <strong>{z.name}</strong>{' '}
-                  <span class="small muted">{always ? 'always' : `during ${z.forbidden.windows.map((w) => `${w.start}–${w.end}`).join(', ')}`}</span>
-                </summary>
-                <div class="stack">
-                  <div class="row">
-                    <label class="check">
-                      <input type="radio" name={`fw-${z.id}`} checked={always} onChange={() => editZone(z.id, (x) => { x.forbidden.windows = []; })} />
-                      Always forbidden
-                    </label>
-                    <label class="check">
-                      <input type="radio" name={`fw-${z.id}`} checked={!always} onChange={() => editZone(z.id, (x) => { if (!x.forbidden.windows.length) x.forbidden.windows = [{ start: '20:00', end: '02:00' }]; })} />
-                      Only during
-                    </label>
-                  </div>
-                  {!always && <WindowsEditor value={z.forbidden.windows} onChange={(v) => editZone(z.id, (x) => { x.forbidden.windows = v; })} />}
-                  <div class="grid2">
-                    <NullableMinutesField path={`zones.${config.zones.indexOf(z)}.forbidden.firstWarningAfterMinutes`} label="First warning" value={z.forbidden.firstWarningAfterMinutes} fallback={2} min={0} inherited={{ value: R.forbidden.firstWarningAfterMinutes, format: offOr }} onChange={(v) => editZone(z.id, (x) => { x.forbidden.firstWarningAfterMinutes = v; })} />
-                    <OverrideField label="First penalty after" suffix="minutes" min={0} value={z.forbidden.firstPenaltyAfterMinutes} inherited={R.forbidden.firstPenaltyAfterMinutes} format={fmtMinutes} onChange={(v) => editZone(z.id, (x) => { x.forbidden.firstPenaltyAfterMinutes = v; })} />
-                    <OverrideField label="Then every" suffix="minutes, min. 5" min={5} value={z.forbidden.repeatEveryMinutes} inherited={R.forbidden.repeatEveryMinutes} format={fmtMinutes} onChange={(v) => editZone(z.id, (x) => { x.forbidden.repeatEveryMinutes = v; })} />
-                    <NullableMinutesField path={`zones.${config.zones.indexOf(z)}.forbidden.repeatWarningAfterMinutes`} label="Warning after each penalty" value={z.forbidden.repeatWarningAfterMinutes} fallback={1} min={0} inherited={{ value: R.forbidden.repeatWarningAfterMinutes, format: offOr }} onChange={(v) => editZone(z.id, (x) => { x.forbidden.repeatWarningAfterMinutes = v; })} />
-                  </div>
-                  <p class="small muted" style={{ margin: 0 }}>{z.name}: {forbiddenTimeline(t)}</p>
-                  <ConsequenceEditor label={`Extra punishment in ${z.name} (after the common penalty)`} repeating="penalty" value={z.forbidden.onEnter} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.forbidden.onEnter = v; })} />
-                </div>
-              </details>
-            );
-          })}
-        </Section>
-      )}
-
-      {tab === 'reward' && (
-        <Section title="Reward zones" enabled={R.reward.enabled} onToggle={(v) => edit((d) => { d.rules.reward.enabled = v; })} help="Checking in at a goal location (gym, work, …) gives a reward.">
-          <div class="grid2">
-            <NumberField label="Cooldown per zone (default)" suffix="minutes" min={0} value={R.reward.cooldownMinutes} onChange={(v) => edit((d) => { d.rules.reward.cooldownMinutes = v ?? 0; })} />
-            <NumberField label="Max rewards per day – all zones" min={1} value={R.reward.maxPerDay} onChange={(v) => edit((d) => { d.rules.reward.maxPerDay = v ?? 1; })} />
-            <NumberField label="Minimum stay (default)" suffix="minutes, 0 = immediately" min={0} value={R.reward.dwellMinutes} onChange={(v) => edit((d) => { d.rules.reward.dwellMinutes = v ?? 0; })} />
-          </div>
-          <ConsequenceEditor label="Reward (all reward zones)" value={R.reward.onEnter} commands={commands} onChange={(v) => edit((d) => { d.rules.reward.onEnter = v; })} />
-          <h3>Reward zones</h3>
-          {roleZones('reward').length === 0 && noZonesHint('reward')}
-          {roleZones('reward').map((z) => (
-            <details class="zone-details" key={z.id} open={z.id === selected} data-testid="reward-zone">
-              <summary>
-                <span class="dot" style={{ background: ZONE_COLORS.reward }} /> <strong>{z.name}</strong>{' '}
-                <span class="small muted">max {z.reward.maxPerDay ?? R.reward.maxPerDay}× per day</span>
-              </summary>
-              <div class="stack">
-                <div class="grid2">
-                  <OverrideField label="Cooldown" suffix="minutes" min={0} value={z.reward.cooldownMinutes} inherited={R.reward.cooldownMinutes} format={fmtMinutes} onChange={(v) => editZone(z.id, (x) => { x.reward.cooldownMinutes = v; })} />
-                  <OverrideField label="Max per day" min={1} value={z.reward.maxPerDay} inherited={R.reward.maxPerDay} onChange={(v) => editZone(z.id, (x) => { x.reward.maxPerDay = v; })} />
-                  <OverrideField label="Minimum stay" suffix="minutes" min={0} value={z.reward.dwellMinutes} inherited={R.reward.dwellMinutes} format={fmtMinutes} onChange={(v) => editZone(z.id, (x) => { x.reward.dwellMinutes = v; })} />
-                </div>
-                <ConsequenceEditor label={`Extra reward in ${z.name}`} value={z.reward.onEnter} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.reward.onEnter = v; })} />
-              </div>
-            </details>
-          ))}
-        </Section>
-      )}
-
-      {tab === 'travel' && (
-        <Section title="Travel goals" enabled={R.travel.enabled} onToggle={(v) => edit((d) => { d.rules.travel.enabled = v; })}
-          help="The straight-line distance between consecutive check-ins (or background updates) counts. Time consequences are multiplied by the number of completed steps.">
-          <div class="grid2">
-            <NumberField label="Step size – distance per reward" suffix="km" min={0.1} step={0.1} value={R.travel.stepKm} onChange={(v) => edit((d) => { d.rules.travel.stepKm = v ?? 1; })}
-              hint="Every full step runs the consequences below once. Leftover distance carries over." />
-            <NumberField label="Max per check-in – limit for one jump" suffix="km" min={0.1} step={0.1} value={R.travel.maxKmPerCheckin} onChange={(v) => edit((d) => { d.rules.travel.maxKmPerCheckin = v ?? 50; })}
-              hint="A single check-in never adds more than this, e.g. after a train ride." />
-            <NumberField label="Daily cap – limit per day" suffix="km" min={0.1} step={0.1} value={R.travel.dailyCapKm} onChange={(v) => edit((d) => { d.rules.travel.dailyCapKm = v ?? 100; })}
-              hint="Distance beyond this per day (lock timezone) counts for nothing." />
-          </div>
-          <p class="small muted" data-testid="travel-example" style={{ margin: 0 }}>{travelExample(R.travel.stepKm, R.travel.maxKmPerCheckin)}</p>
-          <ConsequenceEditor label="For every step" value={R.travel.onStep} commands={commands} onChange={(v) => edit((d) => { d.rules.travel.onStep = v; })} />
-        </Section>
-      )}
-
-      {tab === 'hunt' && (
-        <Section title="Scavenger hunt" enabled={R.hunt.enabled} onToggle={(v) => edit((d) => { d.rules.hunt.enabled = v; })}
-          help="Checkpoints are found by checking in (or walking in with background tracking). In order: only the current checkpoint counts; any order: every open checkpoint counts.">
-          {placesInfo}
-          <ol class="stack" style={{ paddingLeft: '18px' }}>
-            {R.hunt.checkpoints.map((c, i) => (
-              <li key={c.id} onClick={() => setSelected(c.id)} style={{ outline: c.id === selected ? '2px solid var(--accent)' : undefined, borderRadius: '8px', padding: '4px' }} data-testid="checkpoint-item">
-                <div class="row">
-                  <input class="grow" value={c.name} maxLength={60} aria-label="checkpoint name" onInput={(e) => edit((d) => { d.rules.hunt.checkpoints[i]!.name = val(e); })} />
-                  <input type="number" style={{ width: '80px' }} value={c.radiusM} min={MIN_RADIUS_M} aria-label="radius" onInput={(e) => edit((d) => { d.rules.hunt.checkpoints[i]!.radiusM = Number(val(e)); })} />
-                  <button class="link" disabled={i === 0} aria-label="move up" onClick={() => edit((d) => { const a = d.rules.hunt.checkpoints; [a[i - 1], a[i]] = [a[i]!, a[i - 1]!]; })}>↑</button>
-                  <button class="link" disabled={i === R.hunt.checkpoints.length - 1} aria-label="move down" onClick={() => edit((d) => { const a = d.rules.hunt.checkpoints; [a[i + 1], a[i]] = [a[i]!, a[i + 1]!]; })}>↓</button>
-                  <button class="link danger" aria-label="delete" onClick={() => edit((d) => { d.rules.hunt.checkpoints.splice(i, 1); })}>✕</button>
-                </div>
-                <input placeholder="Hint shown to the wearer" value={c.hint} maxLength={500} onInput={(e) => edit((d) => { d.rules.hunt.checkpoints[i]!.hint = val(e); })} />
-                <select
-                  class="chip-select"
-                  aria-label="checkpoint matching"
-                  value={c.matchMode ?? ''}
-                  onChange={(e) => edit((d) => { const v = (e.target as HTMLSelectElement).value; if (v) d.rules.hunt.checkpoints[i]!.matchMode = v as 'strict'; else delete d.rules.hunt.checkpoints[i]!.matchMode; })}
-                >
-                  <option value="">Matching: default ({config.matchMode})</option>
-                  <option value="lenient">Matching: lenient</option>
-                  <option value="strict">Matching: strict</option>
-                </select>
-                <ReachNote status={reach[c.id]} ack={c.reachabilityAck} onAck={(on) => setAck('checkpoint', c.id, reach[c.id], on)} />
-              </li>
-            ))}
-          </ol>
-          {R.hunt.checkpoints.length === 0 && <p class="muted small">Tap the map to add checkpoints in order.</p>}
-          <div class="grid2">
-            <label class="field">
-              Reveal to wearer
-              <select value={R.hunt.reveal} onChange={(e) => edit((d) => { d.rules.hunt.reveal = (e.target as HTMLSelectElement).value as 'all'; })}>
-                <option value="all">Hint + pin all on the map</option>
-                <option value="map">Hint + pin current on the map</option>
-                <option value="distance">Hint + hot/cold distance</option>
-                <option value="hint">Hint only</option>
-              </select>
-            </label>
-            <label class="field">
-              Order
-              <select value={R.hunt.order} onChange={(e) => edit((d) => { d.rules.hunt.order = (e.target as HTMLSelectElement).value as 'sequence'; })}>
-                <option value="sequence">In order (1 → 2 → 3 …)</option>
-                <option value="any">Any order</option>
-              </select>
-            </label>
-            <label class="field">
-              Start
-              <select data-testid="hunt-start" value={R.hunt.start} onChange={(e) => edit((d) => { d.rules.hunt.start = (e.target as HTMLSelectElement).value as 'auto'; })}>
-                <option value="auto">Automatically when the lock starts</option>
-                <option value="wearer">The wearer starts it</option>
-                <option value="keyholder">The keyholder starts it</option>
-                <option value="scheduled">At a scheduled time</option>
-              </select>
-            </label>
-            {R.hunt.start === 'scheduled' && (
-              <>
-                <label class="field">
-                  Start at (your local time)
-                  <input
-                    type="datetime-local"
-                    value={R.hunt.startAt ? toLocalInput(R.hunt.startAt) : ''}
-                    onInput={(e) => {
-                      const v = (e.target as HTMLInputElement).value;
-                      edit((d) => { d.rules.hunt.startAt = v ? new Date(v).toISOString() : undefined; if (v) d.rules.hunt.startAfterMinutes = undefined; });
-                    }}
-                  />
-                </label>
-                <NumberField label="… or after the lock start" suffix="minutes" optional min={0} value={R.hunt.startAfterMinutes} onChange={(v) => edit((d) => { d.rules.hunt.startAfterMinutes = v; if (v !== undefined) d.rules.hunt.startAt = undefined; })} />
-              </>
-            )}
-            <label class="field">
-              Pause / resume
-              <select value={R.hunt.pauseBy} onChange={(e) => edit((d) => { d.rules.hunt.pauseBy = (e.target as HTMLSelectElement).value as 'keyholder'; })}>
-                <option value="nobody">Nobody</option>
-                <option value="keyholder">Keyholder only</option>
-                <option value="both">Wearer and keyholder</option>
-              </select>
-            </label>
-            <label class="check">
-              <input type="checkbox" checked={R.hunt.wearerCanAbort} onChange={(e) => edit((d) => { d.rules.hunt.wearerCanAbort = checked(e); })} />
-              The wearer may give up the hunt (counts as failed)
-            </label>
-            {R.hunt.reveal !== 'all' && (
-              <NumberField label="Wrong-guess cooldown" suffix="minutes" min={0} value={R.hunt.wrongCooldownMinutes} onChange={(v) => edit((d) => { d.rules.hunt.wrongCooldownMinutes = v ?? 0; })} />
-            )}
-            <NumberField label="Time limit" suffix="minutes" optional min={10} value={R.hunt.timeLimitMinutes} onChange={(v) => edit((d) => { d.rules.hunt.timeLimitMinutes = v; })} />
-            <label class="check">
-              <input type="checkbox" checked={R.hunt.blockUnlockUntilComplete} onChange={(e) => edit((d) => { d.rules.hunt.blockUnlockUntilComplete = checked(e); })} />
-              Block unlocking until completed
-            </label>
-          </div>
-          <p class="small muted" style={{ margin: 0 }}>
-            {R.hunt.reveal === 'all'
-              ? 'The wearer sees all checkpoints with hints on the map (they are also synced to OwnTracks). Wrong guesses are disabled.'
-              : R.hunt.reveal === 'map'
-                ? 'Only the current checkpoint is shown on the map. A "hunt guess" at the wrong place counts as a wrong turn.'
-                : 'Checkpoints stay secret. A "hunt guess" at the wrong place counts as a wrong turn.'}
-          </p>
-          <ConsequenceEditor label="Each checkpoint found" value={R.hunt.onCheckpoint} commands={commands} onChange={(v) => edit((d) => { d.rules.hunt.onCheckpoint = v; })} />
-          {R.hunt.reveal !== 'all' && (
-            <ConsequenceEditor label="Wrong turn (hunt guess at the wrong place)" value={R.hunt.onWrong} commands={commands} onChange={(v) => edit((d) => { d.rules.hunt.onWrong = v; })} />
-          )}
-          <ConsequenceEditor label="Hunt completed" value={R.hunt.onComplete} commands={commands} onChange={(v) => edit((d) => { d.rules.hunt.onComplete = v; })} />
-          {R.hunt.timeLimitMinutes && <ConsequenceEditor label="Time limit exceeded" value={R.hunt.onTimeout} commands={commands} onChange={(v) => edit((d) => { d.rules.hunt.onTimeout = v; })} />}
-          {R.hunt.wearerCanAbort && <ConsequenceEditor label="Wearer gives up" value={R.hunt.onAbort} commands={commands} onChange={(v) => edit((d) => { d.rules.hunt.onAbort = v; })} />}
-          <p class="small muted" style={{ margin: 0 }}>
-            The keyholder can always start the hunt early and end it (without consequences). A pause stops the time limit; checkpoints don't count while paused.
-          </p>
-        </Section>
-      )}
-
-      {tab === 'tracking' && (
-        <div class="card stack">
-          <h2>Check-ins &amp; background tracking</h2>
-          <label class="field">
-            How is the wearer's location collected?
-            <select data-testid="checkin-mode" value={checkinMode(T)} onChange={(e) => edit((d) => setCheckinMode(d, (e.target as HTMLSelectElement).value as CheckinMode))}>
-              <option value="manual">Manual check-ins only</option>
-              <option value="both">Manual check-ins + background tracking (OwnTracks)</option>
-              <option value="auto">Background tracking only – no manual check-ins</option>
-            </select>
-            <span class="small muted">
-              {{
-                manual: 'The wearer taps "Check in" in Lockation. The position is only known at these moments.',
-                both: 'The free OwnTracks app (iPhone / Android) reports the position in the background; manual check-ins still work. Both count for required zones.',
-                auto: 'Only OwnTracks counts – the check-in button is hidden. The wearer must keep OwnTracks running.',
-              }[checkinMode(T)]}
-            </span>
-          </label>
-          {T.enabled && (
-            <>
-              <div class="grid2">
-                <NumberField path="tracking.heartbeatMinutes" label="Missing signal after" suffix="minutes" min={15} value={T.heartbeatMinutes} hint={heartbeatWarningText(T.heartbeatMinutes, T.warnBeforeMinutes)} onChange={(v) => edit((d) => { d.tracking.heartbeatMinutes = v ?? 20; })} />
-                <NumberField path="tracking.warnBeforeMinutes" label="Warn before a missing-signal penalty" suffix="minutes, empty = off" optional min={10} max={Math.max(10, T.heartbeatMinutes - 1)} value={T.warnBeforeMinutes} hint="At least 10 minutes and less than the missing-signal time." onChange={(v) => edit((d) => { d.tracking.warnBeforeMinutes = v; })} />
-                <NumberField label="Accept delayed updates up to" suffix="minutes" min={1} value={T.maxDelayMinutes} onChange={(v) => edit((d) => { d.tracking.maxDelayMinutes = v ?? 1440; })} />
-                <label class="field">
-                  OwnTracks mode
-                  <select value={T.owntracksMode} onChange={(e) => edit((d) => { d.tracking.owntracksMode = (e.target as HTMLSelectElement).value as 'auto'; })}>
-                    <option value="auto">Auto (currently {owntracksMonitoring(config) === 2 ? 'Move' : 'Significant'})</option>
-                    <option value="move">Move – frequent updates</option>
-                    <option value="significant">Significant – battery saving</option>
-                  </select>
-                  <span class="small muted" data-testid="owntracks-mode">
-                    {owntracksMonitoring(config) === 2
-                      ? 'Move mode: frequent reports, needed for short missing-signal times and forbidden-zone timelines – uses noticeably more battery.'
-                      : 'Significant mode: reports only after larger movements – saves battery, but a phone lying still may report rarely.'}
-                    {T.owntracksMode === 'auto' && ' Auto picks Move if the missing-signal time is under 60 min or forbidden zones are enabled.'}
-                  </span>
-                </label>
-                <TimeRange label="Quiet hours – no missing-signal penalty or warning" value={T.quietHours} onChange={(v) => edit((d) => { d.tracking.quietHours = v; })} />
-              </div>
-              <ConsequenceEditor label="When no location arrives in time (phone off, app stopped, not set up)" repeating="missing signal" value={T.onHeartbeatMissed} commands={commands} onChange={(v) => edit((d) => { d.tracking.onHeartbeatMissed = v; })} />
-            </>
-          )}
-        </div>
-      )}
-
-      {tab === 'notify' && (
-        <div class="card stack">
-          <h2>🔔 Notifications</h2>
-          <p class="small muted" style={{ margin: 0 }}>
-            Push notifications use the free <strong>ntfy</strong> app. Wearer and keyholder each tap <em>Set up notifications</em> on the lock page. Texts contain zone names and consequences, never coordinates.
-          </p>
-          <h3>Keyholder – notify me about</h3>
-          <ul class="plain">
-            {KEYHOLDER_SWITCHES.map((s) => (
-              <li key={s.id}>
-                <label class="check">
-                  <input type="checkbox" data-testid={`notify-${s.id}`} checked={config.notifications.keyholder[s.id]} onChange={(e) => edit((d) => { d.notifications.keyholder[s.id] = checked(e); })} />
-                  <span>
-                    {s.label} <span class="small muted">– {s.help}</span>
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
-          <h3>Wearer warnings</h3>
-          <ul class="small">
-            <li>Forbidden zones: {R.forbidden.enabled ? (R.forbidden.firstWarningAfterMinutes === null && R.forbidden.repeatWarningAfterMinutes === null ? 'warnings off' : 'warnings before penalties (Forbidden tab)') : 'rule off'}.</li>
-            <li>Required check-ins: {R.required.enabled && R.required.warnBeforeMinutes ? `warning ${fmtMinutes(R.required.warnBeforeMinutes)} before a deadline` : 'no warning (Required tab)'}.</li>
-            <li>Missing signal: {T.enabled && T.warnBeforeMinutes ? `warning ${fmtMinutes(T.warnBeforeMinutes)} before the penalty` : 'no warning (Tracking tab)'}.</li>
-            <li>Rule changes during a running lock are always announced.</li>
-          </ul>
-        </div>
-      )}
-
-      {tab === 'anticheat' && (
-        <div class="card stack">
-          <h2>Anti-cheat</h2>
-          <p class="small muted">Browser GPS can be faked. These checks make cheating harder but Lockation remains a trust-assisted game.</p>
-          <div class="grid2">
-            <NumberField label="Required accuracy" suffix="m" min={10} max={500} value={config.antiCheat.maxAccuracyM} onChange={(v) => edit((d) => { d.antiCheat.maxAccuracyM = v ?? 100; })} />
-            <NumberField label="Max position age" suffix="seconds" min={10} value={config.antiCheat.maxFixAgeSeconds} onChange={(v) => edit((d) => { d.antiCheat.maxFixAgeSeconds = v ?? 120; })} />
-            <NumberField label="Max plausible speed" suffix="km/h" min={5} value={config.antiCheat.maxSpeedKmh} onChange={(v) => edit((d) => { d.antiCheat.maxSpeedKmh = v ?? 200; })} />
-            <NumberField label="Min time between check-ins" suffix="seconds" min={0} value={config.antiCheat.minIntervalSeconds} onChange={(v) => edit((d) => { d.antiCheat.minIntervalSeconds = v ?? 60; })} />
-            <label class="field">
-              Implausible speed
-              <select value={config.antiCheat.onImplausible} onChange={(e) => edit((d) => { d.antiCheat.onImplausible = (e.target as HTMLSelectElement).value as 'reject'; })}>
-                <option value="reject">Reject the check-in</option>
-                <option value="reject_and_penalize">Reject and penalise</option>
-                <option value="accept_and_verify">Accept but request a verification picture</option>
-              </select>
-            </label>
-            <label class="field">
-              Verification picture
-              <select value={config.antiCheat.verificationPicture} onChange={(e) => edit((d) => { d.antiCheat.verificationPicture = (e.target as HTMLSelectElement).value as 'never'; })}>
-                <option value="never">Never</option>
-                <option value="always">With every check-in</option>
-                <option value="random">Randomly</option>
-              </select>
-            </label>
-            {config.antiCheat.verificationPicture === 'random' && (
-              <NumberField label="Probability" suffix="%" min={0} max={100} value={Math.round(config.antiCheat.verificationProbability * 100)} onChange={(v) => edit((d) => { d.antiCheat.verificationProbability = (v ?? 0) / 100; })} />
-            )}
-            <NumberField
-              path="antiCheat.liveVerificationEveryHours"
-              label="Live tracking only: random verification picture on average every"
-              suffix="hours, empty = off"
-              optional
-              min={1}
-              max={168}
-              disabled={checkinMode(T) !== 'auto'}
-              value={config.antiCheat.liveVerificationEveryHours}
-              hint={checkinMode(T) === 'auto' ? undefined : 'Needs "Background tracking only" in the Tracking tab.'}
-              onChange={(v) => edit((d) => { d.antiCheat.liveVerificationEveryHours = v; })}
-            />
-          </div>
-          {config.antiCheat.onImplausible === 'reject_and_penalize' && (
-            <ConsequenceEditor label="Penalty for implausible movement" value={config.antiCheat.implausibleConsequences} commands={commands} onChange={(v) => edit((d) => { d.antiCheat.implausibleConsequences = v; })} />
-          )}
-          <p class="small muted">Verification pictures require the Verification Picture extension on the lock.</p>
-        </div>
-      )}
-
-      {tab === 'privacy' && (
-        <div class="card stack">
-          <h2>Privacy</h2>
-          <label class="check">
-            <input type="radio" name="priv" checked={config.privacy.coordinates === 'zone_only'} onChange={() => edit((d) => { d.privacy.coordinates = 'zone_only'; })} />
-            Zones only – store which zones the wearer was in, never coordinates (recommended)
-          </label>
-          <label class="check">
-            <input type="radio" name="priv" checked={config.privacy.coordinates === 'exact'} disabled={running && config.privacy.coordinates !== 'exact'} onChange={() => edit((d) => { d.privacy.coordinates = 'exact'; })} />
-            Exact – the keyholder can see each check-in on a map
-          </label>
-          <p class="small muted">
-            The wearer sees this setting before accepting the lock and can switch to "zones only" at any time. Exact sharing cannot be enabled while the lock is running. All location history is deleted when the lock ends.
-          </p>
-          <p class="small muted">
-            Safety check: the coordinates of your zones and checkpoints (never the wearer's location) are looked up in OpenStreetMap (Overpass, Nominatim) to warn about places that are hard to reach.
-          </p>
-        </div>
-      )}
-
-      {tab === 'file' && (
-      <SettingsFile
-        config={config}
-        onImport={(next) => edit((d) => {
-          const keep = d.disclaimer;
-          for (const k of Object.keys(d)) delete (d as Record<string, unknown>)[k];
-          Object.assign(d, next, { disclaimer: keep });
-        })}
-      />
-      )}
+      <TabContent {...tabProps} />
 
       {(!embedded || backend.demo) && (
         <div class="row">
@@ -944,49 +347,6 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
       </footer>
     </div>
     </IssuesContext.Provider>
-  );
-}
-
-/** F17 – reachability status of one zone / checkpoint with its confirmation checkbox. */
-export function ReachNote({ status, ack, onAck }: { status: ReachStatus | undefined; ack: ReachabilityAck | undefined; onAck: (on: boolean) => void }) {
-  if (!status || status.state === 'ok') return null;
-  if (status.state === 'pending') return <span class="small muted full">{statusText(status)}</span>;
-  if (status.state === 'unknown') return <span class="small muted full" data-testid="reach-unknown">ⓘ Reachability could not be checked (map service unavailable).</span>;
-  if (status.state === 'partly') return <span class="small muted full" data-testid="reach-partly">ⓘ Partly {status.reasons.join(', ')}.</span>;
-  const confirmed = !needsConfirmation(ack, status);
-  return (
-    <span class="full stack" data-testid="reach-flag" onClick={(e) => e.stopPropagation()}>
-      <span class="small warn-text">
-        ⚠ Possibly out of reach: {status.reasons.join(', ')}.{' '}
-        {confirmed ? (
-          <span class="muted">
-            Confirmed as intentional ·{' '}
-            <button class="link" onClick={() => onAck(false)}>
-              undo
-            </button>
-          </span>
-        ) : (
-          <span class="muted">Confirm at the top of the page.</span>
-        )}
-      </span>
-    </span>
-  );
-}
-
-function Section(props: { title: string; enabled: boolean; onToggle: (v: boolean) => void; help: string; children: preact.ComponentChildren }) {
-  return (
-    <div class="card stack">
-      <h2>
-        {props.title}
-        <span class="grow" />
-        <label class="check small">
-          <input type="checkbox" checked={props.enabled} onChange={(e) => props.onToggle(checked(e))} />
-          enabled
-        </label>
-      </h2>
-      <p class="small muted" style={{ margin: 0 }}>{props.help}</p>
-      {props.enabled && props.children}
-    </div>
   );
 }
 
@@ -1027,96 +387,4 @@ function AddressSearch({ onPick }: { onPick: (p: { lat: number; lng: number }, n
       )}
     </form>
   );
-}
-
-/** Short note next to Save: how many problems, with links to the affected tabs. */
-function IssueSummary({ count, onGo }: { count: Partial<Record<Tab, number>>; onGo: (t: Tab) => void }) {
-  const tabs = TABS.filter((t) => count[t.id]);
-  const total = tabs.reduce((a, t) => a + (count[t.id] ?? 0), 0);
-  return (
-    <span class="small error" data-testid="issue-summary">
-      {total} problem{total === 1 ? '' : 's'} to fix:{' '}
-      {tabs.map((t, i) => (
-        <span key={t.id}>
-          {i > 0 && ', '}
-          <button class="link" onClick={() => onGo(t.id)}>
-            {t.label} ({count[t.id]})
-          </button>
-        </span>
-      ))}
-    </span>
-  );
-}
-
-/** datetime-local value (browser time) for an ISO instant. */
-function toLocalInput(iso: string): string {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-/** Export the whole configuration as a JSON file, or import one (validated; the disclaimer acceptance is kept). */
-export function SettingsFile({ config, onImport }: { config: LockationConfig; onImport: (c: LockationConfig) => void }) {
-  const [msg, setMsg] = useState<{ ok: boolean; text: string }>();
-  const download = () => {
-    const { disclaimer: _d, ...rest } = config;
-    const blob = new Blob([JSON.stringify(rest, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'lockation-config.json';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    setMsg({ ok: true, text: 'Exported lockation-config.json.' });
-  };
-  const upload = async (file: File | undefined) => {
-    if (!file) return;
-    const res = importConfigText(await file.text());
-    if (res.ok) {
-      onImport(res.config);
-      setMsg({ ok: true, text: `Imported "${file.name}" – check the tabs and save.` });
-    } else setMsg({ ok: false, text: res.error });
-  };
-  return (
-    <div class="card stack" data-testid="settings-file">
-      <h2>💾 Settings file</h2>
-      <p class="small muted" style={{ margin: 0 }}>Export all settings as a file to reuse them for another lock, or import a file exported before. Importing replaces the current settings (not saved until you save).</p>
-      <div class="row">
-        <button onClick={download} data-testid="export-config">⬇ Export</button>
-        <label class="btn">
-          ⬆ Import…
-          <input type="file" accept="application/json,.json" style={{ display: 'none' }} data-testid="import-config" onChange={(e) => void upload((e.target as HTMLInputElement).files?.[0])} />
-        </label>
-      </div>
-      {msg && <p class={`small ${msg.ok ? '' : 'error'}`} style={{ margin: 0 }}>{msg.text}</p>}
-    </div>
-  );
-}
-
-/** Parse an exported settings file (v1 files are migrated). */
-export function importConfigText(text: string): { ok: true; config: LockationConfig } | { ok: false; error: string } {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    return { ok: false, error: 'This is not a valid settings file (not JSON).' };
-  }
-  const res = parseConfig(raw);
-  if (!res.ok) {
-    const first = res.issues.slice(0, 3).map((i) => `${issueLabel(i.path, undefined) || i.path}: ${i.message}`).join('; ');
-    return { ok: false, error: `The file contains invalid settings (${res.issues.length} problem${res.issues.length === 1 ? '' : 's'}): ${first}` };
-  }
-  return { ok: true, config: res.config };
-}
-
-type CheckinMode = 'manual' | 'both' | 'auto';
-
-/** One selector for tracking on/off and the check-in mode. */
-export function checkinMode(t: LockationConfig['tracking']): CheckinMode {
-  return t.enabled ? t.checkins : 'manual';
-}
-
-export function setCheckinMode(d: LockationConfig, mode: CheckinMode) {
-  d.tracking.enabled = mode !== 'manual';
-  d.tracking.checkins = mode === 'auto' ? 'auto' : 'both';
-  if (mode !== 'auto') delete d.antiCheat.liveVerificationEveryHours;
 }
