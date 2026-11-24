@@ -22,7 +22,7 @@ APP_URL = "https://90schaaf.github.io/lockation/app/index.html"
 [[d1_databases]]
 binding = "DB"
 database_name = "lockation"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "2c0f13ed-e335-4c3b-87d9-fc71cd01acfb"
 migrations_dir = "migrations"
 
 # Secrets (never commit!):
