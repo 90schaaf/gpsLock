@@ -75,8 +75,12 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
       </h2>
       {t.status === 'waiting' && (
         <div class="small notice" style={{ margin: 0 }}>
-          Set up, but no location has arrived from your phone yet. Open OwnTracks once and check that location access is set to
-          <strong> "Always"</strong>. The status turns <em>connected</em> with the first location.
+          Set up, but no location has arrived from your phone yet. Open OwnTracks, tap <strong>↑</strong> (publish) and check that
+          location access is set to <strong>"Always"</strong>. The status turns <em>connected</em> with the first location.
+          <br />
+          OwnTracks status still shows <code>mqtts://user@host</code>? The setup wasn't imported – on iPhone turn on{' '}
+          <strong>ⓘ → Settings → Remote control → ⓘ → "Allow external configuration"</strong>, then <em>Set up again</em>, or use{' '}
+          <em>Manual setup</em>.
         </div>
       )}
       {t.status === 'no_signal' && (
@@ -105,7 +109,11 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
                 Install <strong>OwnTracks</strong> (free): <a href={OWNTRACKS_IOS} target="_blank" rel="noopener">iPhone</a> ·{' '}
                 <a href={OWNTRACKS_ANDROID} target="_blank" rel="noopener">Android</a>
               </li>
-              <li>Tap <em>Set up</em> below and open the link in OwnTracks.</li>
+              <li>
+                <strong>iPhone only, once:</strong> in OwnTracks tap <strong>ⓘ → Settings → Remote control → ⓘ</strong> and turn on{' '}
+                <strong>"Allow external configuration"</strong> (section <em>From device</em>). Otherwise OwnTracks ignores the setup link.
+              </li>
+              <li>Tap <em>Set up</em> below, open the link in OwnTracks and confirm <strong>"Process Configuration"</strong>.</li>
               <li>Allow location <strong>"Always"</strong> and keep precise location on.</li>
             </ol>
           )}
@@ -130,10 +138,16 @@ export function TrackingCard({ view, backend, onView, onError }: { view: Session
           <p class="small muted" style={{ margin: 0 }}>
             On another device? Scan this code with the phone's camera. The credentials are shown only once.
           </p>
+          <p class="small notice" style={{ margin: 0 }} data-testid="ios-external-config">
+            <strong>iPhone:</strong> if no <em>"Process Configuration"</em> question appears, OwnTracks blocks setup links. In OwnTracks tap{' '}
+            <strong>ⓘ → Settings → Remote control → ⓘ</strong>, turn on <strong>"Allow external configuration"</strong>, then open the link
+            again (you can switch it off afterwards). Check: OwnTracks' status must show an address starting with <code>https://</code>, not{' '}
+            <code>mqtts://user@host</code>.
+          </p>
           <div style={{ maxWidth: '220px', background: '#fff', padding: '6px', borderRadius: '8px' }} dangerouslySetInnerHTML={{ __html: svg }} />
           <details class="small">
             <summary>Manual setup</summary>
-            <p>OwnTracks → Settings → Connection: Mode <strong>HTTP</strong>, then:</p>
+            <p>Works without "Allow external configuration". OwnTracks → ⓘ → Settings: Mode <strong>HTTP</strong>, then:</p>
             <ul>
               <li>URL: <code>{pairing.url}</code></li>
               <li>Authentication on, username <code>{pairing.username}</code>, password <code>{pairing.password}</code></li>

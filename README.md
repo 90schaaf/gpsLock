@@ -79,6 +79,8 @@ Full step-by-step guide: [`docs/technical/setup.md`](docs/technical/setup.md).
 ## Limitations (beta)
 
 - Without background tracking, location is only known at check-ins (browsers cannot track in the background). Background tracking needs the free OwnTracks app and "Always" location permission; iOS may delay updates in low-power mode.
+  On iPhone, OwnTracks only accepts the setup link after **ⓘ → Settings → Remote control → ⓘ → "Allow external configuration"**
+  is turned on (off by default) – otherwise use the manual setup.
 - Browser GPS can be spoofed – anti-cheat checks and verification pictures reduce, but don't eliminate, cheating.
 - Cross-extension commands use Chaster's experimental extension communication API. Find the key, Jigsaw,
   Reward store and Typing lines don't publish commands yet; they become selectable automatically once they do.
