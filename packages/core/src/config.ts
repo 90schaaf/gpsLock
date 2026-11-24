@@ -1,9 +1,9 @@
 /**
  * Lock configuration schema (stored as the Chaster extension `config`).
  *
- * Version 2 (2026-11-23): zones carry roles (required and/or reward, or forbidden, or neutral) and per-zone settings;
- * the curfew became "stay windows" of required zones; forbidden zones escalate with warnings. Version 1 configs are
- * migrated on read by `migrateConfig` (see the bottom of this file), so stored v1 configs keep their behaviour.
+ * Version 2: zones carry roles (required and/or reward, or forbidden, or neutral) and per-zone settings; required zones
+ * can have "must stay inside" windows; forbidden zones escalate with warnings. (Version 1 was dropped before the beta –
+ * there is no migration.)
  */
 import { z } from 'zod';
 import { ConsequenceListSchema } from './consequences.js';
@@ -132,8 +132,6 @@ const RequiredRuleSchema = z
     enabled: z.boolean().default(false),
     /** Also require a check-in anywhere (no zone) every interval. */
     anywhere: z.boolean().default(false),
-    /** `each` = every required zone has its own deadline; `any` = one shared deadline (v1 behaviour). */
-    combine: z.enum(['each', 'any']).default('each'),
     intervalMinutes: z.number().int().min(1).max(43_200).default(240),
     graceMinutes: minutes(1440).default(5),
     quietHours: z.object({ start: hhmm, end: hhmm }).optional(),
@@ -178,10 +176,9 @@ export const TrackingSchema = z
     maxDelayMinutes: z.number().int().min(1).max(10_080).default(1440),
     /**
      * How check-ins happen when tracking is on: `both` = manual check-ins and background locations count (default),
-     * `auto` = background locations only (manual check-ins disabled, former "live tracking only"),
-     * `manual` = background locations are used for the other rules, but required zones need manual check-ins (legacy).
+     * `auto` = background locations only (manual check-ins disabled). Manual check-ins only = tracking disabled.
      */
-    checkins: z.enum(['manual', 'both', 'auto']).default('both'),
+    checkins: z.enum(['both', 'auto']).default('both'),
     /** OwnTracks monitoring mode provisioned on pairing. `auto` → move if heartbeat < 60 min or forbidden zones exist. */
     owntracksMode: z.enum(['auto', 'move', 'significant']).default('auto'),
     /** No missing-signal penalties or warnings during these hours. */
@@ -390,9 +387,9 @@ export interface ConfigIssue {
 
 export type ParseConfigResult = { ok: true; config: LockationConfig } | { ok: false; issues: ConfigIssue[] };
 
-/** Parse unknown input (from Chaster or the config page) into a full v2 config. v1 input is migrated first. */
+/** Parse unknown input (from Chaster or the config page) into a full config. */
 export function parseConfig(input: unknown): ParseConfigResult {
-  const res = LockationConfigSchema.safeParse(migrateConfig(input ?? {}));
+  const res = LockationConfigSchema.safeParse(input ?? {});
   if (res.success) return { ok: true, config: res.data };
   return {
     ok: false,
@@ -415,9 +412,9 @@ export function enabledRules(cfg: LockationConfig): string[] {
 
 // ---------- helpers used by engine, view and UI ----------
 
-/** Background locations count as required check-ins (tracking on, check-in mode `both` or `auto`). */
+/** Background locations count as required check-ins (whenever tracking is on). */
 export function backgroundCounts(cfg: Pick<LockationConfig, 'tracking'>): boolean {
-  return cfg.tracking.enabled && cfg.tracking.checkins !== 'manual';
+  return cfg.tracking.enabled;
 }
 
 /** Smallest allowed required interval: 3 min if background locations count as check-ins, otherwise 5 min (manual check-ins). */
@@ -463,7 +460,7 @@ export function forbiddenTimings(cfg: LockationConfig, z: Zone): ForbiddenTiming
 export function owntracksLocatorInterval(cfg: LockationConfig): number {
   if (!backgroundCounts(cfg) || !cfg.rules.required.enabled) return 300;
   const intervals = [
-    ...(cfg.rules.required.anywhere || cfg.rules.required.combine === 'any' ? [cfg.rules.required.intervalMinutes] : []),
+    ...(cfg.rules.required.anywhere ? [cfg.rules.required.intervalMinutes] : []),
     ...zonesWithRole(cfg, 'required')
       .filter((z) => z.required.intervalCheckins)
       .map((z) => z.required.intervalMinutes ?? cfg.rules.required.intervalMinutes),
@@ -479,120 +476,4 @@ export function owntracksMonitoring(cfg: LockationConfig): 1 | 2 {
   if (m === 'significant') return 1;
   const forbidden = cfg.rules.forbidden.enabled && zonesWithRole(cfg, 'forbidden').length > 0;
   return cfg.tracking.heartbeatMinutes < 60 || forbidden || owntracksLocatorInterval(cfg) < 300 ? 2 : 1;
-}
-
-// ---------- v1 → v2 migration ----------
-
-type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
-const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
-const strs = (v: unknown): string[] => arr(v).filter((x): x is string => typeof x === 'string');
-
-/**
- * Converts a v1 config (zone lists per rule, curfew rule, single forbidden cooldown) to the v2 shape.
- * v2 input is returned unchanged. The result is still validated by the schema afterwards.
- *
- * Behaviour-preserving choices:
- * - roles come from the rule zone lists; a zone listed as both required and forbidden keeps `forbidden`;
- * - required: `anywhere` = enabled without zones; several required zones → `combine: "any"` (one shared deadline);
- *   a missing grace period gets the v1 default (15 min);
- * - forbidden: first penalty after `tracking.entryConfirmMinutes` (v1 default 3), repeat every `cooldownMinutes`
- *   (min. 5), no warnings;
- * - curfew → "must stay inside" windows of the curfew zones (required role, no interval check-ins unless the zone was
- *   already required), curfew consequences/cooldown → `onOutsideDuringWindow` / `windowCooldownMinutes`;
- * - hunt reveal default stays `distance` (v1 default).
- */
-export function migrateConfig(input: unknown): unknown {
-  if (!isObj(input)) return input;
-  if (input.version === CONFIG_VERSION) return normalizeTracking(input);
-  return normalizeTracking(migrateV1(input));
-}
-
-/** `countsAsCheckin` / `liveOnly` (until 2026-11-24) → `checkins`. */
-function normalizeTracking(input: unknown): unknown {
-  if (!isObj(input) || !isObj(input.tracking)) return input;
-  const t = input.tracking;
-  if (t.checkins !== undefined || (t.liveOnly === undefined && t.countsAsCheckin === undefined)) return input;
-  const { liveOnly, countsAsCheckin, ...rest } = t;
-  return { ...input, tracking: { ...rest, checkins: liveOnly === true ? 'auto' : countsAsCheckin === false ? 'manual' : 'both' } };
-}
-
-function migrateV1(input: Obj): unknown {
-  if (input.version !== undefined && input.version !== 1) return input; // let the schema report it
-
-  const rules: Obj = isObj(input.rules) ? input.rules : {};
-  const req: Obj = isObj(rules.required) ? rules.required : {};
-  const forb: Obj = isObj(rules.forbidden) ? rules.forbidden : {};
-  const rew: Obj = isObj(rules.reward) ? rules.reward : {};
-  const cur: Obj = isObj(rules.curfew) ? rules.curfew : {};
-  const hunt: Obj = isObj(rules.hunt) ? rules.hunt : {};
-  const tracking: Obj = isObj(input.tracking) ? input.tracking : {};
-
-  const reqIds = new Set(strs(req.zoneIds));
-  const forbIds = new Set(strs(forb.zoneIds));
-  const rewIds = new Set(strs(rew.zoneIds));
-  const curfewOn = cur.enabled === true;
-  const curIds = new Set(curfewOn ? strs(cur.zoneIds) : []);
-
-  const zones = arr(input.zones).map((raw) => {
-    if (!isObj(raw)) return raw;
-    const zid = String(raw.id);
-    const roles: string[] = [];
-    if (forbIds.has(zid)) roles.push('forbidden');
-    else {
-      if (reqIds.has(zid) || curIds.has(zid)) roles.push('required');
-      if (rewIds.has(zid)) roles.push('reward');
-    }
-    const z: Obj = { ...raw, roles };
-    if (roles.includes('required') && curIds.has(zid)) {
-      z.required = {
-        intervalCheckins: reqIds.has(zid) && req.enabled !== false,
-        stayWindows: [{ start: cur.start ?? '22:00', end: cur.end ?? '06:00' }],
-      };
-    }
-    return z;
-  });
-
-  const reqZoneCount = [...reqIds].filter((zid) => !forbIds.has(zid)).length;
-  const reqEnabled = req.enabled === true;
-  const { zoneIds: _rz, ...reqRest } = req;
-  const required: Obj = {
-    ...reqRest,
-    enabled: reqEnabled || curfewOn,
-    anywhere: reqEnabled && reqIds.size === 0,
-    combine: reqZoneCount > 1 ? 'any' : 'each',
-    graceMinutes: req.graceMinutes ?? 15,
-  };
-  if (curfewOn) {
-    required.onOutsideDuringWindow = cur.onOutside ?? [];
-    required.windowCooldownMinutes = cur.cooldownMinutes ?? 60;
-  }
-
-  const cooldown = typeof forb.cooldownMinutes === 'number' ? forb.cooldownMinutes : 60;
-  const confirm = typeof tracking.entryConfirmMinutes === 'number' ? tracking.entryConfirmMinutes : 3;
-  const forbidden: Obj = {
-    enabled: forb.enabled === true,
-    onEnter: forb.onEnter ?? [],
-    firstWarningAfterMinutes: null,
-    repeatWarningAfterMinutes: null,
-    firstPenaltyAfterMinutes: Math.max(0, confirm),
-    repeatEveryMinutes: Math.max(5, cooldown),
-  };
-  const { zoneIds: _wz, ...rewRest } = rew;
-  const { entryConfirmMinutes: _ec, ...trackingRest } = tracking;
-
-  return {
-    ...input,
-    version: CONFIG_VERSION,
-    zones,
-    rules: {
-      ...rules,
-      required,
-      forbidden,
-      reward: rewRest,
-      hunt: { reveal: 'distance', ...hunt },
-      curfew: undefined,
-    },
-    tracking: trackingRest,
-  };
 }

@@ -8,6 +8,7 @@ import {
   type LockationConfigInput,
   type LockationState,
 } from '../src/index.js';
+import { fromCompactFixture } from './fixtures.js';
 
 export const HOME = { lat: 47.3769, lng: 8.5417 }; // Zürich HB
 export const GYM = { lat: 47.3667, lng: 8.55 }; // ~1.3 km away
@@ -22,9 +23,9 @@ export function north(p: { lat: number; lng: number }, m: number) {
   return { lat: p.lat + m / 111_195, lng: p.lng };
 }
 
-/** Accepts v1 (legacy) and v2 input – v1 is migrated by parseConfig. */
+/** Accepts the current shape or the compact fixture shape of older tests (see fixtures.ts). */
 export function cfg(input: Record<string, unknown> | LockationConfigInput): LockationConfig {
-  const res = parseConfig({ timezone: 'Europe/Zurich', ...input });
+  const res = parseConfig(fromCompactFixture({ timezone: 'Europe/Zurich', ...(input as Record<string, unknown>) }));
   if (!res.ok) throw new Error(JSON.stringify(res.issues));
   return res.config;
 }

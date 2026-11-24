@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   activeWindowStart,
+  utcToZonedWallTime,
+  zonedWallTimeToUtc,
   allowedHuntActions,
   applyHuntAction,
   HuntActionError,
@@ -10,8 +12,6 @@ import {
   evaluateTick,
   evaluateTracked,
   initialState,
-  loadState,
-  migrateConfig,
   nextDueAt,
   owntracksLocatorInterval,
   owntracksMonitoring,
@@ -59,53 +59,6 @@ class Run {
 }
 const wearer = (ns: Notice[]) => ns.filter((n) => n.audience === 'wearer');
 const kh = (ns: Notice[]) => ns.filter((n) => n.audience === 'keyholder');
-
-describe('v1 → v2 migration', () => {
-  it('derives roles, anywhere/combine, forbidden timings and turns the curfew into stay windows', () => {
-    const v1 = {
-      timezone: 'Europe/Zurich',
-      zones: [zone('home', 'Home', HOME), zone('work', 'Work', WORK), zone('bar', 'Bar', BAR), zone('gym', 'Gym', GYM)],
-      tracking: { enabled: true, entryConfirmMinutes: 4 },
-      rules: {
-        required: { enabled: true, zoneIds: ['home', 'work'] },
-        forbidden: { enabled: true, zoneIds: ['bar'], cooldownMinutes: 30 },
-        reward: { enabled: true, zoneIds: ['gym'] },
-        curfew: { enabled: true, zoneIds: ['home'], start: '23:00', end: '06:00', cooldownMinutes: 45, onOutside: [{ type: 'add_time', seconds: 60 }] },
-      },
-    };
-    const res = parseConfig(v1);
-    expect(res.ok).toBe(true);
-    if (!res.ok) return;
-    const c = res.config;
-    expect(c.version).toBe(2);
-    expect(c.zones.map((z) => [z.id, z.roles])).toEqual([
-      ['home', ['required']],
-      ['work', ['required']],
-      ['bar', ['forbidden']],
-      ['gym', ['reward']],
-    ]);
-    expect(c.rules.required).toMatchObject({ enabled: true, anywhere: false, combine: 'any', graceMinutes: 15, windowCooldownMinutes: 45 });
-    expect(c.zones[0]!.required).toMatchObject({ intervalCheckins: true, stayWindows: [{ start: '23:00', end: '06:00' }] });
-    expect(c.rules.forbidden).toMatchObject({ firstPenaltyAfterMinutes: 4, repeatEveryMinutes: 30, firstWarningAfterMinutes: null, repeatWarningAfterMinutes: null });
-    expect(c.rules.hunt.reveal).toBe('distance');
-    expect(migrateConfig(c)).toBe(c);
-  });
-
-  it('a v1 required rule without zones becomes "anywhere"; a curfew-only zone gets no interval check-ins', () => {
-    const c = cfg({ zones: [zone('home', 'Home', HOME)], tracking: { enabled: true }, rules: { required: { enabled: false }, curfew: { enabled: true, zoneIds: ['home'] } } });
-    expect(c.rules.required).toMatchObject({ enabled: true, anywhere: false });
-    expect(c.zones[0]!.required.intervalCheckins).toBe(false);
-    const any = cfg({ rules: { required: { enabled: true } } });
-    expect(any.rules.required.anywhere).toBe(true);
-  });
-
-  it('migrates v1 state: the single deadline becomes the slot', () => {
-    const c = cfg({ zones: [zone('home', 'Home', HOME)], rules: { required: { enabled: true, zoneIds: ['home'] } } });
-    const raw = { v: 1, startedAt: T0.toISOString(), required: { nextDeadline: '2026-06-01T12:00:00.000Z', missedCount: 2 } };
-    const st = loadState(raw, c, T0);
-    expect(st.required.slots.home).toMatchObject({ nextDeadline: '2026-06-01T12:00:00.000Z', missedCount: 2 });
-  });
-});
 
 describe('v2 validation', () => {
   const base = { version: 2, timezone: 'Europe/Zurich' };
@@ -361,7 +314,7 @@ describe('tracking: quiet hours, warning, mode, live verification', () => {
   });
 
   it('live-only: random verification picture on schedule', () => {
-    const c = cfg({ version: 2, tracking: { ...tracking, liveOnly: true }, antiCheat: { liveVerificationEveryHours: 4 } });
+    const c = cfg({ version: 2, tracking: { ...tracking, checkins: 'auto' }, antiCheat: { liveVerificationEveryHours: 4 } });
     const r = new Run(c);
     r.tick(T0); // schedules: rng 0.5 → 4 h
     expect(r.state.nextLiveVerification).toBe(minutes(T0, 240).toISOString());
@@ -505,7 +458,6 @@ describe('required interval minimum and OwnTracks report interval', () => {
   it('3 min with background check-ins, 5 min with manual check-ins only', () => {
     expect(req({ enabled: true }, 3).ok).toBe(true);
     expect(req({ enabled: true }, 2).ok).toBe(false);
-    expect(req({ enabled: true, checkins: 'manual' }, 3).ok).toBe(false);
     expect(req({ enabled: false }, 4).ok).toBe(false);
     expect(req({ enabled: false }, 5).ok).toBe(true);
   });
@@ -551,5 +503,15 @@ describe('zone actions (enter / leave)', () => {
     const v = buildSessionView({ role: 'wearer', isSelfLock: true, config: b, state: initialState(b, T0), history: [], now: T0 });
     expect(v.rules.find((x) => x.rule === 'zoneActions')?.lines).toEqual(['Gym – leaving after at least 45min inside: unfreeze.']);
     expect(diffConfig(a, b)).toEqual(['"Gym" zone actions: entering nothing; leaving unfreeze (after 45min).']);
+  });
+});
+
+describe('lock-timezone wall time conversion (scheduled hunt start)', () => {
+  it('converts both ways, also across DST', () => {
+    expect(zonedWallTimeToUtc('2026-06-01T18:30', 'Europe/Zurich')!.toISOString()).toBe('2026-06-01T16:30:00.000Z'); // CEST +2
+    expect(zonedWallTimeToUtc('2026-12-01T18:30', 'Europe/Zurich')!.toISOString()).toBe('2026-12-01T17:30:00.000Z'); // CET +1
+    expect(zonedWallTimeToUtc('2026-06-01T18:30', 'America/New_York')!.toISOString()).toBe('2026-06-01T22:30:00.000Z');
+    expect(utcToZonedWallTime('2026-06-01T16:30:00.000Z', 'Europe/Zurich')).toBe('2026-06-01T18:30');
+    expect(zonedWallTimeToUtc('nonsense', 'UTC')).toBeUndefined();
   });
 });

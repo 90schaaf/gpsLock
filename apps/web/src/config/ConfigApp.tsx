@@ -506,14 +506,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
                 </span>
               </span>
             </label>
-            <label class="field">
-              Several required zones
-              <select value={R.required.combine} onChange={(e) => edit((d) => { d.rules.required.combine = (e.target as HTMLSelectElement).value as 'each'; })}>
-                <option value="each">Each zone has its own deadline (AND)</option>
-                <option value="any">One shared deadline – any zone counts (OR)</option>
-              </select>
-            </label>
-            <NumberField path="rules.required.intervalMinutes" label="Interval (default)" suffix="minutes" min={minRequiredInterval(config)} value={R.required.intervalMinutes} hint={`${fmtMinutes(R.required.intervalMinutes)} · minimum ${minRequiredInterval(config)} min (${minRequiredInterval(config) === 1 ? 'background locations count as check-ins' : 'manual check-ins; 1 min with background tracking'})`} onChange={(v) => edit((d) => { d.rules.required.intervalMinutes = v ?? 240; })} />
+            <NumberField path="rules.required.intervalMinutes" label="Interval (default)" suffix="minutes" min={minRequiredInterval(config)} value={R.required.intervalMinutes} hint={`${fmtMinutes(R.required.intervalMinutes)} · minimum ${minRequiredInterval(config)} min (${minRequiredInterval(config) === 3 ? 'background tracking' : 'manual check-ins; 3 min with background tracking'})`} onChange={(v) => edit((d) => { d.rules.required.intervalMinutes = v ?? 240; })} />
             <NumberField label="Grace period (default)" suffix="minutes" min={0} value={R.required.graceMinutes} onChange={(v) => edit((d) => { d.rules.required.graceMinutes = v ?? 0; })} />
             <NumberField path="rules.required.warnBeforeMinutes" label="Warn before a deadline" suffix="minutes, empty = off" optional min={5} value={R.required.warnBeforeMinutes} hint="Sent to the wearer's notifications (ntfy) if set up." onChange={(v) => edit((d) => { d.rules.required.warnBeforeMinutes = v; })} />
             <TimeRange label="Quiet hours (no deadline inside)" value={R.required.quietHours} onChange={(v) => edit((d) => { d.rules.required.quietHours = v; })} />
@@ -524,9 +517,6 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
 
           <h3>Required zones</h3>
           {roleZones('required').length === 0 && noZonesHint('required')}
-          {R.required.combine === 'any' && roleZones('required').length > 1 && (
-            <p class="small muted" style={{ margin: 0 }}>With one shared deadline the per-zone interval, grace and missed lists are not used.</p>
-          )}
           {roleZones('required').map((z) => (
             <details class="zone-details" key={z.id} open={z.id === selected} data-testid="required-zone">
               <summary>
@@ -791,14 +781,12 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
               <option value="manual">Manual check-ins only</option>
               <option value="both">Manual check-ins + background tracking (OwnTracks)</option>
               <option value="auto">Background tracking only – no manual check-ins</option>
-              {checkinMode(T) === 'legacy' && <option value="legacy">Background tracking, required zones only by manual check-in (older setting)</option>}
             </select>
             <span class="small muted">
               {{
                 manual: 'The wearer taps "Check in" in Lockation. The position is only known at these moments.',
                 both: 'The free OwnTracks app (iPhone / Android) reports the position in the background; manual check-ins still work. Both count for required zones.',
                 auto: 'Only OwnTracks counts – the check-in button is hidden. The wearer must keep OwnTracks running.',
-                legacy: 'Background locations are used for forbidden/reward zones, the hunt and windows, but required zones need manual check-ins.',
               }[checkinMode(T)]}
             </span>
           </label>
@@ -1120,17 +1108,15 @@ export function importConfigText(text: string): { ok: true; config: LockationCon
   return { ok: true, config: res.config };
 }
 
-type CheckinMode = 'manual' | 'both' | 'auto' | 'legacy';
+type CheckinMode = 'manual' | 'both' | 'auto';
 
 /** One selector for tracking on/off and the check-in mode. */
 export function checkinMode(t: LockationConfig['tracking']): CheckinMode {
-  if (!t.enabled) return 'manual';
-  return t.checkins === 'manual' ? 'legacy' : t.checkins;
+  return t.enabled ? t.checkins : 'manual';
 }
 
 export function setCheckinMode(d: LockationConfig, mode: CheckinMode) {
   d.tracking.enabled = mode !== 'manual';
-  d.tracking.checkins = mode === 'legacy' ? 'manual' : mode === 'manual' ? 'both' : mode;
+  d.tracking.checkins = mode === 'auto' ? 'auto' : 'both';
   if (mode !== 'auto') delete d.antiCheat.liveVerificationEveryHours;
-  if (mode === 'manual') d.rules.required.enabled = d.rules.required.enabled; // stay windows are flagged inline if used
 }

@@ -6,7 +6,7 @@ import { adjustForQuietHours, isInQuietHours, MINUTE } from './time.js';
 
 const iso = z.string();
 
-/** One required check-in deadline ("slot"): `*` = anywhere, `@any` = shared deadline of all required zones, else a zone id. */
+/** One required check-in deadline ("slot"): `*` = anywhere, else a zone id. */
 const SlotSchema = z.object({
   lastValidAt: iso.optional(),
   nextDeadline: iso.optional(),
@@ -126,7 +126,6 @@ export interface RequiredSlot {
 }
 
 export const ANYWHERE_SLOT = '*';
-export const ANY_ZONE_SLOT = '@any';
 
 export function requiredSlots(config: LockationConfig): RequiredSlot[] {
   const r = config.rules.required;
@@ -136,30 +135,16 @@ export function requiredSlots(config: LockationConfig): RequiredSlot[] {
     out.push({ key: ANYWHERE_SLOT, name: 'anywhere', zoneIds: null, intervalMinutes: r.intervalMinutes, graceMinutes: r.graceMinutes, onMissed: r.onMissed, onSuccess: r.onSuccess });
   }
   const zones = zonesWithRole(config, 'required').filter((z) => z.required.intervalCheckins);
-  if (r.combine === 'any') {
-    if (zones.length) {
-      out.push({
-        key: ANY_ZONE_SLOT,
-        name: zones.map((z) => z.name).join(' or '),
-        zoneIds: zones.map((z) => z.id),
-        intervalMinutes: r.intervalMinutes,
-        graceMinutes: r.graceMinutes,
-        onMissed: r.onMissed,
-        onSuccess: r.onSuccess,
-      });
-    }
-  } else {
-    for (const z of zones) {
-      out.push({
-        key: z.id,
-        name: z.name,
-        zoneIds: [z.id],
-        intervalMinutes: z.required.intervalMinutes ?? r.intervalMinutes,
-        graceMinutes: z.required.graceMinutes ?? r.graceMinutes,
-        onMissed: [...r.onMissed, ...z.required.onMissed],
-        onSuccess: [...r.onSuccess, ...z.required.onSuccess],
-      });
-    }
+  for (const z of zones) {
+    out.push({
+      key: z.id,
+      name: z.name,
+      zoneIds: [z.id],
+      intervalMinutes: z.required.intervalMinutes ?? r.intervalMinutes,
+      graceMinutes: z.required.graceMinutes ?? r.graceMinutes,
+      onMissed: [...r.onMissed, ...z.required.onMissed],
+      onSuccess: [...r.onSuccess, ...z.required.onSuccess],
+    });
   }
   return out;
 }
@@ -215,29 +200,9 @@ export function initialState(config: LockationConfig, startedAt: Date): Lockatio
   return state;
 }
 
-type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
-
-/** v1 state → v2 shape: the single required deadline becomes the matching slot; curfew/forbidden cooldowns are dropped. */
-export function migrateState(raw: unknown, config: LockationConfig): unknown {
-  if (!isObj(raw) || raw.v === 2) return raw;
-  const req = isObj(raw.required) ? raw.required : {};
-  const slot: Obj = {
-    lastValidAt: req.lastValidAt,
-    nextDeadline: req.nextDeadline,
-    missedCount: req.missedCount ?? 0,
-    missedSinceValid: req.missedSinceValid,
-  };
-  const slots: Obj = {};
-  const first = requiredSlots(config)[0];
-  if (first && (req.nextDeadline || req.lastValidAt)) slots[first.key] = slot;
-  const { curfew: _c, forbidden: _f, ...rest } = raw;
-  return { ...rest, v: 2, required: { slots } };
-}
-
 /** Parse stored state; returns a fresh state when missing or corrupt. Slots are synced to the config. */
 export function loadState(raw: unknown, config: LockationConfig, fallbackStart: Date, now: Date = fallbackStart): LockationState {
-  const res = LockationStateSchema.safeParse(migrateState(raw, config));
+  const res = LockationStateSchema.safeParse(raw);
   const state = res.success ? res.data : initialState(config, fallbackStart);
   syncSlots(config, state, now);
   return state;

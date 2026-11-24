@@ -159,9 +159,7 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
     const zones = zonesWithRole(config, 'required');
     const interval = zones.filter((z) => z.required.intervalCheckins);
     if (interval.length) {
-      if (required.combine === 'any') {
-        lines.push(`Check in inside ${interval.map((z) => z.name).join(' or ')} at least every ${fmtMinutes(required.intervalMinutes)} (grace ${fmtMinutes(required.graceMinutes)}).`);
-      } else {
+      {
         for (const z of interval) {
           lines.push(
             `Check in inside ${z.name} at least every ${fmtMinutes(z.required.intervalMinutes ?? required.intervalMinutes)} (grace ${fmtMinutes(z.required.graceMinutes ?? required.graceMinutes)})${z.required.onMissed.length ? `; missed there additionally: ${list(z.required.onMissed)}` : ''}.`,
@@ -242,8 +240,7 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
         `If no location arrives for ${fmtMinutes(tr.heartbeatMinutes)}: ${list(tr.onHeartbeatMissed)}.`,
         ...(tr.quietHours ? [`No missing-signal penalties between ${tr.quietHours.start} and ${tr.quietHours.end}.`] : []),
         ...(tr.warnBeforeMinutes ? [`You get a warning ${fmtMinutes(tr.warnBeforeMinutes)} before a missing-signal penalty (if notifications are set up).`] : []),
-        ...(tr.checkins !== 'manual' && required.enabled ? ['Background locations inside a required zone count as check-ins.'] : []),
-        ...(tr.checkins === 'manual' && required.enabled ? ['Required zones need manual check-ins; background locations are used for the other rules.'] : []),
+        ...(required.enabled ? ['Background locations inside a required zone count as check-ins.'] : []),
         ...(config.antiCheat.liveVerificationEveryHours ? [`Random verification pictures, on average every ${config.antiCheat.liveVerificationEveryHours} h.`] : []),
       ],
     });

@@ -664,8 +664,6 @@ describe('check-in mode selector', () => {
     c.antiCheat.liveVerificationEveryHours = 4;
     setCheckinMode(c, 'both');
     expect([c.tracking.checkins, c.antiCheat.liveVerificationEveryHours]).toEqual(['both', undefined]);
-    c.tracking.checkins = 'manual';
-    expect(checkinMode(c.tracking)).toBe('legacy');
   });
 });
 

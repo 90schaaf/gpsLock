@@ -6,15 +6,17 @@ const HOME = { lat: 47.3769, lng: 8.5417 };
 const BAR = { lat: 47.39, lng: 8.515 };
 
 const config = {
+  version: 2,
   timezone: 'Europe/Zurich',
   zones: [
     { id: 'home', name: 'Home', ...HOME, radiusM: 100 },
-    { id: 'bar', name: 'Bar', ...BAR, radiusM: 100 },
+    { id: 'bar', name: 'Bar', ...BAR, radiusM: 100, roles: ['forbidden'] },
   ],
-  tracking: { enabled: true, heartbeatMinutes: 120, entryConfirmMinutes: 0, onHeartbeatMissed: [{ type: 'add_time', seconds: 1800 }] },
+  tracking: { enabled: true, heartbeatMinutes: 120, onHeartbeatMissed: [{ type: 'add_time', seconds: 1800 }] },
   rules: {
-    forbidden: { enabled: true, zoneIds: ['bar'], onEnter: [{ type: 'add_time', seconds: 3600 }] },
-    hunt: { enabled: true, checkpoints: [{ id: 'c1', name: 'SecretSpot', lat: 47.4, lng: 8.6, radiusM: 80, hint: 'x' }] },
+    // immediate penalty, no warnings (keeps these tests independent of the escalation timeline)
+    forbidden: { enabled: true, firstWarningAfterMinutes: null, firstPenaltyAfterMinutes: 0, repeatWarningAfterMinutes: null, onEnter: [{ type: 'add_time', seconds: 3600 }] },
+    hunt: { enabled: true, reveal: 'distance', checkpoints: [{ id: 'c1', name: 'SecretSpot', lat: 47.4, lng: 8.6, radiusM: 80, hint: 'x' }] },
   },
 };
 
@@ -143,7 +145,7 @@ describe('F14 ingest', () => {
 
 describe('F16 live tracking only', () => {
   it('rejects manual check-ins with 403 and records nothing; tracking still works', async () => {
-    fake.addSession('s2', { ...config, tracking: { ...config.tracking, liveOnly: true } });
+    fake.addSession('s2', { ...config, tracking: { ...config.tracking, checkins: 'auto' } });
     fake.mainTokens.set('live-token', { role: 'wearer', sessionId: 's2' });
     const fix = { lat: BAR.lat, lng: BAR.lng, accuracy: 10, timestamp: now.getTime() };
     const r = await post('/api/checkin', { mainToken: 'live-token', fix, purpose: 'general' });
