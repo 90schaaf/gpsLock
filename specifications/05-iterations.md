@@ -442,3 +442,17 @@ per point, ack cleared when reasons change, save blocked, service failure → no
   5. Optional random verification pictures in live-tracking-only mode.
 - Before inviting testers: Chaster developer portal set up (slug `lockation`), end-to-end test with a test lock, OwnTracks test
   on a real iPhone and Android phone, disclaimer/privacy reviewed.
+
+### Improvements 2026-11-24 (implemented)
+
+- **Tracking setup confirmed by a manual send:** status *connected* only after the first OwnTracks location with trigger
+  `t: "u"` (user tapped publish) since pairing (`state.tracking.verifiedAt`). Automatic locations are evaluated meanwhile
+  (`view.tracking.receiving`); the setup panel polls every 5 s and shows "Setup complete".
+- **Test notification:** the setup sends "✅ Lockation test notification"; `POST /api/notify/test` sends another one.
+- **Reachability:** one confirmation for all flagged places (stored per place as `reachabilityAck` as before).
+- **Settings file:** export / import of the whole configuration (JSON, validated, disclaimer kept).
+- **Hunt control:** `rules.hunt.start: auto | wearer | keyholder | scheduled` (`startAt` or `startAfterMinutes`),
+  `pauseBy: nobody | keyholder | both`, `wearerCanAbort` + `onAbort`. State `hunt.status` gains `not_started | paused |
+  aborted`, `pausedAt`, `pausedMs` (extends the time limit). Keyholder can always force-start and end without consequences;
+  wearer abort = failed + `onAbort`. Self-locks: the wearer acts as wearer but may always start. `POST /api/hunt {action}`.
+  Checkpoints are hidden and don't count before the start or while paused; scheduled starts are run by the cron.

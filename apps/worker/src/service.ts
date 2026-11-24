@@ -1,6 +1,9 @@
 /** Application service: orchestrates Chaster API, core engine, storage and notifications. */
 import {
+  applyHuntAction,
   buildLogEntry,
+  type HuntAction,
+  HuntActionError,
   buildSessionView,
   computeMetadata,
   diffConfig,
@@ -193,9 +196,38 @@ export class LockationService {
     const audience = this.audience(r);
     const topic = await this.store.createTopic(r.sessionId, audience, this.now());
     await this.ntfy
-      .send(topic, { title: 'Lockation', message: audience === 'wearer' ? 'Warnings for your lock will arrive here.' : 'Notifications about your wearer\'s lock will arrive here.', click: this.appUrl })
+      .send(topic, { title: '✅ Lockation test notification', message: audience === 'wearer' ? 'Notifications are set up. Warnings for your lock will arrive here.' : 'Notifications are set up. Updates about your wearer\'s lock will arrive here.', click: this.appUrl })
       .catch(() => undefined);
     return { topic, ...this.ntfy.links(topic), view: await this.view(r, r.state) };
+  }
+
+  /** Sends a test message to the caller's own notification channel. */
+  async testNotification(mainToken: string): Promise<{ ok: true }> {
+    const r = await this.resolve(mainToken);
+    if (!this.ntfy) throw new HttpError(503, 'notifications_unavailable', 'Notifications are not configured on this server.');
+    const topic = await this.store.topic(r.sessionId, this.audience(r));
+    if (!topic) throw new HttpError(409, 'not_subscribed', 'Set up notifications first.');
+    try {
+      await this.ntfy.send(topic, { title: '✅ Lockation test notification', message: 'Notifications work. Warnings and updates for this lock will arrive here.', click: this.appUrl });
+    } catch {
+      throw new HttpError(502, 'ntfy_failed', 'The notification server did not accept the message. Check the NTFY_TOKEN secret.');
+    }
+    return { ok: true };
+  }
+
+  // ---------- scavenger hunt control ----------
+  async huntAction(mainToken: string, action: HuntAction): Promise<SessionView> {
+    const r = await this.resolve(mainToken);
+    if (r.session.lock?.status && r.session.lock.status !== 'locked') throw new HttpError(409, 'not_locked', 'The lock is not running.');
+    let result: EvalResult;
+    try {
+      result = applyHuntAction(r.config, r.state, action, r.role, { now: this.now(), sessionId: r.sessionId, evalId: this.newId(), rng: this.rng }, r.isSelfLock);
+    } catch (e) {
+      if (e instanceof HuntActionError) throw new HttpError(403, 'hunt_action_not_allowed', e.message);
+      throw e;
+    }
+    await this.finish(r, result, 'tick');
+    return this.view(r, result.state);
   }
 
   async stopNotifications(mainToken: string): Promise<SessionView> {

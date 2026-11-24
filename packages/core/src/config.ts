@@ -195,6 +195,17 @@ const HuntRuleSchema = z
     wrongCooldownMinutes: minutes(1440).default(10),
     timeLimitMinutes: z.number().int().min(10).max(525_600).optional(),
     blockUnlockUntilComplete: z.boolean().default(false),
+    /** How the hunt starts: with the lock, by the wearer, by the keyholder, or at a scheduled time. Keyholder can always force-start. */
+    start: z.enum(['auto', 'wearer', 'keyholder', 'scheduled']).default('auto'),
+    /** Scheduled start: absolute time (ISO) … */
+    startAt: z.string().max(40).optional(),
+    /** … or minutes after the lock started. */
+    startAfterMinutes: z.number().int().min(0).max(525_600).optional(),
+    /** Who may pause and resume a running hunt. A pause stops the time limit; checkpoints don't count while paused. */
+    pauseBy: z.enum(['nobody', 'keyholder', 'both']).default('keyholder'),
+    /** The wearer may abort the hunt (counts as failed and applies `onAbort`). The keyholder can always abort without consequences. */
+    wearerCanAbort: z.boolean().default(false),
+    onAbort: ConsequenceListSchema,
     onCheckpoint: ConsequenceListSchema,
     onWrong: ConsequenceListSchema,
     onComplete: ConsequenceListSchema,
@@ -313,6 +324,10 @@ export const LockationConfigSchema = z
       issue(['antiCheat', 'liveVerificationEveryHours'], 'random verification pictures need "live tracking only"');
     }
     if (R.hunt.enabled && R.hunt.checkpoints.length === 0) issue(['rules', 'hunt', 'checkpoints'], 'add at least one checkpoint');
+    if (R.hunt.start === 'scheduled' && !R.hunt.startAt && R.hunt.startAfterMinutes === undefined) {
+      issue(['rules', 'hunt', 'startAt'], 'set a start time or a delay after the lock start');
+    }
+    if (R.hunt.startAt !== undefined && !Number.isFinite(Date.parse(R.hunt.startAt))) issue(['rules', 'hunt', 'startAt'], 'invalid date/time');
     const cpIds = new Set<string>();
     R.hunt.checkpoints.forEach((c, i) => {
       if (cpIds.has(c.id)) issue(['rules', 'hunt', 'checkpoints', i, 'id'], `duplicate checkpoint id "${c.id}"`);

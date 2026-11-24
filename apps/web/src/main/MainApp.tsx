@@ -1,4 +1,4 @@
-import type { CheckinPurpose, CheckinRecord, Fix, SessionView } from '@lockation/core';
+import type { CheckinPurpose, CheckinRecord, Fix, SessionView, HuntAction } from '@lockation/core';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { LeafletMap, ZONE_COLORS, type MapCircle, type MapPoint } from '../components/LeafletMap.js';
 import { ApiError, type Backend } from '../lib/backend.js';
@@ -305,7 +305,8 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
 
         {view.hunt && (
           <div class="card" data-testid="hunt-card">
-            <h2>🧭 Scavenger hunt <span class={`badge ${view.hunt.status === 'completed' ? 'ok' : view.hunt.status === 'failed' ? 'bad' : ''}`}>{view.hunt.status}</span></h2>
+            <h2>🧭 Scavenger hunt <span class={`badge ${view.hunt.status === 'completed' ? 'ok' : view.hunt.status === 'failed' ? 'bad' : view.hunt.status === 'paused' || view.hunt.status === 'not_started' ? 'warn' : ''}`}>{HUNT_STATUS[view.hunt.status]}</span></h2>
+            <HuntControls view={view} backend={backend} onView={setView} onError={(message) => setError({ message })} />
             <div class="progress" aria-label="hunt progress"><span style={{ width: `${(view.hunt.index / Math.max(1, view.hunt.total)) * 100}%` }} /></div>
             <p class="small muted">
               {view.hunt.index} of {view.hunt.total} checkpoints found · {view.hunt.order === 'any' ? 'any order' : 'in order'}
@@ -584,6 +585,70 @@ function DemoBar({ mock, role, simulating, onClearSim, onChange }: { mock: MockB
               ))}
             </ul>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const HUNT_STATUS: Record<NonNullable<SessionView['hunt']>['status'], string> = {
+  not_started: 'not started',
+  active: 'running',
+  paused: 'paused',
+  completed: 'completed',
+  failed: 'failed',
+  aborted: 'ended',
+};
+
+/** Start / pause / resume / abort buttons for the scavenger hunt (only the actions this viewer may use). */
+export function HuntControls({ view, backend, onView, onError }: { view: SessionView; backend: Backend; onView: (v: SessionView) => void; onError: (m: string) => void }) {
+  const h = view.hunt;
+  const [busy, setBusy] = useState(false);
+  if (!h) return null;
+  const isKh = view.role === 'keyholder';
+  const run = async (a: HuntAction) => {
+    if (a === 'abort') {
+      const msg = isKh && !view.isSelfLock ? 'End the scavenger hunt? It ends without consequences.' : 'Give up the scavenger hunt? It counts as failed and may have consequences.';
+      if (!confirm(msg)) return;
+    }
+    setBusy(true);
+    try {
+      onView(await backend.huntAction(a));
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const label: Record<HuntAction, string> = {
+    start: isKh && h.start !== 'keyholder' && !view.isSelfLock ? '▶ Start now (force)' : '▶ Start hunt',
+    pause: '⏸ Pause',
+    resume: '▶ Resume',
+    abort: isKh && !view.isSelfLock ? '⏹ End hunt' : '🏳 Give up',
+  };
+  return (
+    <div class="stack" data-testid="hunt-controls">
+      {h.status === 'not_started' && (
+        <p class="small" style={{ margin: 0 }}>
+          {h.start === 'scheduled' && h.scheduledStartAt
+            ? `Starts automatically ${fmtTime(h.scheduledStartAt, view.timezone)}.`
+            : h.start === 'wearer'
+              ? isKh
+                ? 'Waiting for the wearer to start the hunt.'
+                : 'Start the hunt when you are ready – the checkpoints appear then.'
+              : isKh
+                ? 'Start the hunt when the wearer should begin.'
+                : 'The keyholder starts the hunt.'}
+        </p>
+      )}
+      {h.status === 'paused' && <p class="small warn-text" style={{ margin: 0 }}>Paused{h.pausedAt ? ` since ${fmtTime(h.pausedAt, view.timezone)}` : ''} – the time limit is stopped and checkpoints don't count.</p>}
+      {h.actions.length > 0 && (
+        <div class="row">
+          {h.actions.map((a) => (
+            <button key={a} class={a === 'start' || a === 'resume' ? 'primary' : a === 'abort' ? 'danger' : ''} disabled={busy} onClick={() => void run(a)}>
+              {label[a]}
+            </button>
+          ))}
         </div>
       )}
     </div>

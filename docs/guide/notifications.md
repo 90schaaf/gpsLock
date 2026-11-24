@@ -8,7 +8,8 @@ Both the wearer and the keyholder can set them up – each gets their own privat
 
 1. Install **ntfy**.
 2. Open Lockation on the lock and tap **🔔 Set up notifications**.
-3. Tap **Open in ntfy** (or scan the QR code) – ntfy subscribes to your private channel. A test message "Lockation" arrives.
+3. Tap **Open in ntfy** (or scan the QR code) – ntfy subscribes to your private channel. A **"✅ Lockation test notification"**
+   is sent right away; **Send test notification** sends another one at any time to check that everything works.
 
 **Stop notifications** removes the channel at any time. It is also removed automatically when the lock ends.
 

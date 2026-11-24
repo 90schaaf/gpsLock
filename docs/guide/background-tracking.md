@@ -30,10 +30,14 @@ uses the phone's battery-friendly location services.
 5. Give OwnTracks location access:
    - **iPhone:** Settings → OwnTracks → Location → **Always**, *Precise Location* on, and *Background App Refresh* on.
    - **Android:** App info → OwnTracks → Permissions → Location → **Allow all the time**; Battery → **Unrestricted**.
-6. Tap **↑** (publish) in OwnTracks once. Back in Lockation the card shows the real connection state:
+6. **Tap ↑ (publish) in OwnTracks once.** The setup is complete only with this first **manual** send – it proves that the
+   phone, the app and the connection work. The setup panel waits for it and then shows **✅ Setup complete**. Automatic
+   locations that arrive before are already evaluated, but the status stays *waiting* until you send manually.
+
+   Back in Lockation the card shows the real connection state:
    - **not set up** – no phone connected;
-   - **waiting for first location** – set up, but nothing has arrived from your phone yet (open OwnTracks once, check "Always");
-   - **connected** – a location arrived within the missing-signal time;
+   - **waiting for first location** – set up, but no manual send has arrived yet (tap ↑ in OwnTracks, check "Always");
+   - **connected** – setup confirmed and a location arrived within the missing-signal time;
    - **no signal** – the last location is older than that.
 
    Below it a live counter shows **"Next location expected by 14:32 · in 12:05"** – the latest time the next location must

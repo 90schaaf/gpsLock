@@ -175,7 +175,10 @@ describe('security: only wearer and keyholder', () => {
     const p = await pair();
     expect(p.view.tracking.status).toBe('waiting');
     await post('/track/owntracks', loc(HOME, now), basic(p.username, p.password));
-    const v = (await (await post('/api/session', { mainToken: 'wearer-token' })).json()) as any;
+    let v = (await (await post('/api/session', { mainToken: 'wearer-token' })).json()) as any;
+    expect(v.tracking).toMatchObject({ status: 'waiting', receiving: true }); // automatic location: setup not confirmed yet
+    await post('/track/owntracks', { ...loc(HOME, now), t: 'u' }, basic(p.username, p.password));
+    v = (await (await post('/api/session', { mainToken: 'wearer-token' })).json()) as any;
     expect(v.tracking.status).toBe('connected');
   });
 });

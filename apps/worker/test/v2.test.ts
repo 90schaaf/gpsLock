@@ -64,7 +64,7 @@ describe('notifications (ntfy)', () => {
     expect(s.url).toBe(`https://ntfy.sh/${s.topic}`);
     expect(s.deepLink).toBe(`ntfy://ntfy.sh/${s.topic}`);
     expect(s.view.notifications).toEqual({ available: true, subscribed: true });
-    expect(ntfy.sent[0]).toMatchObject({ topic: s.topic, title: 'Lockation' });
+    expect(ntfy.sent[0]).toMatchObject({ topic: s.topic, title: '✅ Lockation test notification' });
     const stop = (await (await post('/api/notify/stop', { mainToken: 'wearer-token' })).json()) as any;
     expect(stop.notifications.subscribed).toBe(false);
 
@@ -180,5 +180,27 @@ describe('session end', () => {
     const auth = { Authorization: `Basic ${btoa('hook:secret')}` };
     await post('/webhook', { event: 'extension_session.deleted', data: { session: { sessionId: 's1' } } }, auth);
     for (const t of ['history', 'devices', 'topics', 'due', 'sent']) expect(db.rows(t).filter((r) => r.session_id === 's1')).toHaveLength(0);
+  });
+});
+
+describe('test notification and hunt control endpoints', () => {
+  it('sends a test notification to the own channel', async () => {
+    expect((await post('/api/notify/test', { mainToken: 'wearer-token' })).status).toBe(409); // not subscribed
+    const s = await subscribe('wearer-token');
+    ntfy.sent = [];
+    expect((await post('/api/notify/test', { mainToken: 'wearer-token' })).status).toBe(200);
+    expect(ntfy.sent).toEqual([expect.objectContaining({ topic: s.topic, title: '✅ Lockation test notification' })]);
+  });
+
+  it('keyholder starts a keyholder-started hunt; wearer may not; actions in the view', async () => {
+    fake.addSession('s1', { ...config, rules: { ...config.rules, hunt: { ...config.rules.hunt, start: 'keyholder' } } });
+    let v = (await (await post('/api/session', { mainToken: 'kh-token' })).json()) as any;
+    expect(v.hunt).toMatchObject({ status: 'not_started', actions: ['start', 'abort'] });
+    expect((await post('/api/hunt', { mainToken: 'wearer-token', action: 'start' })).status).toBe(403);
+    const r = await post('/api/hunt', { mainToken: 'kh-token', action: 'start' });
+    expect(r.status).toBe(200);
+    v = await r.json();
+    expect(v.hunt.status).toBe('active');
+    expect(fake.calls.some((c) => c.path.endsWith('/logs/custom') && /keyholder started the scavenger hunt/.test(c.body.description))).toBe(true);
   });
 });

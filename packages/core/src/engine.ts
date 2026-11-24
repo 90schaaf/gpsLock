@@ -104,6 +104,8 @@ export interface TrackedInput {
   fix?: Fix;
   /** OwnTracks region transition, resolved by the caller to a zone or a hunt checkpoint. */
   transition?: { event: 'enter' | 'leave'; zoneId?: string; checkpointId?: string; at: number };
+  /** The wearer sent this location manually (OwnTracks ↑, trigger "u") – completes the tracking setup. */
+  manual?: boolean;
 }
 
 export interface TrackedResult extends CheckinResult {
@@ -120,6 +122,7 @@ const PENALTY_SOURCES = new Set([
   'tracking.onHeartbeatMissed',
   'hunt.onWrong',
   'hunt.onTimeout',
+  'hunt.onAbort',
   'antiCheat.implausible',
 ]);
 
@@ -323,13 +326,15 @@ export function evaluateTracked(config: LockationConfig, prevState: LockationSta
   const at = new Date(Math.min(fix?.timestamp ?? input.transition?.at ?? now.getTime(), now.getTime()));
 
   // Every authenticated message proves the device is alive (heartbeat).
-  const wasConnected = !!state.tracking.lastSeenAt && (!state.tracking.pairedAt || state.tracking.lastSeenAt >= state.tracking.pairedAt);
+  const verified = !!state.tracking.verifiedAt && (!state.tracking.pairedAt || state.tracking.verifiedAt >= state.tracking.pairedAt);
   state.tracking.lastSeenAt = now.toISOString();
   state.tracking.trackedCount += 1;
   if (config.tracking.enabled) {
     state.tracking.nextHeartbeat = nextHeartbeatFrom(config, now).toISOString();
-    if (!wasConnected) {
-      plan.notify({ audience: 'keyholder', kind: 'tracking', title: 'Lockation: tracking connected', message: 'The wearer\'s phone sent its first background location.', key: `tracking:connected:${state.tracking.pairedAt ?? ''}` });
+    if (!verified && input.manual) {
+      state.tracking.verifiedAt = now.toISOString();
+      plan.event('Background tracking set up – first location sent manually from OwnTracks.');
+      plan.notify({ audience: 'keyholder', kind: 'tracking', title: 'Lockation: tracking connected', message: 'The wearer completed the background tracking setup.', key: `tracking:connected:${state.tracking.pairedAt ?? ''}` });
     }
   }
 
@@ -458,6 +463,7 @@ function finalizeRecord(record: CheckinRecord, list: PlannedConsequence[]) {
 export function visibleCheckpoints(config: LockationConfig, state: LockationState): { cp: Checkpoint; index: number; status: 'found' | 'current' | 'open' | 'upcoming' }[] {
   const h = config.rules.hunt;
   if (!h.enabled) return [];
+  if (state.hunt.status === 'not_started') return [];
   const found = new Set(state.hunt.found);
   const all = h.checkpoints.map((cp, index) => {
     let status: 'found' | 'current' | 'open' | 'upcoming';
@@ -915,11 +921,20 @@ export function evaluateTick(config: LockationConfig, prevState: LockationState,
     state.freezeUntil = undefined;
   }
 
-  // F6 hunt timeout
+  // F6 hunt: scheduled start, then timeout (paused time extends the limit)
   const h = config.rules.hunt;
-  if (h.enabled && h.timeLimitMinutes && state.hunt.status === 'active') {
-    const start = Date.parse(state.hunt.startedAt ?? state.startedAt);
-    if (now.getTime() >= start + h.timeLimitMinutes * MINUTE) {
+  if (h.enabled && state.hunt.status === 'not_started' && h.start === 'scheduled') {
+    const at = huntScheduledStart(config, state);
+    if (at && now.getTime() >= at.getTime()) {
+      startHunt(state, now);
+      plan.event('Scavenger hunt started (scheduled).');
+      plan.notify({ audience: 'wearer', title: 'Scavenger hunt started', message: 'Your scavenger hunt has started – open Lockation for the first checkpoint.', priority: 'high', key: 'hunt:started' });
+      plan.notify({ audience: 'keyholder', kind: 'hunt', title: 'Lockation: hunt started', message: 'The scheduled scavenger hunt has started.', key: 'hunt:started' });
+    }
+  }
+  const huntDeadline = huntDeadlineOf(config, state);
+  if (h.enabled && huntDeadline && state.hunt.status === 'active') {
+    if (now.getTime() >= huntDeadline.getTime()) {
       state.hunt.status = 'failed';
       plan.addStable('hunt.onTimeout', h.onTimeout, 'hunt-timeout');
       plan.event('Scavenger hunt time limit exceeded.');
@@ -991,8 +1006,110 @@ export function nextDueAt(config: LockationConfig, state: LockationState, now: D
   }
   if (state.freezeUntil) push(Date.parse(state.freezeUntil));
   const h = config.rules.hunt;
-  if (h.enabled && h.timeLimitMinutes && state.hunt.status === 'active') push(Date.parse(state.hunt.startedAt ?? state.startedAt) + h.timeLimitMinutes * MINUTE);
+  if (h.enabled && state.hunt.status === 'active') push(huntDeadlineOf(config, state)?.getTime());
+  if (h.enabled && state.hunt.status === 'not_started' && h.start === 'scheduled') push(huntScheduledStart(config, state)?.getTime());
   if (state.nextLiveVerification) push(Date.parse(state.nextLiveVerification));
   if (!times.length) return undefined;
   return new Date(Math.max(now.getTime(), Math.min(...times)));
+}
+
+// ---------- hunt control (start / pause / resume / abort) ----------
+
+export type HuntAction = 'start' | 'pause' | 'resume' | 'abort';
+export type Actor = 'wearer' | 'keyholder';
+
+export class HuntActionError extends Error {}
+
+function startHunt(state: LockationState, at: Date) {
+  state.hunt.status = 'active';
+  state.hunt.startedAt = at.toISOString();
+  state.hunt.pausedAt = undefined;
+  state.hunt.pausedMs = 0;
+}
+
+/** Scheduled start time (absolute, or minutes after the lock start). */
+export function huntScheduledStart(config: LockationConfig, state: LockationState): Date | undefined {
+  const h = config.rules.hunt;
+  if (h.start !== 'scheduled') return undefined;
+  if (h.startAt && Number.isFinite(Date.parse(h.startAt))) return new Date(h.startAt);
+  if (h.startAfterMinutes !== undefined) return new Date(Date.parse(state.startedAt) + h.startAfterMinutes * MINUTE);
+  return undefined;
+}
+
+/** Time-limit deadline of a running hunt, extended by the paused time. Undefined while paused / not running. */
+export function huntDeadlineOf(config: LockationConfig, state: LockationState): Date | undefined {
+  const h = config.rules.hunt;
+  if (!h.timeLimitMinutes || state.hunt.status !== 'active') return undefined;
+  const start = Date.parse(state.hunt.startedAt ?? state.startedAt);
+  return new Date(start + h.timeLimitMinutes * MINUTE + (state.hunt.pausedMs ?? 0));
+}
+
+/** Which hunt actions an actor may perform right now. */
+/**
+ * On self-locks the wearer is their own keyholder: they act as the wearer (no penalty-free abort), but may always start.
+ */
+export function allowedHuntActions(config: LockationConfig, state: LockationState, actor: Actor, selfLock = false): HuntAction[] {
+  const h = config.rules.hunt;
+  if (!h.enabled) return [];
+  const s = state.hunt.status;
+  const out: HuntAction[] = [];
+  if (s === 'not_started' && (actor === 'keyholder' || h.start === 'wearer' || selfLock)) out.push('start');
+  const mayPause = h.pauseBy === 'both' || (h.pauseBy === 'keyholder' && actor === 'keyholder');
+  if (s === 'active' && mayPause) out.push('pause');
+  if (s === 'paused' && mayPause) out.push('resume');
+  if ((s === 'not_started' || s === 'active' || s === 'paused') && (actor === 'keyholder' || h.wearerCanAbort)) out.push('abort');
+  return out;
+}
+
+/** Apply a hunt action. Throws `HuntActionError` if the actor may not do it. */
+export function applyHuntAction(config: LockationConfig, prevState: LockationState, action: HuntAction, actor: Actor, ctx: EvalContext, selfLock = false): EvalResult {
+  if (!allowedHuntActions(config, prevState, actor, selfLock).includes(action)) {
+    throw new HuntActionError(`The ${actor} cannot ${action} the hunt right now.`);
+  }
+  const state = cloneState(prevState);
+  const plan = new Planner(ctx);
+  const now = ctx.now;
+  const h = config.rules.hunt;
+  const who = actor === 'keyholder' ? 'The keyholder' : 'The wearer';
+  const other: Notice['audience'] = actor === 'keyholder' ? 'wearer' : 'keyholder';
+  const tell = (title: string, message: string) =>
+    plan.notify(other === 'keyholder' ? { audience: 'keyholder', kind: 'hunt', title: `Lockation: ${title.toLowerCase()}`, message, key: `hunt:${action}:${now.toISOString()}` } : { audience: 'wearer', title, message, priority: 'high', key: `hunt:${action}:${now.toISOString()}` });
+
+  switch (action) {
+    case 'start':
+      startHunt(state, now);
+      plan.event(`${who} started the scavenger hunt${actor === 'keyholder' && h.start !== 'keyholder' ? ' (forced)' : ''}.`);
+      tell('Hunt started', `${who} started the scavenger hunt.`);
+      break;
+    case 'pause':
+      state.hunt.status = 'paused';
+      state.hunt.pausedAt = now.toISOString();
+      plan.event(`${who} paused the scavenger hunt.`);
+      tell('Hunt paused', `${who} paused the scavenger hunt – the time limit is stopped.`);
+      break;
+    case 'resume': {
+      const since = state.hunt.pausedAt ? Date.parse(state.hunt.pausedAt) : now.getTime();
+      state.hunt.pausedMs = (state.hunt.pausedMs ?? 0) + Math.max(0, now.getTime() - since);
+      state.hunt.pausedAt = undefined;
+      state.hunt.status = 'active';
+      plan.event(`${who} resumed the scavenger hunt.`);
+      tell('Hunt resumed', `${who} resumed the scavenger hunt.`);
+      break;
+    }
+    case 'abort':
+      state.hunt.pausedAt = undefined;
+      if (actor === 'keyholder') {
+        state.hunt.status = 'aborted';
+        plan.event('The keyholder ended the scavenger hunt (no consequences).');
+        tell('Hunt ended', 'The keyholder ended the scavenger hunt.');
+      } else {
+        state.hunt.status = 'failed';
+        plan.addStable('hunt.onAbort', h.onAbort, `hunt-abort:${now.toISOString()}`);
+        plan.event(`The wearer gave up the scavenger hunt${h.onAbort.length ? ` – ${list(h.onAbort)}` : ''}.`);
+        tell('Hunt aborted', `The wearer gave up the scavenger hunt${h.onAbort.length ? `: ${list(h.onAbort)}` : ''}.`);
+      }
+      break;
+  }
+  trackFreeze(state, plan.list, now);
+  return { state, consequences: plan.list, events: plan.events, notices: plan.finish() };
 }

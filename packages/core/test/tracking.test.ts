@@ -288,6 +288,8 @@ describe('tracking status and position visibility', () => {
     s.tracking.lastSeenAt = minutes(T0, 5).toISOString(); // from an earlier pairing
     expect(trackingStatus(s, 120, minutes(T0, 11))).toBe('waiting');
     s.tracking.lastSeenAt = minutes(T0, 12).toISOString();
+    expect(trackingStatus(s, 120, minutes(T0, 13))).toBe('waiting'); // locations arrive, but no manual send yet
+    s.tracking.verifiedAt = minutes(T0, 12).toISOString();
     expect(trackingStatus(s, 120, minutes(T0, 13))).toBe('connected');
     expect(trackingStatus(s, 120, minutes(T0, 12 + 121))).toBe('no_signal');
   });

@@ -111,6 +111,7 @@ interface OwnTracksMessage {
   tst?: unknown;
   event?: unknown;
   desc?: unknown;
+  t?: unknown;
 }
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
@@ -130,7 +131,8 @@ export function parseOwnTracks(body: unknown, config: LockationConfig): TrackedI
     lat !== undefined && lng !== undefined && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
       ? { lat, lng, accuracy: num(m.acc) ?? 0, timestamp: Math.round(tst * 1000) }
       : undefined;
-  if (m._type === 'location') return fix ? { fix } : undefined;
+  // OwnTracks trigger "u" = the user tapped publish (manual send).
+  if (m._type === 'location') return fix ? { fix, ...(m.t === 'u' ? { manual: true } : {}) } : undefined;
   if (m._type === 'transition') {
     const event = m.event === 'enter' || m.event === 'leave' ? m.event : undefined;
     if (!event) return fix ? { fix } : undefined;

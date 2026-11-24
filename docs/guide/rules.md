@@ -92,6 +92,14 @@ Time amounts are multiplied by the number of steps. Movements flagged as implaus
   (*wrong turn* consequences, at most once per cooldown).
 - With background tracking, the checkpoints you can see are synced to OwnTracks, so reaching one is reported immediately.
 - Optional **time limit** (hunt fails, *time limit* runs once) and **block unlocking** until completed.
+- **Start**: automatically with the lock (default), by the **wearer** (*Start hunt* button), by the **keyholder**, or at a
+  **scheduled time** (date/time or minutes after the lock start). Before the start, checkpoints are hidden and don't count.
+  The keyholder can always start the hunt early (*Start now*).
+- **Pause / resume**: *nobody*, *keyholder only* (default) or *wearer and keyholder*. While paused the time limit stops and
+  checkpoints don't count; the paused time is added to the time limit.
+- **Ending early**: the keyholder can always end the hunt – without consequences. If allowed, the wearer can **give up** – the
+  hunt counts as failed and *wearer gives up* runs (e.g. add 1 day). Unlocking is no longer blocked by the hunt afterwards.
+- The other side is notified when someone starts, pauses, resumes or ends the hunt.
 
 ## Background tracking
 

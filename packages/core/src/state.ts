@@ -67,8 +67,12 @@ export const LockationStateSchema = z.object({
       /** Sequence mode: index of the current checkpoint. Any-order mode: equals `found.length`. */
       index: z.number().int().default(0),
       found: z.array(z.string()).default([]),
-      status: z.enum(['active', 'completed', 'failed']).default('active'),
+      /** not_started → active ⇄ paused → completed | failed (timeout, wearer abort) | aborted (keyholder). */
+      status: z.enum(['not_started', 'active', 'paused', 'completed', 'failed', 'aborted']).default('active'),
       startedAt: iso.optional(),
+      pausedAt: iso.optional(),
+      /** Total paused time (ms) – extends the time limit. */
+      pausedMs: z.number().default(0),
       lastWrongAt: iso.optional(),
       lastDistanceBand: z.string().optional(),
     })
@@ -88,6 +92,8 @@ export const LockationStateSchema = z.object({
       monitoring: z.number().int().optional(),
       /** Heartbeat deadline for which the missing-signal warning was sent. */
       warnedFor: iso.optional(),
+      /** First manual send (OwnTracks ↑) after pairing – completes the setup. */
+      verifiedAt: iso.optional(),
     })
     .default({}),
   /** Live-only locks: next random verification picture. */
@@ -196,7 +202,8 @@ export function nextHeartbeatFrom(config: LockationConfig, from: Date): Date {
 
 export function initialState(config: LockationConfig, startedAt: Date): LockationState {
   const state = LockationStateSchema.parse({ startedAt: startedAt.toISOString() });
-  state.hunt.startedAt = startedAt.toISOString();
+  if (config.rules.hunt.start === 'auto') state.hunt.startedAt = startedAt.toISOString();
+  else state.hunt.status = 'not_started';
   syncSlots(config, state, startedAt);
   if (config.tracking.enabled) {
     state.tracking.nextHeartbeat = nextHeartbeatFrom(config, startedAt).toISOString();

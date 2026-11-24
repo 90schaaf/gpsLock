@@ -493,7 +493,7 @@ describe('UI smoke tests (jsdom)', () => {
       throw new Error('unused');
     });
     expect(ok).toBe(false);
-    (el.querySelector('[data-testid="reach-flag"] input') as HTMLInputElement).click();
+    (el.querySelector('[data-testid="reach-ack-all"]') as HTMLInputElement).click(); // one confirmation for all flagged places
     await vi.advanceTimersByTimeAsync(200);
     expect(el.querySelector('[data-testid="reach-blocker"]')).toBeNull();
     // Required tab lists only required zones
@@ -605,4 +605,50 @@ describe('inline validation', () => {
     expect(issueLabel('rules.forbidden.enabled', cfg)).toBe('');
   });
 
+});
+
+describe('hunt control, test notification, setup confirmation, settings file (demo)', () => {
+  const mem = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) };
+  };
+  const DISC = { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' };
+
+  it('keyholder-started hunt: wearer cannot start, keyholder can; pause by keyholder', async () => {
+    const b = new MockBackend(mem());
+    const { config } = await b.configGet();
+    await b.configSave({ ...config, disclaimer: DISC, rules: { ...config.rules, hunt: { ...config.rules.hunt, start: 'keyholder' } } });
+    b.setRole('wearer');
+    let v = await b.session();
+    expect(v.hunt).toMatchObject({ status: 'not_started', actions: [] });
+    await expect(b.huntAction('start')).rejects.toMatchObject({ status: 403 });
+    b.setRole('keyholder');
+    v = await b.huntAction('start');
+    expect(v.hunt?.status).toBe('active');
+    v = await b.huntAction('pause');
+    expect(v.hunt).toMatchObject({ status: 'paused', actions: ['resume', 'abort'] });
+  });
+
+  it('test notification needs a subscription; demo track() confirms the tracking setup', async () => {
+    const b = new MockBackend(mem());
+    await expect(b.testNotification()).rejects.toMatchObject({ status: 409 });
+    await b.setupNotifications();
+    await expect(b.testNotification()).resolves.toEqual({ ok: true });
+    expect(b.demoLog().some((l) => /test notification/.test(l.title))).toBe(true);
+    await b.pairTracking();
+    expect((await b.session()).tracking?.status).toBe('waiting');
+    const home = (await b.configGet()).config.zones[0]!;
+    await b.track({ lat: home.lat, lng: home.lng, accuracy: 10, timestamp: Date.now() });
+    expect((await b.session()).tracking?.status).toBe('connected');
+  });
+
+  it('settings file: export/import round trip, invalid files rejected', async () => {
+    const { importConfigText } = await import('../src/config/ConfigApp.js');
+    const cfg = demoConfig();
+    const ok = importConfigText(JSON.stringify(cfg));
+    expect(ok.ok && ok.config.zones.map((z) => z.name)).toEqual(cfg.zones.map((z) => z.name));
+    expect(importConfigText('not json')).toMatchObject({ ok: false, error: expect.stringContaining('not JSON') });
+    const bad = importConfigText(JSON.stringify({ ...cfg, zones: [{ ...cfg.zones[0], radiusM: 1 }] }));
+    expect(bad).toMatchObject({ ok: false, error: expect.stringMatching(/Radius/) });
+  });
 });

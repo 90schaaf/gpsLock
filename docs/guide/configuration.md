@@ -17,8 +17,9 @@ The configuration can be edited later while the lock is running (as far as Chast
   - *Lenient* (default): the position must be inside the zone.
   - *Strict*: the whole accuracy circle must be inside – fairer for forbidden zones (suggested automatically for them), harder for required zones.
 - **Safety check**: every zone and checkpoint is checked against OpenStreetMap (water, sea, glacier/cliff, military areas,
-  runways/railways, no road or path nearby). A place flagged as *out of reach* must be confirmed individually ("I know – this
-  place is intentionally hard to reach") before you can save. The wearer sees the confirmed note.
+  runways/railways, no road or path nearby). Places flagged as *out of reach* are listed at the top of the page; **one**
+  confirmation ("I know – these places are intentionally hard to reach") covers all of them. Moving a place checks it again.
+  The wearer sees the confirmed note.
 - **Timezone**: used for windows, quiet hours and daily limits. It is set automatically from your browser.
 
 A zone does nothing by itself – it gets its meaning from its role and the rules below.
@@ -85,6 +86,12 @@ offer commands yet – as soon as they do, they will appear in the command list 
 - **Exact**: the keyholder can see each check-in on a map.
 
 The wearer sees this before accepting the lock and can always switch to *zones only*. Read more in [Privacy & fairness](./privacy).
+
+## Settings file 💾
+
+**Export** downloads all settings as `lockation-config.json` – e.g. to reuse a setup for another lock or as a backup.
+**Import** loads such a file into the page (it is validated; older files are converted). Nothing is saved until you save; the
+disclaimer acceptance of the current lock is kept.
 
 ## Disclaimer ✅
 
