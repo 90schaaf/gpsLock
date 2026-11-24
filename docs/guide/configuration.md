@@ -85,8 +85,8 @@ The wearer sees this before accepting the lock and can always switch to *zones o
 
 ## Disclaimer ✅
 
-Before the first save the keyholder must tick **"I have read the disclaimer and use Lockation at my own risk"** at the bottom of the
-page. Without it, saving fails. The confirmation is stored with the lock's configuration; if the [disclaimer](./disclaimer) changes
+The **Zones** tab first shows the disclaimer: tick **"I have read the disclaimer and use Lockation at my own risk"** to start.
+Until then no zones or checkpoints can be added and saving fails; after accepting, the notice disappears. The confirmation is stored with the lock's configuration; if the [disclaimer](./disclaimer) changes
 materially, you are asked again.
 
 ## Example setups

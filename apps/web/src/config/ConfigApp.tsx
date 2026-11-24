@@ -160,7 +160,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
       throw new Error('unconfirmed_reachability');
     }
     if (!disclaimerAccepted(v.config)) {
-      setSaveMsg('Please accept the disclaimer at the bottom of the page before saving.');
+      setSaveMsg('Please accept the disclaimer on the Zones tab before saving.');
       throw new Error('disclaimer');
     }
     try {
@@ -212,6 +212,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
     ? R.hunt.checkpoints.map((c, i) => ({ id: c.id, lat: c.lat, lng: c.lng, radiusM: c.radiusM, color: ZONE_COLORS.hunt, label: `${flagged(c.id) ? '⚠ ' : ''}${i + 1}. ${c.name}`, draggable: true, selected: c.id === selected }))
     : config.zones.map((z) => ({ id: z.id, lat: z.lat, lng: z.lng, radiusM: z.radiusM, color: zoneColor(z), label: `${flagged(z.id) ? '⚠ ' : ''}${z.name}`, draggable: true, selected: z.id === selected }));
 
+  const accepted = disclaimerAccepted(config);
   const placeCount = config.zones.length + R.hunt.checkpoints.length;
   const placesFull = placeCount >= MAX_PLACES;
   const placesInfo = (
@@ -222,6 +223,10 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
   );
 
   function addAt(p: { lat: number; lng: number }, name?: string) {
+    if (!accepted) {
+      setTab('zones'); // shows the disclaimer
+      return;
+    }
     if (placesFull) {
       setTab(isHunt ? 'hunt' : 'zones'); // shows the "limit reached" note
       return;
@@ -329,19 +334,43 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
         ))}
       </div>
 
+      {tab === 'zones' && !accepted && (
+        <div class="card stack" data-testid="disclaimer">
+          <h2>⚠️ Before you start</h2>
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={false}
+              onChange={(e) => {
+                if (!checked(e)) return;
+                edit((d) => { d.disclaimer = { version: DISCLAIMER_VERSION, acceptedAt: new Date().toISOString() }; });
+              }}
+            />
+            <span>
+              I have read the <a href="../guide/disclaimer.html" target="_blank" rel="noopener">disclaimer</a> and use Lockation at my own risk.
+              Lockation is beta software without any warranty; safety always comes first.
+            </span>
+          </label>
+          <p class="small muted" style={{ margin: 0 }}>Accept the disclaimer to add zones.</p>
+        </div>
+      )}
+      {tab === 'hunt' && !accepted && (
+        <div class="notice small" data-testid="disclaimer-hint">Accept the disclaimer on the <button class="link" onClick={() => setTab('zones')}>Zones</button> tab to add checkpoints.</div>
+      )}
+
       {mapUsable && (
         <>
-          <AddressSearch onPick={(p, name) => { addAt(p, name); setFitKey(newId('f')); }} />
+          {accepted && <AddressSearch onPick={(p, name) => { addAt(p, name); setFitKey(newId('f')); }} />}
           <LeafletMap
             circles={circles}
             fitKey={`${fitKey}-${tab}`}
             height="360px"
-            onClick={addAt}
+            onClick={accepted ? addAt : undefined}
             onCircleClick={setSelected}
             onCircleMove={move}
           />
           <p class="small muted" style={{ margin: 0 }}>
-            Tap the map to add a {isHunt ? 'checkpoint' : 'zone'}; drag the handle to move it. Radius {MIN_RADIUS_M} m – {MAX_RADIUS_M / 1000} km.
+            {accepted ? `Tap the map to add a ${isHunt ? 'checkpoint' : 'zone'}; ` : ''}Drag the handle to move it. Radius {MIN_RADIUS_M} m – {MAX_RADIUS_M / 1000} km.
           </p>
         </>
       )}
@@ -798,23 +827,6 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
           </p>
         </div>
       )}
-
-      <div class="card stack" data-testid="disclaimer">
-        <label class="check">
-          <input
-            type="checkbox"
-            checked={disclaimerAccepted(config)}
-            onChange={(e) => {
-              const on = checked(e);
-              edit((d) => { d.disclaimer = on ? { version: DISCLAIMER_VERSION, acceptedAt: new Date().toISOString() } : undefined; });
-            }}
-          />
-          <span>
-            I have read the <a href="../guide/disclaimer.html" target="_blank" rel="noopener">disclaimer</a> and use Lockation at my own risk.
-            Lockation is beta software without any warranty; safety always comes first.
-          </span>
-        </label>
-      </div>
 
       {(!embedded || backend.demo) && (
         <div class="row">

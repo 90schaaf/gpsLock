@@ -504,4 +504,31 @@ describe('UI smoke tests (jsdom)', () => {
     vi.useRealTimers();
     render(null, el);
   });
+
+  it('shows the disclaimer only on the Zones tab until accepted; adding places needs it', async () => {
+    setup();
+    const { h, render } = await import('preact');
+    const { ConfigApp } = await import('../src/config/ConfigApp.js');
+    const b = new MockBackend(memStore());
+    const { win } = fakeWindow();
+    const bridge = new ConfigBridge(win);
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(h(ConfigApp, { backend: b, bridge, reachCheck: async () => ({ state: 'ok' }) as ReachStatus }), el);
+    await vi.advanceTimersByTimeAsync(200);
+    const card = el.querySelector('[data-testid="disclaimer"]');
+    expect(card).not.toBeNull();
+    expect(el.querySelector('input[placeholder*="address" i]')).toBeNull(); // no address search yet
+    (card!.querySelector('input[type="checkbox"]') as HTMLInputElement).click();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(el.querySelector('[data-testid="disclaimer"]')).toBeNull();
+    const huntTab = [...el.querySelectorAll('.tabs button')].find((x) => x.textContent?.includes('Hunt')) as HTMLButtonElement;
+    huntTab.click();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(el.querySelector('[data-testid="disclaimer"]')).toBeNull();
+    expect(el.querySelector('[data-testid="disclaimer-hint"]')).toBeNull();
+    vi.useRealTimers();
+    render(null, el);
+  });
 });
