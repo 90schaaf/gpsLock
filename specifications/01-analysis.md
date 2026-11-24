@@ -1,5 +1,10 @@
 # 01 – Analysis: Intent, Constraints, Findings
 
+> **Historical document.** This is the original analysis and Q&A log from 2026-11-23. Several decisions were refined later
+> (e.g. D1 instead of KV, a 1-minute cron, 20 m minimum radius, background tracking via OwnTracks). The current behaviour
+> is specified in [02-architecture.md](02-architecture.md), [03-features.md](03-features.md) and
+> [04-data-model-and-api.md](04-data-model-and-api.md); changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
 Status: **accepted** (refined with the product owner on 2026-11-23)
 
 ## 1. Intent
