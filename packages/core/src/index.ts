@@ -8,3 +8,4 @@ export * from './view.js';
 export * from './known-commands.js';
 export * from './owntracks.js';
 export * from './diff.js';
+export * from './app.js';

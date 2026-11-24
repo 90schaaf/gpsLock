@@ -34,13 +34,5 @@ export interface ExecutionContextLike {
   waitUntil(p: Promise<unknown>): void;
 }
 
-export class HttpError extends Error {
-  constructor(
-    public status: number,
-    public code: string,
-    message: string,
-    public details?: unknown,
-  ) {
-    super(message);
-  }
-}
+/** HTTP errors are the shared application errors (status, code, message, details). */
+export { AppError as HttpError } from '@lockation/core';

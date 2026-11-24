@@ -1,29 +1,22 @@
 /** F13 – demo backend: runs the real rule engine in the browser, persisted in localStorage. */
 import {
-  applyHuntAction,
-  type HuntAction,
-  HuntActionError,
-  buildLogEntry,
-  buildSessionView,
-  diffConfig,
-  evaluateCheckin,
-  isLiveOnly,
-  disclaimerAccepted,
-  evaluateTick,
-  evaluateTracked,
-  owntracksConfigLink,
-  owntracksMonitoring,
-  initialState,
-  KNOWN_COMMANDS,
-  loadState,
-  parseConfig,
-  parseConfigOrDefault,
+  AppError,
   type CheckinPurpose,
   type CheckinRecord,
   type Fix,
+  type HuntAction,
+  initialState,
+  KNOWN_COMMANDS,
+  loadState,
+  LockationApp,
   type LockationConfig,
   type LockationState,
-  type Notice,
+  type LockSession,
+  owntracksConfigLink,
+  owntracksLocatorInterval,
+  owntracksMonitoring,
+  parseConfig,
+  parseConfigOrDefault,
 } from '@lockation/core';
 import { ApiError, type Backend, type NotificationSetup, type PairingResult } from './backend.js';
 
@@ -109,12 +102,63 @@ export function demoConfig(center = { lat: 47.3769, lng: 8.5417 }): LockationCon
   });
 }
 
+/** A demo "lock session": the shared application service works on this, the adapter keeps it in localStorage. */
+interface DemoSession extends LockSession {
+  store: DemoStore;
+}
+
+/**
+ * Demo backend. The flow (evaluate, apply, log, persist, history, notices) is the shared `LockationApp` from
+ * @lockation/core – the same code the worker runs; only the ports differ (localStorage instead of Chaster/D1/ntfy).
+ */
 export class MockBackend implements Backend {
   readonly demo = true;
+  private app: LockationApp<DemoSession>;
+
   constructor(
     private storage: StorageLike = window.localStorage,
     private now: () => Date = () => new Date(),
-  ) {}
+  ) {
+    const self = this;
+    this.app = new LockationApp<DemoSession>({
+      now: () => self.now(),
+      newId: () => crypto.randomUUID(),
+      async saveState(d, state) {
+        d.state = state;
+        d.store.state = state;
+        self.save(d.store);
+      },
+      async applyConsequences(_d, list) {
+        return list.map(() => ({ ok: true }));
+      },
+      async log(d, entry) {
+        self.log(d.store, entry.title, entry.description);
+        self.save(d.store);
+      },
+      async appendHistory(d, record) {
+        d.store.history = [record, ...d.store.history].slice(0, 200);
+        self.save(d.store);
+      },
+      async listHistory(d) {
+        return d.store.history;
+      },
+      async redactHistory(d) {
+        d.store.history = d.store.history.map(({ lat: _a, lng: _b, ...r }) => r);
+        self.save(d.store);
+      },
+      async deliver(d, notices) {
+        // Wearer notices (warnings) always go to the demo log; keyholder notices only if their switch is on.
+        for (const n of notices) {
+          if (n.audience === 'wearer') self.log(d.store, `🔔 ${n.title}`, n.message);
+          else if (!n.kind || d.config.notifications.keyholder[n.kind]) self.log(d.store, `🔔 Keyholder: ${n.title}`, n.message);
+        }
+        self.save(d.store);
+      },
+      async notificationStatus(d, audience) {
+        return { available: true, subscribed: !!d.store.notify?.[audience] };
+      },
+    });
+  }
 
   load(): DemoStore {
     try {
@@ -143,61 +187,44 @@ export class MockBackend implements Backend {
     s.log = s.log.slice(0, 200);
   }
 
-  /** Wearer notices (warnings) always go to the demo log; keyholder notices only if their switch is on. */
-  private logNotices(s: DemoStore, config: LockationConfig, notices: Notice[]) {
-    for (const n of notices) {
-      if (n.audience === 'wearer') this.log(s, `🔔 ${n.title}`, n.message);
-      else if (!n.kind || config.notifications.keyholder[n.kind]) this.log(s, `🔔 Keyholder: ${n.title}`, n.message);
+  /** Load the demo session and simulate the cron (every request runs a tick, like the worker's 1-minute cron). */
+  private async session_(): Promise<DemoSession> {
+    const store = this.load();
+    const config = parseConfigOrDefault(store.config);
+    const state = store.state ? loadState(store.state, config, this.now(), this.now()) : initialState(config, this.now());
+    const d: DemoSession = { sessionId: 'demo', config, state, isSelfLock: false, locked: true, store };
+    await this.app.tick(d, { hadState: !!store.state });
+    store.state = d.state;
+    this.save(store);
+    return d;
+  }
+
+  /** Map the shared AppError to the transport error the UI understands. */
+  private async run<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (e) {
+      if (e instanceof AppError) throw new ApiError(e.status, e.code, e.message, e.details);
+      throw e;
     }
   }
 
-  private ctx() {
-    const s = this.load();
-    const config = parseConfigOrDefault(s.config);
-    let state = s.state ? loadState(s.state, config, this.now(), this.now()) : initialState(config, this.now());
-    // Simulate the cron on every request.
-    const tick = evaluateTick(config, state, { now: this.now(), sessionId: 'demo', evalId: `tick-${this.now().getTime()}` });
-    state = tick.state;
-    const entry = buildLogEntry('tick', tick.events, tick.consequences);
-    if (entry) this.log(s, entry.title, entry.description);
-    this.logNotices(s, config, tick.notices);
-    s.state = state;
-    this.save(s);
-    return { s, config, state };
-  }
-
-  private view(s: DemoStore, config: LockationConfig, state: LockationState) {
-    const v = buildSessionView({ role: s.role, isSelfLock: false, config, state, history: s.history, now: this.now() });
-    v.notifications = { available: true, subscribed: !!s.notify?.[s.role] };
-    return v;
-  }
-
   async session() {
-    const { s, config, state } = this.ctx();
-    return this.view(s, config, state);
+    const d = await this.session_();
+    return this.app.view(d, d.store.role);
   }
 
   async checkin(fix: Fix, purpose: CheckinPurpose) {
-    const { s, config, state } = this.ctx();
-    if (s.role !== 'wearer') throw new ApiError(403, 'not_wearer', 'Only the wearer can check in (switch role in the demo bar).');
-    if (isLiveOnly(config)) throw new ApiError(403, 'manual_disabled', 'Manual check-ins are disabled for this lock – only live tracking counts.');
-    const res = evaluateCheckin(config, state, fix, { now: this.now(), sessionId: 'demo', evalId: crypto.randomUUID() }, purpose);
-    res.record.consequences = res.record.consequences.map((c) => ({ ...c, ok: true }));
-    const entry = buildLogEntry('checkin', res.events, res.consequences, res.record);
-    if (entry) this.log(s, entry.title, entry.description);
-    this.logNotices(s, config, res.notices);
-    s.state = res.state;
-    s.history = [res.record, ...s.history].slice(0, 200);
-    this.save(s);
-    return { record: res.record, view: this.view(s, config, res.state) };
+    return this.run(async () => {
+      const d = await this.session_();
+      if (d.store.role !== 'wearer') throw new AppError(403, 'not_wearer', 'Only the wearer can check in (switch role in the demo bar).');
+      return this.app.checkin(d, d.store.role, fix, purpose);
+    });
   }
 
   async downgradePrivacy() {
-    const { s, config, state } = this.ctx();
-    s.state = { ...state, privacyOverride: 'zone_only' };
-    s.history = s.history.map(({ lat: _a, lng: _b, ...r }) => r);
-    this.save(s);
-    return this.view(s, config, s.state);
+    const d = await this.session_();
+    return this.app.downgradePrivacy(d, d.store.role);
   }
 
   async configGet() {
@@ -206,22 +233,20 @@ export class MockBackend implements Backend {
   }
 
   async configSave(config: LockationConfig) {
-    const parsed = parseConfig(config);
-    if (!parsed.ok) throw new ApiError(400, 'invalid_config', 'The configuration is invalid.', parsed.issues);
-    if (!disclaimerAccepted(parsed.config)) throw new ApiError(400, 'disclaimer_required', 'Please accept the Lockation disclaimer before saving.');
-    const s = this.load();
-    if (s.state) {
-      // The demo "lock" keeps running – like the worker, tell the wearer what changed.
-      const summary = diffConfig(parseConfigOrDefault(s.config), parsed.config);
-      if (summary.length) {
-        const state = loadState(s.state, parsed.config, this.now(), this.now());
-        state.rulesChanged = { at: this.now().toISOString(), summary };
-        s.state = state;
-        this.log(s, 'Lockation rules changed', summary.join('\n'));
-        if (s.notify?.wearer) this.log(s, '🔔 Lockation rules changed', summary.join('\n'));
+    return this.run(async () => {
+      const parsed = parseConfig(config);
+      if (!parsed.ok) throw new AppError(400, 'invalid_config', 'The configuration is invalid.', parsed.issues);
+      const store = this.load();
+      const before = parseConfigOrDefault(store.config);
+      LockationApp.checkSave(before, parsed.config, false); // the demo lock may switch privacy freely
+      store.config = parsed.config;
+      this.save(store);
+      if (store.state) {
+        // The demo "lock" keeps running – like the worker, tell the wearer what changed.
+        const d: DemoSession = { sessionId: 'demo', config: parsed.config, state: loadState(store.state, parsed.config, this.now(), this.now()), isSelfLock: false, locked: true, store };
+        await this.app.announceChanges(d, before);
       }
-    }
-    this.save({ ...s, config: parsed.config });
+    });
   }
 
   async capabilities() {
@@ -229,66 +254,60 @@ export class MockBackend implements Backend {
   }
 
   async pairTracking(): Promise<PairingResult> {
-    const { s, config, state } = this.ctx();
-    if (s.role !== 'wearer') throw new ApiError(403, 'not_wearer', 'Only the wearer can set up background tracking.');
-    const opts = { url: 'https://lockation.example.workers.dev/track/owntracks', username: 'lodemo', password: 'demo-password', monitoring: owntracksMonitoring(config) };
-    s.state = { ...state, tracking: { ...state.tracking, deviceUser: opts.username, pairedAt: this.now().toISOString() } };
-    this.save(s);
-    return { link: owntracksConfigLink(opts), url: opts.url, username: opts.username, password: opts.password, view: this.view(s, config, s.state) };
+    return this.run(async () => {
+      const d = await this.session_();
+      const monitoring = owntracksMonitoring(d.config);
+      const locatorInterval = owntracksLocatorInterval(d.config);
+      const opts = { url: 'https://lockation.example.workers.dev/track/owntracks', username: 'lodemo', password: 'demo-password', monitoring, locatorInterval };
+      const view = await this.app.paired(d, d.store.role, opts.username, { monitoring, locatorInterval });
+      return { link: owntracksConfigLink(opts), url: opts.url, username: opts.username, password: opts.password, view };
+    });
   }
 
   async unpairTracking() {
-    const { s, config, state } = this.ctx();
-    s.state = { ...state, tracking: { ...state.tracking, deviceUser: undefined, pairedAt: undefined } };
-    this.save(s);
-    return this.view(s, config, s.state);
+    return this.run(async () => {
+      const d = await this.session_();
+      return this.app.unpaired(d, d.store.role);
+    });
   }
 
   async setupNotifications(): Promise<NotificationSetup> {
-    const { s, config, state } = this.ctx();
-    const topic = `lockation-demo-${s.role}-${Math.random().toString(36).slice(2, 10)}`;
-    s.notify = { ...s.notify, [s.role]: topic };
-    this.save(s);
-    return { topic, url: `https://ntfy.sh/${topic}`, deepLink: `ntfy://ntfy.sh/${topic}`, view: this.view(s, config, state) };
+    const d = await this.session_();
+    const audience = this.app.audience(d, d.store.role);
+    const topic = `lockation-demo-${audience}-${Math.random().toString(36).slice(2, 10)}`;
+    d.store.notify = { ...d.store.notify, [audience]: topic };
+    this.log(d.store, '🔔 ✅ Lockation test notification', 'Notifications are set up (demo – nothing is sent).');
+    this.save(d.store);
+    return { topic, url: `https://ntfy.sh/${topic}`, deepLink: `ntfy://ntfy.sh/${topic}`, view: await this.app.view(d, d.store.role) };
   }
 
   async stopNotifications() {
-    const { s, config, state } = this.ctx();
-    if (s.notify) delete s.notify[s.role];
-    this.save(s);
-    return this.view(s, config, state);
+    const d = await this.session_();
+    if (d.store.notify) delete d.store.notify[this.app.audience(d, d.store.role)];
+    this.save(d.store);
+    return this.app.view(d, d.store.role);
   }
 
   async ackRulesChanged() {
-    const { s, config, state } = this.ctx();
-    if (s.role !== 'wearer') throw new ApiError(403, 'not_wearer', 'Only the wearer can acknowledge rule changes.');
-    s.state = { ...state, rulesChanged: undefined };
-    this.save(s);
-    return this.view(s, config, s.state);
+    return this.run(async () => {
+      const d = await this.session_();
+      return this.app.ackRulesChanged(d, d.store.role);
+    });
   }
 
   async testNotification(): Promise<{ ok: true }> {
-    const { s } = this.ctx();
-    if (!s.notify?.[s.role]) throw new ApiError(409, 'not_subscribed', 'Set up notifications first.');
-    this.log(s, '🔔 ✅ Lockation test notification', 'Notifications work (demo – nothing is sent).');
-    this.save(s);
+    const d = await this.session_();
+    if (!d.store.notify?.[this.app.audience(d, d.store.role)]) throw new ApiError(409, 'not_subscribed', 'Set up notifications first.');
+    this.log(d.store, '🔔 ✅ Lockation test notification', 'Notifications work (demo – nothing is sent).');
+    this.save(d.store);
     return { ok: true };
   }
 
   async huntAction(action: HuntAction) {
-    const { s, config, state } = this.ctx();
-    let res;
-    try {
-      res = applyHuntAction(config, state, action, s.role, { now: this.now(), sessionId: 'demo', evalId: crypto.randomUUID() }, false);
-    } catch (e) {
-      if (e instanceof HuntActionError) throw new ApiError(403, 'hunt_action_not_allowed', e.message);
-      throw e;
-    }
-    for (const ev of res.events) this.log(s, 'Lockation', ev);
-    for (const n of res.notices.filter((x) => x.audience === 'wearer')) this.log(s, `🔔 ${n.title}`, n.message);
-    s.state = res.state;
-    this.save(s);
-    return this.view(s, config, s.state);
+    return this.run(async () => {
+      const d = await this.session_();
+      return this.app.huntAction(d, d.store.role, action);
+    });
   }
 
   /** Demo: map clicks send a fake background location (stored per browser). */
@@ -309,20 +328,10 @@ export class MockBackend implements Backend {
 
   /** Demo only: pretend OwnTracks sent this position (like tapping ↑ in the app, which also completes the setup). */
   async track(fix: Fix, opts: { ignoreSpeed?: boolean } = {}) {
-    const { s, config, state } = this.ctx();
-    // Map clicks jump kilometres within seconds – skip the speed plausibility check for them.
-    const cfg = opts.ignoreSpeed ? { ...config, antiCheat: { ...config.antiCheat, maxSpeedKmh: Number.POSITIVE_INFINITY } } : config;
-    const res = evaluateTracked(cfg, state, { fix, manual: true }, { now: this.now(), sessionId: 'demo', evalId: crypto.randomUUID() });
-    res.record.consequences = res.record.consequences.map((c) => ({ ...c, ok: true }));
-    if (res.consequences.length || res.events.length) {
-      const entry = buildLogEntry('checkin', res.events, res.consequences, res.record);
-      if (entry) this.log(s, entry.title.replace('GPS check-in', 'GPS background update'), entry.description);
-    }
-    this.logNotices(s, config, res.notices);
-    s.state = res.state;
-    if (res.notable) s.history = [res.record, ...s.history].slice(0, 200);
-    this.save(s);
-    return { record: res.record, view: this.view(s, config, res.state) };
+    const d = await this.session_();
+    const { results } = await this.app.tracked(d, [{ fix, manual: true }], { ignoreSpeed: opts.ignoreSpeed });
+    const record: CheckinRecord = results[0]!.record;
+    return { record, view: await this.app.view(d, d.store.role) };
   }
 
   demoLog() {

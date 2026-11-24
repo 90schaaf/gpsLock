@@ -407,7 +407,7 @@ describe('demo backend v2', () => {
     await b.configSave({ ...config, disclaimer: DISCLAIMER, zones });
     const v = await b.session();
     expect(v.rulesChanged?.summary.join(' ')).toMatch(/Home.*interval 4h → 2h/);
-    expect(b.demoLog()[0]!.title).toBe('Lockation rules changed');
+    expect(b.demoLog().map((l) => l.title)).toContain('Lockation rules changed');
     b.setRole('keyholder');
     await expect(b.ackRulesChanged()).rejects.toMatchObject({ status: 403 });
     b.setRole('wearer');
