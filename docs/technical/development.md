@@ -34,16 +34,17 @@ position for the next check-in or *Demo: send as background update*).
 ## Project layout
 
 ```
-packages/core   rule engine, config schema, geo, view models   (vitest)
-apps/worker     Cloudflare Worker                              (vitest, fake Chaster API)
-apps/web        main + config page                             (vitest + jsdom)
+packages/core   rule engine, config schema, geo, view models,  (vitest)
+                LockationApp – the application flow shared by worker and demo (app.ts)
+apps/worker     Cloudflare Worker: adapters for Chaster, D1, ntfy (vitest, fake Chaster API, node:sqlite D1)
+apps/web        main + config page, demo backend (same LockationApp, localStorage adapters) (vitest + jsdom)
 docs            this site (VitePress)
 specifications  spec-driven development documents
 ```
 
 ## Tests and specifications
 
-Every feature in `specifications/03-features.md` has acceptance criteria (F1–F13). The test names
+Every feature in `specifications/03-features.md` has acceptance criteria (F1–F24). The test names
 reference them, e.g. `F6 scavenger hunt › AC2 wrong hunt check-in adds time`.
 
 ## Building the Pages artifact locally
