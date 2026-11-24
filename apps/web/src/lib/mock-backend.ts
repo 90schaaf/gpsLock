@@ -291,10 +291,28 @@ export class MockBackend implements Backend {
     return this.view(s, config, s.state);
   }
 
+  /** Demo: map clicks send a fake background location (stored per browser). */
+  get mapClickSends(): boolean {
+    try {
+      return localStorage.getItem('lockation-demo-click-sends') !== 'off';
+    } catch {
+      return true;
+    }
+  }
+  set mapClickSends(on: boolean) {
+    try {
+      localStorage.setItem('lockation-demo-click-sends', on ? 'on' : 'off');
+    } catch {
+      /* private mode – keep the default */
+    }
+  }
+
   /** Demo only: pretend OwnTracks sent this position (like tapping ↑ in the app, which also completes the setup). */
-  async track(fix: Fix) {
+  async track(fix: Fix, opts: { ignoreSpeed?: boolean } = {}) {
     const { s, config, state } = this.ctx();
-    const res = evaluateTracked(config, state, { fix, manual: true }, { now: this.now(), sessionId: 'demo', evalId: crypto.randomUUID() });
+    // Map clicks jump kilometres within seconds – skip the speed plausibility check for them.
+    const cfg = opts.ignoreSpeed ? { ...config, antiCheat: { ...config.antiCheat, maxSpeedKmh: Number.POSITIVE_INFINITY } } : config;
+    const res = evaluateTracked(cfg, state, { fix, manual: true }, { now: this.now(), sessionId: 'demo', evalId: crypto.randomUUID() });
     res.record.consequences = res.record.consequences.map((c) => ({ ...c, ok: true }));
     if (res.consequences.length || res.events.length) {
       const entry = buildLogEntry('checkin', res.events, res.consequences, res.record);

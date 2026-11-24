@@ -33,6 +33,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
   const [last, setLast] = useState<CheckinRecord>();
   const [myPos, setMyPos] = useState<Fix>();
   const [simulated, setSimulated] = useState<{ lat: number; lng: number }>();
+  const [clickSends, setClickSends] = useState(() => mock?.mapClickSends ?? false);
   const [demoTick, setDemoTick] = useState(0);
   const [watching, setWatching] = useState(false);
   const stopWatch = useRef<() => void>();
@@ -205,6 +206,20 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
     }
   }
 
+  /** Demo: a click on the map moves the fake GPS there and (with tracking) sends it like OwnTracks would. */
+  async function demoMapClick(p: { lat: number; lng: number }) {
+    setSimulated(p);
+    if (!mock || !view?.tracking || !clickSends) return;
+    try {
+      if (!view.tracking.paired) await mock.pairTracking();
+      const res = await mock.track({ ...p, accuracy: 10, timestamp: Date.now() }, { ignoreSpeed: true });
+      setLast(res.record);
+      setView(res.view);
+    } catch (e) {
+      setError({ message: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
   return (
     <>
       {mock && (
@@ -213,6 +228,12 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
           role={view.role}
           simulating={!!simulated}
           onClearSim={() => setSimulated(undefined)}
+          clickSends={clickSends}
+          onToggleClickSends={() => {
+            if (mock) mock.mapClickSends = !clickSends;
+            setClickSends(!clickSends);
+          }}
+          trackingOn={!!view.tracking}
           onChange={() => {
             setLast(undefined);
             setDemoTick((n) => n + 1);
@@ -372,7 +393,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
                 {busy ? 'Getting your position…' : simulated ? '📍 Check in (simulated position)' : '📍 Check in now'}
               </button>
             )}
-            {mock && view.tracking && simulated && (
+            {mock && view.tracking && simulated && !clickSends && (
               <button
                 disabled={busy}
                 onClick={async () => {
@@ -392,7 +413,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
             <p class="small muted" style={{ margin: 0 }}>
               {view.liveOnly ? 'Hunt checkpoints are found automatically when you walk into them.' : `Your accuracy must be ±${view.maxAccuracyM} m or better. Outdoors works best.`}
               {huntActive && !view.liveOnly && !view.hunt?.guessesAllowed && ' Check in at a checkpoint to find it.'}
-              {backend.demo && ' Demo: tap the map to simulate a position.'}
+              {backend.demo && (view.tracking && clickSends ? ' Demo: click the map to send a fake background location there (like OwnTracks; speed check off).' : ' Demo: click the map to set a fake position for the next check-in.')}
             </p>
           </div>
         )}
@@ -404,7 +425,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
           circles={circles}
           points={points}
           fitKey={`${view.zones.length}-${view.hunt?.index}-${view.hunt?.checkpoints.length ?? 0}-${backend.demo ? demoTick : ''}-${myPos ? 1 : 0}-${view.lastPosition ? 1 : 0}`}
-          onClick={backend.demo && isWearer ? (p) => setSimulated(p) : undefined}
+          onClick={backend.demo && isWearer ? (p) => void demoMapClick(p) : undefined}
         />
         <div class="row small muted">
           <span><span class="dot" style={{ background: ZONE_COLORS.required }} /> required</span>
@@ -548,7 +569,25 @@ function ResultCard({ record }: { record: CheckinRecord }) {
   );
 }
 
-function DemoBar({ mock, role, simulating, onClearSim, onChange }: { mock: MockBackend; role: string; simulating: boolean; onClearSim: () => void; onChange: () => void }) {
+function DemoBar({
+  mock,
+  role,
+  simulating,
+  onClearSim,
+  onChange,
+  clickSends,
+  onToggleClickSends,
+  trackingOn,
+}: {
+  mock: MockBackend;
+  role: string;
+  simulating: boolean;
+  onClearSim: () => void;
+  onChange: () => void;
+  clickSends: boolean;
+  onToggleClickSends: () => void;
+  trackingOn: boolean;
+}) {
   const [showLog, setShowLog] = useState(false);
   return (
     <div>
@@ -558,6 +597,11 @@ function DemoBar({ mock, role, simulating, onClearSim, onChange }: { mock: MockB
         <span class="grow" />
         <button onClick={() => { mock.setRole(role === 'wearer' ? 'keyholder' : 'wearer'); onChange(); }}>View as {role === 'wearer' ? 'keyholder' : 'wearer'}</button>
         {simulating && <button onClick={onClearSim}>Use real GPS</button>}
+        {trackingOn && role === 'wearer' && (
+          <button onClick={onToggleClickSends} aria-pressed={clickSends} data-testid="demo-click-sends" title="What a click on the map does">
+            🖱 Map click: {clickSends ? 'send location' : 'only set position'}
+          </button>
+        )}
         <button
           onClick={() =>
             getFix()

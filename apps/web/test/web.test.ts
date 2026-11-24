@@ -668,3 +668,18 @@ describe('check-in mode selector', () => {
     expect(checkinMode(c.tracking)).toBe('legacy');
   });
 });
+
+describe('demo: map clicks as fake background locations', () => {
+  it('accepts far jumps when sent from a map click (speed check off), rejects them otherwise', async () => {
+    const m = new Map<string, string>();
+    const b = new MockBackend({ getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) });
+    await b.pairTracking();
+    const z = (await b.configGet()).config.zones;
+    const t = Date.now();
+    await b.track({ lat: z[0]!.lat, lng: z[0]!.lng, accuracy: 10, timestamp: t }, { ignoreSpeed: true });
+    const far = { lat: z[0]!.lat + 0.5, lng: z[0]!.lng, accuracy: 10, timestamp: t + 2000 };
+    expect((await b.track(far, { ignoreSpeed: true })).record.outcome).toBe('accepted');
+    const back = { lat: z[0]!.lat, lng: z[0]!.lng, accuracy: 10, timestamp: t + 4000 };
+    expect((await b.track(back)).record.reason).toBe('implausible_speed');
+  });
+});
