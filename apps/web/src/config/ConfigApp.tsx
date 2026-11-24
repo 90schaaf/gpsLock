@@ -22,6 +22,7 @@ import { ApiError, type Backend, type CommandInfo } from '../lib/backend.js';
 import { ConfigBridge } from '../lib/config-bridge.js';
 import { isEmbedded } from '../lib/hash.js';
 import { ackStillValid, createReachabilityChecker, needsConfirmation, statusText, unconfirmedPlaces, type ReachabilityAck, type ReachStatus } from '../lib/reachability.js';
+import { countByTab, issueLabel, issuesForTab, IssuesContext } from './issues.js';
 import { ConsequenceEditor, NullableMinutesField, NumberField, OverrideField, TimeRange, WindowsEditor } from './editors.js';
 import { applyRoles, droppedRolesWithSettings, forbiddenTimeline, heartbeatWarningText, toggleRole, type RoleChoice } from './helpers.js';
 import { useReachability, type PlaceRef, type ReachCheck } from './useReachability.js';
@@ -144,6 +145,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
 
   const validation = useMemo(() => (config ? parseConfig(config) : undefined), [config]);
   const issues = validation && !validation.ok ? validation.issues : [];
+  const issueCount = countByTab(issues);
   const unconfirmed = config ? unconfirmedPlaces([...config.zones, ...config.rules.hunt.checkpoints], reach) : [];
 
   async function save() {
@@ -151,7 +153,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
     if (!cfg) throw new Error('not loaded');
     const v = parseConfig(cfg);
     if (!v.ok) {
-      setSaveMsg('Please fix the problems listed above.');
+      setSaveMsg('Please fix the problems marked on the tabs.');
       throw new Error('invalid');
     }
     const open = unconfirmedPlaces([...cfg.zones, ...cfg.rules.hunt.checkpoints], reachRef.current);
@@ -213,6 +215,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
     : config.zones.map((z) => ({ id: z.id, lat: z.lat, lng: z.lng, radiusM: z.radiusM, color: zoneColor(z), label: `${flagged(z.id) ? '⚠ ' : ''}${z.name}`, draggable: true, selected: z.id === selected }));
 
   const accepted = disclaimerAccepted(config);
+  const tabIssues = issuesForTab(issues, tab, config);
   const placeCount = config.zones.length + R.hunt.checkpoints.length;
   const placesFull = placeCount >= MAX_PLACES;
   const placesInfo = (
@@ -295,6 +298,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
   };
 
   return (
+    <IssuesContext.Provider value={issues}>
     <div class="container">
       <header class="top">
         <h1>📍 Lockation – configuration</h1>
@@ -304,18 +308,6 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
       </header>
       {running && <p class="small muted" style={{ margin: 0 }}>Changes apply immediately; the wearer sees a summary of what changed.</p>}
 
-      {issues.length > 0 && (
-        <div class="card">
-          <strong class="error">Please fix:</strong>
-          <ul class="issues">
-            {issues.map((i) => (
-              <li key={i.path + i.message}>
-                {i.path || 'config'}: {i.message}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
       {unconfirmed.length > 0 && (
         <div class="card small" data-testid="reach-blocker">
           <strong class="warn-text">⚠ Safety check:</strong> {unconfirmed.map((p) => `"${p.name}" (${p.reasons.join(', ')})`).join('; ')} – confirm each place or move it before saving.
@@ -330,6 +322,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
           <button key={t.id} class={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)} role="tab" aria-selected={tab === t.id}>
             {t.label}
             {(t.id === 'tracking' ? T.enabled : t.id in R && R[t.id as keyof typeof R].enabled) ? ' ●' : ''}
+            {issueCount[t.id] ? <span class="badge bad tab-issues" data-testid={`tab-issues-${t.id}`}>⚠ {issueCount[t.id]}</span> : null}
           </button>
         ))}
       </div>
@@ -373,6 +366,23 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
             {accepted ? `Tap the map to add a ${isHunt ? 'checkpoint' : 'zone'}; ` : ''}Drag the handle to move it. Radius {MIN_RADIUS_M} m – {MAX_RADIUS_M / 1000} km.
           </p>
         </>
+      )}
+
+      {tabIssues.length > 0 && (
+        <div class="card stack issue-card" data-testid="tab-issues">
+          <strong class="error">Please fix on this tab:</strong>
+          <ul class="issues">
+            {tabIssues.map((i) => {
+              const where = issueLabel(i.path, config);
+              return (
+                <li key={i.path + i.message}>
+                  {where && <strong>{where}: </strong>}
+                  {i.message}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       )}
 
       {tab === 'zones' && (
@@ -457,7 +467,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
             </label>
             <NumberField label="Interval (default)" suffix="minutes" min={15} value={R.required.intervalMinutes} hint={fmtMinutes(R.required.intervalMinutes)} onChange={(v) => edit((d) => { d.rules.required.intervalMinutes = v ?? 240; })} />
             <NumberField label="Grace period (default)" suffix="minutes" min={0} value={R.required.graceMinutes} onChange={(v) => edit((d) => { d.rules.required.graceMinutes = v ?? 0; })} />
-            <NumberField label="Warn before a deadline" suffix="minutes, empty = off" optional min={5} value={R.required.warnBeforeMinutes} hint="Sent to the wearer's notifications (ntfy) if set up." onChange={(v) => edit((d) => { d.rules.required.warnBeforeMinutes = v; })} />
+            <NumberField path="rules.required.warnBeforeMinutes" label="Warn before a deadline" suffix="minutes, empty = off" optional min={5} value={R.required.warnBeforeMinutes} hint="Sent to the wearer's notifications (ntfy) if set up." onChange={(v) => edit((d) => { d.rules.required.warnBeforeMinutes = v; })} />
             <TimeRange label="Quiet hours (no deadline inside)" value={R.required.quietHours} onChange={(v) => edit((d) => { d.rules.required.quietHours = v; })} />
           </div>
           <ConsequenceEditor label="When a check-in is missed (all zones)" repeating="miss" value={R.required.onMissed} commands={commands} onChange={(v) => edit((d) => { d.rules.required.onMissed = v; })} />
@@ -520,10 +530,10 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
           help="Staying inside a forbidden zone escalates: a warning, then a first penalty, then a penalty at regular intervals until the wearer has left. The timeline needs background tracking – a manual check-in inside is penalised immediately.">
           {!T.enabled && <p class="small notice" style={{ margin: 0 }}>Without background tracking only manual check-ins inside are penalised (at most once per repeat interval).</p>}
           <div class="grid2">
-            <NullableMinutesField label="First warning" value={R.forbidden.firstWarningAfterMinutes} fallback={2} min={0} onChange={(v) => edit((d) => { d.rules.forbidden.firstWarningAfterMinutes = v ?? null; })} />
+            <NullableMinutesField path="rules.forbidden.firstWarningAfterMinutes" label="First warning" value={R.forbidden.firstWarningAfterMinutes} fallback={2} min={0} onChange={(v) => edit((d) => { d.rules.forbidden.firstWarningAfterMinutes = v ?? null; })} />
             <NumberField label="First penalty after" suffix="minutes inside" min={0} value={R.forbidden.firstPenaltyAfterMinutes} onChange={(v) => edit((d) => { d.rules.forbidden.firstPenaltyAfterMinutes = v ?? 0; })} />
             <NumberField label="Then a penalty every" suffix="minutes, min. 5" min={5} value={R.forbidden.repeatEveryMinutes} onChange={(v) => edit((d) => { d.rules.forbidden.repeatEveryMinutes = v ?? 5; })} />
-            <NullableMinutesField label="Warning after each penalty" value={R.forbidden.repeatWarningAfterMinutes} fallback={1} min={0} onChange={(v) => edit((d) => { d.rules.forbidden.repeatWarningAfterMinutes = v ?? null; })} />
+            <NullableMinutesField path="rules.forbidden.repeatWarningAfterMinutes" label="Warning after each penalty" value={R.forbidden.repeatWarningAfterMinutes} fallback={1} min={0} onChange={(v) => edit((d) => { d.rules.forbidden.repeatWarningAfterMinutes = v ?? null; })} />
           </div>
           <p class="small muted" data-testid="forbidden-timeline" style={{ margin: 0 }}>Default timeline: {forbiddenTimeline(ruleTimings)}</p>
           <ConsequenceEditor label="Penalty (all forbidden zones)" repeating="penalty" value={R.forbidden.onEnter} commands={commands} onChange={(v) => edit((d) => { d.rules.forbidden.onEnter = v; })} />
@@ -552,10 +562,10 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
                   </div>
                   {!always && <WindowsEditor value={z.forbidden.windows} onChange={(v) => editZone(z.id, (x) => { x.forbidden.windows = v; })} />}
                   <div class="grid2">
-                    <NullableMinutesField label="First warning" value={z.forbidden.firstWarningAfterMinutes} fallback={2} min={0} inherited={{ value: R.forbidden.firstWarningAfterMinutes, format: offOr }} onChange={(v) => editZone(z.id, (x) => { x.forbidden.firstWarningAfterMinutes = v; })} />
+                    <NullableMinutesField path={`zones.${config.zones.indexOf(z)}.forbidden.firstWarningAfterMinutes`} label="First warning" value={z.forbidden.firstWarningAfterMinutes} fallback={2} min={0} inherited={{ value: R.forbidden.firstWarningAfterMinutes, format: offOr }} onChange={(v) => editZone(z.id, (x) => { x.forbidden.firstWarningAfterMinutes = v; })} />
                     <OverrideField label="First penalty after" suffix="minutes" min={0} value={z.forbidden.firstPenaltyAfterMinutes} inherited={R.forbidden.firstPenaltyAfterMinutes} format={fmtMinutes} onChange={(v) => editZone(z.id, (x) => { x.forbidden.firstPenaltyAfterMinutes = v; })} />
                     <OverrideField label="Then every" suffix="minutes, min. 5" min={5} value={z.forbidden.repeatEveryMinutes} inherited={R.forbidden.repeatEveryMinutes} format={fmtMinutes} onChange={(v) => editZone(z.id, (x) => { x.forbidden.repeatEveryMinutes = v; })} />
-                    <NullableMinutesField label="Warning after each penalty" value={z.forbidden.repeatWarningAfterMinutes} fallback={1} min={0} inherited={{ value: R.forbidden.repeatWarningAfterMinutes, format: offOr }} onChange={(v) => editZone(z.id, (x) => { x.forbidden.repeatWarningAfterMinutes = v; })} />
+                    <NullableMinutesField path={`zones.${config.zones.indexOf(z)}.forbidden.repeatWarningAfterMinutes`} label="Warning after each penalty" value={z.forbidden.repeatWarningAfterMinutes} fallback={1} min={0} inherited={{ value: R.forbidden.repeatWarningAfterMinutes, format: offOr }} onChange={(v) => editZone(z.id, (x) => { x.forbidden.repeatWarningAfterMinutes = v; })} />
                   </div>
                   <p class="small muted" style={{ margin: 0 }}>{z.name}: {forbiddenTimeline(t)}</p>
                   <ConsequenceEditor label={`Extra punishment in ${z.name} (after the common penalty)`} repeating="penalty" value={z.forbidden.onEnter} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.forbidden.onEnter = v; })} />
@@ -699,8 +709,8 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
           {T.enabled && (
             <>
               <div class="grid2">
-                <NumberField label="Missing signal after" suffix="minutes" min={15} value={T.heartbeatMinutes} hint={heartbeatWarningText(T.heartbeatMinutes, T.warnBeforeMinutes)} onChange={(v) => edit((d) => { d.tracking.heartbeatMinutes = v ?? 20; })} />
-                <NumberField label="Warn before a missing-signal penalty" suffix="minutes, empty = off" optional min={10} max={Math.max(10, T.heartbeatMinutes - 1)} value={T.warnBeforeMinutes} hint="At least 10 minutes and less than the missing-signal time." onChange={(v) => edit((d) => { d.tracking.warnBeforeMinutes = v; })} />
+                <NumberField path="tracking.heartbeatMinutes" label="Missing signal after" suffix="minutes" min={15} value={T.heartbeatMinutes} hint={heartbeatWarningText(T.heartbeatMinutes, T.warnBeforeMinutes)} onChange={(v) => edit((d) => { d.tracking.heartbeatMinutes = v ?? 20; })} />
+                <NumberField path="tracking.warnBeforeMinutes" label="Warn before a missing-signal penalty" suffix="minutes, empty = off" optional min={10} max={Math.max(10, T.heartbeatMinutes - 1)} value={T.warnBeforeMinutes} hint="At least 10 minutes and less than the missing-signal time." onChange={(v) => edit((d) => { d.tracking.warnBeforeMinutes = v; })} />
                 <NumberField label="Accept delayed updates up to" suffix="minutes" min={1} value={T.maxDelayMinutes} onChange={(v) => edit((d) => { d.tracking.maxDelayMinutes = v ?? 1440; })} />
                 <label class="field">
                   OwnTracks mode
@@ -790,6 +800,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
               <NumberField label="Probability" suffix="%" min={0} max={100} value={Math.round(config.antiCheat.verificationProbability * 100)} onChange={(v) => edit((d) => { d.antiCheat.verificationProbability = (v ?? 0) / 100; })} />
             )}
             <NumberField
+              path="antiCheat.liveVerificationEveryHours"
               label="Live tracking only: random verification picture on average every"
               suffix="hours, empty = off"
               optional
@@ -835,14 +846,17 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
           </button>
           {backend.demo && <a class="btn" href={`index.html${location.search}`}>Open demo lock →</a>}
           {saveMsg && <span class="small">{saveMsg}</span>}
+          {issues.length > 0 && <IssueSummary count={issueCount} onGo={setTab} />}
         </div>
       )}
       {embedded && !backend.demo && saveMsg && <p class="small">{saveMsg}</p>}
+      {embedded && !backend.demo && issues.length > 0 && <IssueSummary count={issueCount} onGo={setTab} />}
       <footer class="small muted">
         <a href="../guide/configuration.html" target="_blank" rel="noopener">How to configure Lockation</a> ·{' '}
         <a href="../guide/disclaimer.html" target="_blank" rel="noopener">Disclaimer</a> · Beta – use at your own risk
       </footer>
     </div>
+    </IssuesContext.Provider>
   );
 }
 
@@ -916,5 +930,24 @@ function AddressSearch({ onPick }: { onPick: (p: { lat: number; lng: number }, n
         </ul>
       )}
     </form>
+  );
+}
+
+/** Short note next to Save: how many problems, with links to the affected tabs. */
+function IssueSummary({ count, onGo }: { count: Partial<Record<Tab, number>>; onGo: (t: Tab) => void }) {
+  const tabs = TABS.filter((t) => count[t.id]);
+  const total = tabs.reduce((a, t) => a + (count[t.id] ?? 0), 0);
+  return (
+    <span class="small error" data-testid="issue-summary">
+      {total} problem{total === 1 ? '' : 's'} to fix:{' '}
+      {tabs.map((t, i) => (
+        <span key={t.id}>
+          {i > 0 && ', '}
+          <button class="link" onClick={() => onGo(t.id)}>
+            {t.label} ({count[t.id]})
+          </button>
+        </span>
+      ))}
+    </span>
   );
 }

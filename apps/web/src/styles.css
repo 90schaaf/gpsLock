@@ -140,3 +140,8 @@ details.zone-details[open] > summary { margin-bottom: 8px; }
 .leaflet-tooltip.map-label { background: #9b59b6; color: #fff; border: 0; border-radius: 999px; padding: 1px 7px; font-weight: 700; box-shadow: none; }
 .leaflet-tooltip.map-label::before { display: none; }
 .notice-card { border-left: 4px solid var(--warn); }
+/* Inline validation */
+.field.invalid input, .field.invalid select { border-color: var(--bad); box-shadow: 0 0 0 1px var(--bad); }
+.field-error { color: var(--bad); font-size: 0.8rem; font-weight: 600; }
+.issue-card { border-color: var(--bad); }
+.tab-issues { margin-left: 4px; }

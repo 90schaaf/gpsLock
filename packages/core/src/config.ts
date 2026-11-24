@@ -273,7 +273,9 @@ export const LockationConfigSchema = z
       if (new Set(z.roles).size !== z.roles.length) issue(['zones', i, 'roles'], 'duplicate role');
       if (z.roles.includes('forbidden') && z.roles.length > 1) issue(['zones', i, 'roles'], 'a forbidden zone cannot have other roles');
       const f = forbiddenTimings(cfg, z);
-      if (z.roles.includes('forbidden')) {
+      const ownTimings = ['firstWarningAfterMinutes', 'firstPenaltyAfterMinutes', 'repeatEveryMinutes', 'repeatWarningAfterMinutes'].some((k) => z.forbidden[k as keyof typeof z.forbidden] !== undefined);
+      // Inherited timings are validated once at rule level; only zones with own values report here.
+      if (z.roles.includes('forbidden') && ownTimings) {
         if (f.firstWarning !== null && f.firstWarning >= f.firstPenalty) {
           issue(['zones', i, 'forbidden', 'firstWarningAfterMinutes'], 'the first warning must come before the first penalty');
         }

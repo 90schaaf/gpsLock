@@ -408,3 +408,15 @@ describe('tracking view: signal due time', () => {
     expect(v(s).signalDueAt).toBe('2026-06-02T06:00:00.000Z');
   });
 });
+
+describe('validation reports inherited forbidden timings only once', () => {
+  it('rule-level issue only, unless the zone overrides timings', () => {
+    const base = { version: 2, timezone: 'Europe/Zurich', zones: [zone('bar', 'Bar', BAR, { roles: ['forbidden'] })], rules: { forbidden: { enabled: true, firstWarningAfterMinutes: 30 } } };
+    const r = parseConfig(base);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.issues.map((i) => i.path)).toEqual(['rules.forbidden.firstWarningAfterMinutes']);
+    const own = parseConfig({ ...base, rules: { forbidden: { enabled: true } }, zones: [zone('bar', 'Bar', BAR, { roles: ['forbidden'], forbidden: { firstWarningAfterMinutes: 30 } })] });
+    if (!own.ok) expect(own.issues.map((i) => i.path)).toEqual(['zones.0.forbidden.firstWarningAfterMinutes']);
+    expect(own.ok).toBe(false);
+  });
+});
