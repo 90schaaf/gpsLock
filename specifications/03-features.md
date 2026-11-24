@@ -168,8 +168,8 @@ Rule `rules.hunt`: `checkpoints[{id, name, lat, lng, radiusM, hint, matchMode?}]
   every unfound checkpoint counts. `onCheckpoint` per find, `onComplete` when all are found.
 - **Wrong guesses:** with `hint` / `distance` / `map` the wearer can submit a hunt guess; a guess outside the target applies
   `onWrong` (cooldown). With `all` there are no guesses. Background locations are never wrong guesses.
-- **Start:** `auto` (with the lock), `wearer`, `keyholder` or `scheduled` (`startAt` = local date-time **in the lock's
-  timezone**, or `startAfterMinutes` after the lock start; run by the cron). The keyholder can always force-start. On a
+- **Start:** `auto` (with the lock), `wearer`, `keyholder` or `scheduled` (`startAt` = UTC instant, entered as date/time **in the
+  lock's timezone**, or `startAfterMinutes` after the lock start; run by the cron). The keyholder can always force-start. On a
   self-lock the wearer may always start.
 - **Pause:** `pauseBy: nobody | keyholder (default) | both`. A pause stops the time limit; checkpoints don't count and are
   hidden before the start and while paused.

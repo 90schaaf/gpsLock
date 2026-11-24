@@ -22,7 +22,7 @@ v1 config or state migration.
     hunt:      { enabled, checkpoints: Checkpoint[], reveal ["all" | "hint" | "distance" | "map"],
                  order ["sequence" | "any"], wrongCooldownMinutes [10], timeLimitMinutes?, blockUnlockUntilComplete [false],
                  start ["auto" | "wearer" | "keyholder" | "scheduled"],
-                 startAt?,                    // local date-time "YYYY-MM-DDTHH:MM" in the lock timezone
+                 startAt?,                    // ISO instant (UTC); the config page enters it in the lock timezone
                  startAfterMinutes?, pauseBy ["keyholder" | "nobody" | "both"], wearerCanAbort [false],
                  onAbort, onCheckpoint, onWrong, onComplete, onTimeout }
   },
