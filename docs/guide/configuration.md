@@ -91,7 +91,7 @@ The wearer sees this before accepting the lock and can always switch to *zones o
 
 ## Settings file 💾
 
-**Export** downloads all settings as `lockation-config.json` – e.g. to reuse a setup for another lock or as a backup.
+In the tab **💾 Import / Export**: **Export** downloads all settings as `lockation-config.json` – e.g. to reuse a setup for another lock or as a backup.
 **Import** loads such a file into the page (it is validated; older files are converted). Nothing is saved until you save; the
 disclaimer acceptance of the current lock is kept.
 

@@ -6,7 +6,7 @@ import type { ConfigIssue, LockationConfig } from '@lockation/core';
 import { createContext } from 'preact';
 import { useContext } from 'preact/hooks';
 
-export type Tab = 'zones' | 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'tracking' | 'notify' | 'anticheat' | 'privacy';
+export type Tab = 'zones' | 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'tracking' | 'notify' | 'anticheat' | 'privacy' | 'file';
 
 export function issueTab(path: string): Tab {
   const p = path.split('.');

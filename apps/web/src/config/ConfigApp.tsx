@@ -28,7 +28,7 @@ import { ConsequenceEditor, NullableMinutesField, NumberField, OverrideField, Ti
 import { applyRoles, droppedRolesWithSettings, forbiddenTimeline, heartbeatWarningText, toggleRole, type RoleChoice } from './helpers.js';
 import { useReachability, type PlaceRef, type ReachCheck } from './useReachability.js';
 
-type Tab = 'zones' | 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'tracking' | 'notify' | 'anticheat' | 'privacy';
+type Tab = 'zones' | 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'tracking' | 'notify' | 'anticheat' | 'privacy' | 'file';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'zones', label: '🗺 Zones' },
   { id: 'required', label: '⏱ Required' },
@@ -40,6 +40,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'notify', label: '🔔 Notifications' },
   { id: 'anticheat', label: '🛡 Anti-cheat' },
   { id: 'privacy', label: '🔒 Privacy' },
+  { id: 'file', label: '💾 Import / Export' },
 ];
 
 const ROLE_CHIPS: { id: RoleChoice; label: string }[] = [
@@ -926,6 +927,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
         </div>
       )}
 
+      {tab === 'file' && (
       <SettingsFile
         config={config}
         onImport={(next) => edit((d) => {
@@ -934,6 +936,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
           Object.assign(d, next, { disclaimer: keep });
         })}
       />
+      )}
 
       {(!embedded || backend.demo) && (
         <div class="row">
