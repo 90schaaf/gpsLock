@@ -204,3 +204,18 @@ describe('test notification and hunt control endpoints', () => {
     expect(fake.calls.some((c) => c.path.endsWith('/logs/custom') && /keyholder started the scavenger hunt/.test(c.body.description))).toBe(true);
   });
 });
+
+describe('ntfy errors are explained', () => {
+  it('reports status, ntfy error text and a hint for a bad token', async () => {
+    await subscribe('wearer-token');
+    const failing = async () => new Response(JSON.stringify({ code: 40101, http: 401, error: 'unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    const r = await handleRequest(
+      new Request('https://worker.test/api/notify/test', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://user.github.io' }, body: JSON.stringify({ mainToken: 'wearer-token' }) }),
+      env,
+      { ...o(), ntfyFetch: failing },
+    );
+    expect(r.status).toBe(502);
+    const body = (await r.json()) as any;
+    expect(body.error.message).toMatch(/answered 401 \(unauthorized\)\. The NTFY_TOKEN secret is wrong or expired/);
+  });
+});

@@ -17,6 +17,23 @@ export interface NtfyMessage {
   tags?: string[];
 }
 
+/** Error answer of the ntfy server (status + its error text). */
+export class NtfyError extends Error {
+  constructor(
+    public status: number,
+    public detail: string,
+  ) {
+    super(`ntfy ${status}${detail ? `: ${detail}` : ''}`);
+  }
+
+  /** What the operator should check. */
+  get hint(): string {
+    if (this.status === 401 || this.status === 403) return 'The NTFY_TOKEN secret is wrong or expired – create a new access token on ntfy.sh (it starts with tk_) and run: npx wrangler secret put NTFY_TOKEN';
+    if (this.status === 429) return 'The ntfy.sh message limit of the account was reached – try again later or upgrade the ntfy plan.';
+    return 'The notification server rejected the message.';
+  }
+}
+
 export class Ntfy {
   constructor(
     private base: string,
@@ -25,7 +42,8 @@ export class Ntfy {
   ) {}
 
   static from(env: { NTFY_BASE?: string; NTFY_TOKEN?: string }, fetchImpl: FetchLike): Ntfy | undefined {
-    return env.NTFY_TOKEN ? new Ntfy((env.NTFY_BASE ?? 'https://ntfy.sh').replace(/\/$/, ''), env.NTFY_TOKEN, fetchImpl) : undefined;
+    const token = env.NTFY_TOKEN?.trim(); // a stray space or newline from pasting would make every request fail
+    return token ? new Ntfy((env.NTFY_BASE ?? 'https://ntfy.sh').trim().replace(/\/$/, ''), token, fetchImpl) : undefined;
   }
 
   get host(): string {
@@ -49,7 +67,16 @@ export class Ntfy {
         ...(m.tags?.length ? { tags: m.tags } : {}),
       }),
     });
-    if (!res.ok) throw new Error(`ntfy ${res.status}`);
+    if (!res.ok) {
+      let detail = '';
+      try {
+        const j = (await res.json()) as { error?: string };
+        detail = j.error ?? '';
+      } catch {
+        /* not JSON */
+      }
+      throw new NtfyError(res.status, detail);
+    }
   }
 }
 
