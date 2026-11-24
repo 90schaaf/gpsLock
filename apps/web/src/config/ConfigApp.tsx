@@ -244,7 +244,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
     } else {
       const id = newId('z');
       edit((d) => {
-        d.zones.push({ id, name: (name ?? `Zone ${d.zones.length + 1}`).slice(0, 60), lat: p.lat, lng: p.lng, radiusM: 150, roles: [], required: { intervalCheckins: true, stayWindows: [], onMissed: [], onSuccess: [], onOutsideDuringWindow: [] }, forbidden: { windows: [], onEnter: [] }, reward: { onEnter: [] } });
+        d.zones.push({ id, name: (name ?? `Zone ${d.zones.length + 1}`).slice(0, 60), lat: p.lat, lng: p.lng, radiusM: 150, roles: [], required: { intervalCheckins: true, stayWindows: [], onMissed: [], onSuccess: [], onOutsideDuringWindow: [] }, forbidden: { windows: [], onEnter: [] }, reward: { onEnter: [] }, actions: { onEnter: [], onLeave: [], minStayMinutes: 0, cooldownMinutes: 0 } });
       });
       setSelected(id);
       if (tab !== 'zones') setTab('zones');
@@ -451,12 +451,29 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
                   </span>
                 )}
                 <ReachNote status={reach[z.id]} ack={z.reachabilityAck} onAck={(on) => setAck('zone', z.id, reach[z.id], on)} />
+                <details class="zone-details full" data-testid="zone-actions" onClick={(e) => e.stopPropagation()} open={z.actions.onEnter.length + z.actions.onLeave.length > 0 && z.id === selected}>
+                  <summary class="small">
+                    ⚡ Actions on enter / leave{z.actions.onEnter.length + z.actions.onLeave.length ? ` (${z.actions.onEnter.length + z.actions.onLeave.length})` : ''}
+                  </summary>
+                  <div class="stack">
+                    <p class="small muted" style={{ margin: 0 }}>
+                      Independent of the role – also for neutral zones. Leaving counts once the wearer is clearly outside (with background tracking at
+                      once, otherwise at the next check-in outside).
+                    </p>
+                    <ConsequenceEditor label="When entering" value={z.actions.onEnter} commands={commands} onChange={(v) => edit((d) => { d.zones[i]!.actions.onEnter = v; })} />
+                    <ConsequenceEditor label="When leaving" value={z.actions.onLeave} commands={commands} onChange={(v) => edit((d) => { d.zones[i]!.actions.onLeave = v; })} />
+                    <div class="grid2">
+                      <NumberField path={`zones.${i}.actions.minStayMinutes`} label="Leaving counts only after at least" suffix="minutes inside" min={0} value={z.actions.minStayMinutes} hint="E.g. 45 min at the gym before 'unfreeze'." onChange={(v) => edit((d) => { d.zones[i]!.actions.minStayMinutes = v ?? 0; })} />
+                      <NumberField path={`zones.${i}.actions.cooldownMinutes`} label="Cooldown" suffix="minutes" min={0} value={z.actions.cooldownMinutes} hint="Minimum time between two runs of the same action." onChange={(v) => edit((d) => { d.zones[i]!.actions.cooldownMinutes = v ?? 0; })} />
+                    </div>
+                  </div>
+                </details>
               </li>
             ))}
           </ul>
           {config.zones.length === 0 && <p class="muted">No zones yet – tap the map or search an address.</p>}
           <p class="small muted">
-            Roles: <strong>Required</strong> and/or <strong>Reward</strong>, or <strong>Forbidden</strong>, or <strong>Neutral</strong> (map only). The rule tabs list the zones of their role.
+            Roles: <strong>Required</strong> and/or <strong>Reward</strong>, or <strong>Forbidden</strong>, or <strong>Neutral</strong> (no rule – for orientation or zone actions). The rule tabs list the zones of their role. Every zone can also run <strong>actions on enter / leave</strong>.
           </p>
           <div class="grid2" style={{ marginTop: '10px' }}>
             <label class="field">
@@ -766,17 +783,24 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
 
       {tab === 'tracking' && (
         <div class="card stack">
-          <h2>
-            Background tracking
-            <span class="grow" />
-            <label class="check small">
-              <input type="checkbox" checked={T.enabled} onChange={(e) => edit((d) => { d.tracking.enabled = checked(e); if (!d.tracking.enabled) { d.tracking.liveOnly = false; delete d.antiCheat.liveVerificationEveryHours; } })} />
-              enabled
-            </label>
-          </h2>
-          <p class="small muted" style={{ margin: 0 }}>
-            The wearer connects the free OwnTracks app (iPhone / Android), which reports the location in the background. All rules then also react to these background updates – without manual check-ins.
-          </p>
+          <h2>Check-ins &amp; background tracking</h2>
+          <label class="field">
+            How is the wearer's location collected?
+            <select data-testid="checkin-mode" value={checkinMode(T)} onChange={(e) => edit((d) => setCheckinMode(d, (e.target as HTMLSelectElement).value as CheckinMode))}>
+              <option value="manual">Manual check-ins only</option>
+              <option value="both">Manual check-ins + background tracking (OwnTracks)</option>
+              <option value="auto">Background tracking only – no manual check-ins</option>
+              {checkinMode(T) === 'legacy' && <option value="legacy">Background tracking, required zones only by manual check-in (older setting)</option>}
+            </select>
+            <span class="small muted">
+              {{
+                manual: 'The wearer taps "Check in" in Lockation. The position is only known at these moments.',
+                both: 'The free OwnTracks app (iPhone / Android) reports the position in the background; manual check-ins still work. Both count for required zones.',
+                auto: 'Only OwnTracks counts – the check-in button is hidden. The wearer must keep OwnTracks running.',
+                legacy: 'Background locations are used for forbidden/reward zones, the hunt and windows, but required zones need manual check-ins.',
+              }[checkinMode(T)]}
+            </span>
+          </label>
           {T.enabled && (
             <>
               <div class="grid2">
@@ -798,14 +822,6 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
                   </span>
                 </label>
                 <TimeRange label="Quiet hours – no missing-signal penalty or warning" value={T.quietHours} onChange={(v) => edit((d) => { d.tracking.quietHours = v; })} />
-                <label class="check">
-                  <input type="checkbox" checked={T.countsAsCheckin || T.liveOnly} disabled={T.liveOnly} onChange={(e) => edit((d) => { d.tracking.countsAsCheckin = checked(e); })} />
-                  Background updates in a required zone count as check-ins
-                </label>
-                <label class="check">
-                  <input type="checkbox" data-testid="live-only" checked={T.liveOnly} onChange={(e) => edit((d) => { d.tracking.liveOnly = checked(e); if (!d.tracking.liveOnly) delete d.antiCheat.liveVerificationEveryHours; })} />
-                  Live tracking only – disable manual check-ins
-                </label>
               </div>
               <ConsequenceEditor label="When no location arrives in time (phone off, app stopped, not set up)" repeating="missing signal" value={T.onHeartbeatMissed} commands={commands} onChange={(v) => edit((d) => { d.tracking.onHeartbeatMissed = v; })} />
             </>
@@ -877,9 +893,9 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
               optional
               min={1}
               max={168}
-              disabled={!(T.enabled && T.liveOnly)}
+              disabled={checkinMode(T) !== 'auto'}
               value={config.antiCheat.liveVerificationEveryHours}
-              hint={T.enabled && T.liveOnly ? undefined : 'Needs "Live tracking only" in the Tracking tab.'}
+              hint={checkinMode(T) === 'auto' ? undefined : 'Needs "Background tracking only" in the Tracking tab.'}
               onChange={(v) => edit((d) => { d.antiCheat.liveVerificationEveryHours = v; })}
             />
           </div>
@@ -1099,4 +1115,19 @@ export function importConfigText(text: string): { ok: true; config: LockationCon
     return { ok: false, error: `The file contains invalid settings (${res.issues.length} problem${res.issues.length === 1 ? '' : 's'}): ${first}` };
   }
   return { ok: true, config: res.config };
+}
+
+type CheckinMode = 'manual' | 'both' | 'auto' | 'legacy';
+
+/** One selector for tracking on/off and the check-in mode. */
+export function checkinMode(t: LockationConfig['tracking']): CheckinMode {
+  if (!t.enabled) return 'manual';
+  return t.checkins === 'manual' ? 'legacy' : t.checkins;
+}
+
+export function setCheckinMode(d: LockationConfig, mode: CheckinMode) {
+  d.tracking.enabled = mode !== 'manual';
+  d.tracking.checkins = mode === 'legacy' ? 'manual' : mode === 'manual' ? 'both' : mode;
+  if (mode !== 'auto') delete d.antiCheat.liveVerificationEveryHours;
+  if (mode === 'manual') d.rules.required.enabled = d.rules.required.enabled; // stay windows are flagged inline if used
 }

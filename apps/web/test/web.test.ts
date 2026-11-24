@@ -189,7 +189,7 @@ describe('F16 live tracking only in the demo backend', () => {
     const now = new Date('2026-06-01T10:00:00Z');
     const b = new MockBackend(mem(), () => now);
     const { config } = await b.configGet();
-    await b.configSave({ ...config, disclaimer: { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' }, tracking: { ...config.tracking, liveOnly: true } });
+    await b.configSave({ ...config, disclaimer: { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' }, tracking: { ...config.tracking, checkins: 'auto' } });
     const v = await b.session();
     expect(v.liveOnly).toBe(true);
     const home = config.zones[0]!;
@@ -650,5 +650,21 @@ describe('hunt control, test notification, setup confirmation, settings file (de
     expect(importConfigText('not json')).toMatchObject({ ok: false, error: expect.stringContaining('not JSON') });
     const bad = importConfigText(JSON.stringify({ ...cfg, zones: [{ ...cfg.zones[0], radiusM: 1 }] }));
     expect(bad).toMatchObject({ ok: false, error: expect.stringMatching(/Radius/) });
+  });
+});
+
+describe('check-in mode selector', () => {
+  it('maps tracking on/off and checkins to one mode and back', async () => {
+    const { checkinMode, setCheckinMode } = await import('../src/config/ConfigApp.js');
+    const c = demoConfig();
+    setCheckinMode(c, 'manual');
+    expect([c.tracking.enabled, checkinMode(c.tracking)]).toEqual([false, 'manual']);
+    setCheckinMode(c, 'auto');
+    expect([c.tracking.enabled, c.tracking.checkins, checkinMode(c.tracking)]).toEqual([true, 'auto', 'auto']);
+    c.antiCheat.liveVerificationEveryHours = 4;
+    setCheckinMode(c, 'both');
+    expect([c.tracking.checkins, c.antiCheat.liveVerificationEveryHours]).toEqual(['both', undefined]);
+    c.tracking.checkins = 'manual';
+    expect(checkinMode(c.tracking)).toBe('legacy');
   });
 });

@@ -241,7 +241,7 @@ function storeLastAccepted(config: LockationConfig, state: LockationState, fix: 
 
 /** F16 – manual check-ins disabled, location only via background tracking. */
 export function isLiveOnly(config: LockationConfig): boolean {
-  return config.tracking.enabled && config.tracking.liveOnly;
+  return config.tracking.enabled && config.tracking.checkins === 'auto';
 }
 
 export function evaluateCheckin(
@@ -410,10 +410,13 @@ function runRules(config: LockationConfig, state: LockationState, fix: Fix | und
   if (o.forced?.event === 'leave') inside.delete(o.forced.zoneId);
   record.zones = config.zones.filter((z) => inside.has(z.id)).map((z) => z.name);
 
+  const presentBefore = new Set(Object.keys(state.presence));
   const left = updatePresence(config, state, fix, inside, at, o.forced);
+  const entered = Object.keys(state.presence).filter((id) => !presentBefore.has(id));
+  evalZoneActions(config, state, entered, left, rctx, plan);
 
   evalHunt(config, state, fix, rctx, plan, o.source === 'manual' ? o.purpose : 'general', o.forcedCheckpoint);
-  if (o.source === 'manual' || config.tracking.countsAsCheckin || isLiveOnly(config)) evalRequired(config, state, inside, rctx, plan, o.source);
+  if (o.source === 'manual' || config.tracking.checkins !== 'manual') evalRequired(config, state, inside, rctx, plan, o.source);
   if (fix || o.forced) evalStayWindows(config, state, inside, rctx, plan);
   evalForbidden(config, state, inside, left, zones, rctx, plan, o.source, ctx.now);
   evalReward(config, state, inside, left, zones, rctx, plan, o.source);
@@ -455,6 +458,27 @@ function finalizeRecord(record: CheckinRecord, list: PlannedConsequence[]) {
     source: p.source,
     description: describeConsequence(p.consequence),
   }));
+}
+
+// ---------- zone actions (enter / leave) ----------
+function evalZoneActions(config: LockationConfig, state: LockationState, entered: string[], left: LeftZone[], ctx: EvalContext, plan: Planner) {
+  for (const z of config.zones) {
+    const a = z.actions;
+    if (!a.onEnter.length && !a.onLeave.length) continue;
+    const mark = (state.zoneActions[z.id] ??= {});
+    const cooldown = a.cooldownMinutes * MINUTE;
+    if (a.onEnter.length && entered.includes(z.id) && msSince(mark.lastEnter, ctx.now) >= cooldown) {
+      mark.lastEnter = ctx.now.toISOString();
+      plan.addStable('zone.onEnter', a.onEnter, `zone-enter:${z.id}:${state.presence[z.id]?.since ?? ctx.now.toISOString()}`);
+      plan.event(`Entered "${z.name}": ${list(a.onEnter)}.`);
+    }
+    const l = left.find((x) => x.id === z.id);
+    if (a.onLeave.length && l && l.durationMs >= a.minStayMinutes * MINUTE && msSince(mark.lastLeave, ctx.now) >= cooldown) {
+      mark.lastLeave = ctx.now.toISOString();
+      plan.addStable('zone.onLeave', a.onLeave, `zone-leave:${z.id}:${l.since}`);
+      plan.event(`Left "${z.name}" after ${Math.round(l.durationMs / MINUTE)} min: ${list(a.onLeave)}.`);
+    }
+  }
 }
 
 // ---------- F6 hunt ----------

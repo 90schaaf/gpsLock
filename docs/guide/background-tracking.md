@@ -81,9 +81,10 @@ phone is simply not moving.
 GPS edge cases: Lockation only treats you as having left a zone once you are clearly outside (accuracy taken into account),
 so a jumpy GPS at the edge of a zone doesn't trigger anything.
 
-## Live tracking only
+## Background tracking only
 
-The keyholder can make live tracking **mandatory**: manual check-ins are then switched off and the check-in button disappears.
+The keyholder chooses the **check-in mode** (Tracking tab): *manual check-ins only*, *manual check-ins + background tracking*
+(both count) or *background tracking only*. With **background tracking only** tracking is **mandatory**: manual check-ins are then switched off and the check-in button disappears.
 Everything is decided by the locations OwnTracks sends:
 
 - Being in a required zone (as reported in the background) counts as the check-in. After a missed deadline, the first location

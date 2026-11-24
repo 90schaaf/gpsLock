@@ -11,8 +11,8 @@ minute for time-based things (deadlines, warnings, forbidden-zone penalties whil
 
 - **Each required zone has its own deadline** ("Home every 4 h **and** Work every 8 h"). A check-in at Home doesn't reset Work.
   The interval and grace period can be set per zone; otherwise the rule defaults apply (interval 4 h, grace **5 min**).
-- **Shortest interval:** **5 min** with manual check-ins; **1 min** when background locations count as check-ins. With short
-  intervals Lockation asks OwnTracks to report every half interval (at least every 30 s, Move mode) – this uses more battery.
+- **Shortest interval:** **5 min** with manual check-ins; **3 min** when background locations count as check-ins. With short
+  intervals Lockation asks OwnTracks to report every half interval, at most every **2 min** (Move mode) – this uses more battery.
 - Optional **check-in anywhere**: an extra deadline that doesn't depend on a zone – the wearer must check in somewhere at
   least once per interval, so their position is known regularly (useful together with forbidden zones). With background
   tracking every location counts.
@@ -105,11 +105,23 @@ Time amounts are multiplied by the number of steps. Movements flagged as implaus
   hunt counts as failed and *wearer gives up* runs (e.g. add 1 day). Unlocking is no longer blocked by the hunt afterwards.
 - The other side is notified when someone starts, pauses, resumes or ends the hunt.
 
+## Zone actions (enter / leave)
+
+Every zone – whatever its role, neutral too – can run consequences **when entering** and/or **when leaving** it
+(Zones tab → zone → *⚡ Actions on enter / leave*):
+
+- *Leaving counts only after at least … minutes inside* – e.g. **Gym**: leaving after at least 45 min → **unfreeze**.
+- *Cooldown* – minimum time between two runs of the same action.
+- With background tracking the actions run as soon as the wearer is inside / clearly outside (accuracy taken into account);
+  with manual check-ins only at the next check-in inside / outside.
+- The stay is counted from the first to the last location inside, so for "leaving after 45 min" keep tracking running.
+
 ## Background tracking
 
 See [Background tracking](./background-tracking): background locations are evaluated like check-ins, a missing signal is
 penalised like a missed check-in (optionally not during quiet hours, with a warning before), and with **live tracking only**
-manual check-ins are disabled.
+manual check-ins are disabled. The *check-in mode* (Tracking tab) decides: **manual only**, **manual + background** (both
+count for required zones) or **background only**.
 
 ## Changes during a lock
 

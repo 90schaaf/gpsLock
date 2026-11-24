@@ -47,6 +47,10 @@ export function diffConfig(before: LockationConfig, after: LockationConfig): str
       if (!same(o.forbidden.onEnter, z.forbidden.onEnter)) out.push(`"${z.name}" extra punishment: ${cons(z.forbidden.onEnter)}.`);
     }
     if (z.roles.includes('reward') && !same(o.reward, z.reward)) out.push(`"${z.name}" reward settings changed.`);
+    if (!same(o.actions, z.actions)) {
+      const a = z.actions;
+      out.push(`"${z.name}" zone actions: entering ${cons(a.onEnter)}; leaving ${cons(a.onLeave)}${a.minStayMinutes ? ` (after ${fmtMinutes(a.minStayMinutes)})` : ''}.`);
+    }
   }
   for (const o of before.zones) if (!newZones.has(o.id)) out.push(`Zone "${o.name}" removed.`);
 
@@ -84,7 +88,7 @@ export function diffConfig(before: LockationConfig, after: LockationConfig): str
   if (t1.enabled) {
     if (t0.heartbeatMinutes !== t1.heartbeatMinutes) out.push(`Missing signal after ${fmtMinutes(t0.heartbeatMinutes)} → ${fmtMinutes(t1.heartbeatMinutes)}.`);
     if (!same(t0.onHeartbeatMissed, t1.onHeartbeatMissed)) out.push(`Missing signal: ${cons(t1.onHeartbeatMissed)}.`);
-    if (t0.liveOnly !== t1.liveOnly) out.push(t1.liveOnly ? 'Manual check-ins disabled (live tracking only).' : 'Manual check-ins allowed again.');
+    if (t0.checkins !== t1.checkins) out.push({ auto: 'Manual check-ins disabled (background tracking only).', both: 'Manual check-ins and background locations count.', manual: 'Required zones need manual check-ins.' }[t1.checkins]);
     if (!same(t0.quietHours, t1.quietHours)) out.push(`Missing-signal quiet hours: ${t1.quietHours ? `${t1.quietHours.start}–${t1.quietHours.end}` : 'none'}.`);
     if (t0.owntracksMode !== t1.owntracksMode) out.push(`OwnTracks mode: ${t1.owntracksMode}.`);
   }

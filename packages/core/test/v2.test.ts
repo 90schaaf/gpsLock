@@ -502,18 +502,54 @@ describe('hunt control', () => {
 describe('required interval minimum and OwnTracks report interval', () => {
   const req = (tr: Record<string, unknown>, interval: number) =>
     parseConfig({ version: 2, timezone: 'Europe/Zurich', zones: [zone('home', 'Home', HOME, { roles: ['required'] })], tracking: tr, rules: { required: { enabled: true, intervalMinutes: interval } } });
-  it('1 min with background check-ins, 5 min with manual check-ins only', () => {
-    expect(req({ enabled: true }, 1).ok).toBe(true);
-    expect(req({ enabled: true, countsAsCheckin: false }, 1).ok).toBe(false);
+  it('3 min with background check-ins, 5 min with manual check-ins only', () => {
+    expect(req({ enabled: true }, 3).ok).toBe(true);
+    expect(req({ enabled: true }, 2).ok).toBe(false);
+    expect(req({ enabled: true, checkins: 'manual' }, 3).ok).toBe(false);
     expect(req({ enabled: false }, 4).ok).toBe(false);
     expect(req({ enabled: false }, 5).ok).toBe(true);
   });
-  it('OwnTracks reports every half interval (30–300 s) and switches to move mode', () => {
-    const c = cfg({ version: 2, zones: [zone('home', 'Home', HOME, { roles: ['required'] })], tracking: { enabled: true, heartbeatMinutes: 180 }, rules: { required: { enabled: true, intervalMinutes: 2 } } });
-    expect(owntracksLocatorInterval(c)).toBe(60);
+  it('OwnTracks reports every half interval (120–300 s) and switches to move mode', () => {
+    const c = cfg({ version: 2, zones: [zone('home', 'Home', HOME, { roles: ['required'] })], tracking: { enabled: true, heartbeatMinutes: 180 }, rules: { required: { enabled: true, intervalMinutes: 3 } } });
+    expect(owntracksLocatorInterval(c)).toBe(120); // 3-min interval → report every 2 min
     expect(owntracksMonitoring(c)).toBe(2);
     const slow = cfg({ version: 2, zones: [zone('home', 'Home', HOME, { roles: ['required'] })], tracking: { enabled: true, heartbeatMinutes: 180 }, rules: { required: { enabled: true, intervalMinutes: 240 } } });
     expect(owntracksLocatorInterval(slow)).toBe(300);
     expect(owntracksMonitoring(slow)).toBe(1);
+  });
+});
+
+describe('zone actions (enter / leave)', () => {
+  const gym = (actions: Record<string, unknown>, tr: Record<string, unknown> = tracking) =>
+    cfg({ version: 2, zones: [zone('gym', 'Gym', GYM, { actions })], tracking: tr });
+
+  it('leave after a minimum stay unfreezes (background tracking, neutral zone)', () => {
+    const r = new Run(gym({ onLeave: [{ type: 'unfreeze' }], minStayMinutes: 45 }));
+    r.at(GYM, minutes(T0, 0));
+    r.at(GYM, minutes(T0, 30));
+    expect(types(r.at(north(GYM, 600), minutes(T0, 32)))).toEqual([]); // only 30 min provably inside
+    r.at(GYM, minutes(T0, 40));
+    r.at(GYM, minutes(T0, 90));
+    const out = r.at(north(GYM, 600), minutes(T0, 92));
+    expect(types(out)).toEqual(['unfreeze']);
+    expect(out.events.join(' ')).toMatch(/Left "Gym" after 50 min/);
+  });
+
+  it('enter runs once per visit, with cooldown; works with manual check-ins', () => {
+    const r = new Run(gym({ onEnter: [{ type: 'remove_time', seconds: 60 }], cooldownMinutes: 120 }, { enabled: false }));
+    expect(types(r.checkin(GYM, minutes(T0, 0)))).toEqual(['remove_time']);
+    expect(types(r.checkin(GYM, minutes(T0, 5)))).toEqual([]); // still inside
+    r.checkin(north(GYM, 600), minutes(T0, 10));
+    expect(types(r.checkin(GYM, minutes(T0, 20)))).toEqual([]); // cooldown
+    r.checkin(north(GYM, 600), minutes(T0, 30));
+    expect(types(r.checkin(GYM, minutes(T0, 130)))).toEqual(['remove_time']);
+  });
+
+  it('is summarised for the wearer and in config diffs', () => {
+    const a = gym({});
+    const b = gym({ onLeave: [{ type: 'unfreeze' }], minStayMinutes: 45 });
+    const v = buildSessionView({ role: 'wearer', isSelfLock: true, config: b, state: initialState(b, T0), history: [], now: T0 });
+    expect(v.rules.find((x) => x.rule === 'zoneActions')?.lines).toEqual(['Gym – leaving after at least 45min inside: unfreeze.']);
+    expect(diffConfig(a, b)).toEqual(['"Gym" zone actions: entering nothing; leaving unfreeze (after 45min).']);
   });
 });

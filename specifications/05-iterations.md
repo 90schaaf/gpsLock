@@ -456,3 +456,13 @@ per point, ack cleared when reasons change, save blocked, service failure → no
   aborted`, `pausedAt`, `pausedMs` (extends the time limit). Keyholder can always force-start and end without consequences;
   wearer abort = failed + `onAbort`. Self-locks: the wearer acts as wearer but may always start. `POST /api/hunt {action}`.
   Checkpoints are hidden and don't count before the start or while paused; scheduled starts are run by the cron.
+
+### Changes 2026-11-24 (implemented)
+
+- **Check-in mode** `tracking.checkins: manual | both | auto` replaces `countsAsCheckin` and `liveOnly` (migrated: liveOnly → auto,
+  countsAsCheckin false → manual, else both). UI: one selector "How is the location collected?" – manual only (tracking off),
+  manual + background, background only; `manual` with tracking on is only shown for older settings.
+- **Required interval minimum:** 3 min when background locations count, 5 min with manual check-ins; OwnTracks report interval
+  = half the shortest interval, 120–300 s (setConfiguration pushes `monitoring` + `locatorInterval`).
+- **Zone actions:** `zone.actions {onEnter, onLeave, minStayMinutes, cooldownMinutes}` for every zone (any role, neutral
+  too). Enter = presence starts; leave = clearly outside (hysteresis) with a stay ≥ minStay; stable idempotency keys per visit.

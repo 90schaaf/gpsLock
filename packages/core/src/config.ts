@@ -85,6 +85,18 @@ const ZoneRewardSchema = z
   })
   .default({});
 
+/** Actions when entering / leaving a zone – independent of the zone's role (neutral zones too). */
+const ZoneActionsSchema = z
+  .object({
+    onEnter: ConsequenceListSchema,
+    onLeave: ConsequenceListSchema,
+    /** "On leave" only after at least this long inside (e.g. 45 min at the gym). */
+    minStayMinutes: minutes(1440).default(0),
+    /** Minimum time between two runs of the same action. */
+    cooldownMinutes: minutes(10_080).default(0),
+  })
+  .default({});
+
 export const ZoneSchema = z.object({
   id,
   name: z.string().min(1).max(60),
@@ -98,6 +110,7 @@ export const ZoneSchema = z.object({
   required: ZoneRequiredSchema,
   forbidden: ZoneForbiddenSchema,
   reward: ZoneRewardSchema,
+  actions: ZoneActionsSchema,
   reachabilityAck: ReachabilityAckSchema.optional(),
 });
 export type Zone = z.infer<typeof ZoneSchema>;
@@ -163,9 +176,12 @@ export const TrackingSchema = z
     heartbeatMinutes: z.number().int().min(15).max(10_080).default(20),
     onHeartbeatMissed: ConsequenceListSchema,
     maxDelayMinutes: z.number().int().min(1).max(10_080).default(1440),
-    countsAsCheckin: z.boolean().default(true),
-    /** F16 – live tracking only: manual check-ins are disabled, every rule runs on background updates. */
-    liveOnly: z.boolean().default(false),
+    /**
+     * How check-ins happen when tracking is on: `both` = manual check-ins and background locations count (default),
+     * `auto` = background locations only (manual check-ins disabled, former "live tracking only"),
+     * `manual` = background locations are used for the other rules, but required zones need manual check-ins (legacy).
+     */
+    checkins: z.enum(['manual', 'both', 'auto']).default('both'),
     /** OwnTracks monitoring mode provisioned on pairing. `auto` → move if heartbeat < 60 min or forbidden zones exist. */
     owntracksMode: z.enum(['auto', 'move', 'significant']).default('auto'),
     /** No missing-signal penalties or warnings during these hours. */
@@ -315,7 +331,7 @@ export const LockationConfigSchema = z
     // Interval minimum: 1 min when background locations count as check-ins (automatic), else 5 min (manual check-ins).
     const minInterval = minRequiredInterval(cfg);
     if (R.required.intervalMinutes < minInterval) {
-      issue(['rules', 'required', 'intervalMinutes'], `at least ${minInterval} min ${minInterval === 1 ? '' : '(1 min with background tracking counting as check-ins)'}`.trim());
+      issue(['rules', 'required', 'intervalMinutes'], `at least ${minInterval} min${minInterval === 3 ? '' : ' (3 min when background locations count as check-ins)'}`);
     }
     cfg.zones.forEach((z, i) => {
       const v = z.required.intervalMinutes;
@@ -325,11 +341,10 @@ export const LockationConfigSchema = z
       issue(['rules', 'required', 'warnBeforeMinutes'], 'the warning must be shorter than the check-in interval');
     }
     const tr = cfg.tracking;
-    if (tr.liveOnly && !tr.enabled) issue(['tracking', 'liveOnly'], 'live tracking only needs background tracking to be enabled');
     if (tr.warnBeforeMinutes !== undefined && tr.warnBeforeMinutes >= tr.heartbeatMinutes) {
       issue(['tracking', 'warnBeforeMinutes'], 'the warning must come before the missing-signal penalty');
     }
-    if (cfg.antiCheat.liveVerificationEveryHours !== undefined && !tr.liveOnly) {
+    if (cfg.antiCheat.liveVerificationEveryHours !== undefined && !(tr.enabled && tr.checkins === 'auto')) {
       issue(['antiCheat', 'liveVerificationEveryHours'], 'random verification pictures need "live tracking only"');
     }
     if (R.hunt.enabled && R.hunt.checkpoints.length === 0) issue(['rules', 'hunt', 'checkpoints'], 'add at least one checkpoint');
@@ -400,10 +415,14 @@ export function enabledRules(cfg: LockationConfig): string[] {
 
 // ---------- helpers used by engine, view and UI ----------
 
-/** Smallest allowed required interval: 1 min if background locations count as check-ins, otherwise 5 min (manual check-ins). */
+/** Background locations count as required check-ins (tracking on, check-in mode `both` or `auto`). */
+export function backgroundCounts(cfg: Pick<LockationConfig, 'tracking'>): boolean {
+  return cfg.tracking.enabled && cfg.tracking.checkins !== 'manual';
+}
+
+/** Smallest allowed required interval: 3 min if background locations count as check-ins, otherwise 5 min (manual check-ins). */
 export function minRequiredInterval(cfg: Pick<LockationConfig, 'tracking'>): number {
-  const t = cfg.tracking;
-  return t.enabled && (t.countsAsCheckin || t.liveOnly) ? 1 : 5;
+  return backgroundCounts(cfg) ? 3 : 5;
 }
 
 export function zonesWithRole(cfg: LockationConfig, role: ZoneRole): Zone[] {
@@ -439,11 +458,10 @@ export function forbiddenTimings(cfg: LockationConfig, z: Zone): ForbiddenTiming
 
 /**
  * OwnTracks report interval (seconds, move mode): half the shortest required interval when background locations count as
- * check-ins (so a 1-minute deadline gets a report every 30 s), at most 300 s, at least 30 s.
+ * check-ins, between 120 s (every 2 min – e.g. for a 3-minute interval) and 300 s.
  */
 export function owntracksLocatorInterval(cfg: LockationConfig): number {
-  const t = cfg.tracking;
-  if (!t.enabled || !(t.countsAsCheckin || t.liveOnly) || !cfg.rules.required.enabled) return 300;
+  if (!backgroundCounts(cfg) || !cfg.rules.required.enabled) return 300;
   const intervals = [
     ...(cfg.rules.required.anywhere || cfg.rules.required.combine === 'any' ? [cfg.rules.required.intervalMinutes] : []),
     ...zonesWithRole(cfg, 'required')
@@ -451,7 +469,7 @@ export function owntracksLocatorInterval(cfg: LockationConfig): number {
       .map((z) => z.required.intervalMinutes ?? cfg.rules.required.intervalMinutes),
   ];
   if (!intervals.length) return 300;
-  return Math.max(30, Math.min(300, Math.floor((Math.min(...intervals) * 60) / 2)));
+  return Math.max(120, Math.min(300, Math.floor((Math.min(...intervals) * 60) / 2)));
 }
 
 /** Effective OwnTracks monitoring: 2 = move (frequent), 1 = significant (battery saving). */
@@ -486,7 +504,20 @@ const strs = (v: unknown): string[] => arr(v).filter((x): x is string => typeof 
  */
 export function migrateConfig(input: unknown): unknown {
   if (!isObj(input)) return input;
-  if (input.version === CONFIG_VERSION) return input;
+  if (input.version === CONFIG_VERSION) return normalizeTracking(input);
+  return normalizeTracking(migrateV1(input));
+}
+
+/** `countsAsCheckin` / `liveOnly` (until 2026-11-24) → `checkins`. */
+function normalizeTracking(input: unknown): unknown {
+  if (!isObj(input) || !isObj(input.tracking)) return input;
+  const t = input.tracking;
+  if (t.checkins !== undefined || (t.liveOnly === undefined && t.countsAsCheckin === undefined)) return input;
+  const { liveOnly, countsAsCheckin, ...rest } = t;
+  return { ...input, tracking: { ...rest, checkins: liveOnly === true ? 'auto' : countsAsCheckin === false ? 'manual' : 'both' } };
+}
+
+function migrateV1(input: Obj): unknown {
   if (input.version !== undefined && input.version !== 1) return input; // let the schema report it
 
   const rules: Obj = isObj(input.rules) ? input.rules : {};

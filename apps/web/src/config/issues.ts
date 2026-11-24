@@ -56,7 +56,8 @@ const FIELD: Record<string, string> = {
   wrongCooldownMinutes: 'Wrong-guess cooldown',
   heartbeatMinutes: 'Missing signal after',
   maxDelayMinutes: 'Accept delayed updates',
-  liveOnly: 'Live tracking only',
+  checkins: 'Check-in mode',
+  minStayMinutes: 'Minimum stay',
   maxAccuracyM: 'Required accuracy',
   maxFixAgeSeconds: 'Max position age',
   maxSpeedKmh: 'Max plausible speed',
@@ -84,6 +85,7 @@ const LISTS: Record<string, string> = {
   onComplete: 'Completed',
   onTimeout: 'Time limit exceeded',
   onHeartbeatMissed: 'Missing signal',
+  onLeave: 'On leave',
   implausibleConsequences: 'Implausible movement',
 };
 
@@ -95,7 +97,7 @@ export function issueLabel(path: string, config: LockationConfig | undefined): s
   if (p[0] === 'zones' && p[1] !== undefined && /^\d+$/.test(p[1])) {
     parts.push(config?.zones[Number(p[1])]?.name || `Zone ${Number(p[1]) + 1}`);
     i = 2;
-    if (p[i] === 'required' || p[i] === 'forbidden' || p[i] === 'reward') i += 1;
+    if (p[i] === 'required' || p[i] === 'forbidden' || p[i] === 'reward' || p[i] === 'actions') i += 1;
   } else if (p[0] === 'rules') {
     i = 2;
     if (p[1] === 'hunt' && p[2] === 'checkpoints' && p[3] !== undefined && /^\d+$/.test(p[3])) {
@@ -110,6 +112,12 @@ export function issueLabel(path: string, config: LockationConfig | undefined): s
     if (seg === 'enabled') continue;
     if (LISTS[seg]) {
       const n = p[i + 1];
+      if (p[i - 1] === 'actions' && seg === 'onEnter') {
+        const n2 = p[i + 1];
+        parts.push(`On enter${n2 !== undefined && /^\d+$/.test(n2) ? ` #${Number(n2) + 1}` : ''}`);
+        if (n2 !== undefined && /^\d+$/.test(n2)) i += 1;
+        continue;
+      }
       const zoneExtra = p[0] === 'zones' && seg === 'onEnter' ? 'Extra' : '';
       parts.push(`${zoneExtra ? `${zoneExtra} ` : ''}${zoneExtra ? LISTS[seg]!.toLowerCase() : LISTS[seg]}${n !== undefined && /^\d+$/.test(n) ? ` #${Number(n) + 1}` : ''}`);
       if (n !== undefined && /^\d+$/.test(n)) i += 1;

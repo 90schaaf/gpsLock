@@ -24,7 +24,7 @@ export interface ZoneView {
 }
 
 export interface RuleSummary {
-  rule: 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'tracking';
+  rule: 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'tracking' | 'zoneActions';
   title: string;
   lines: string[];
 }
@@ -223,18 +223,27 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
       ],
     });
   }
+  const actionLines = config.zones.flatMap((z) => {
+    const a = z.actions;
+    const parts: string[] = [];
+    if (a.onEnter.length) parts.push(`entering: ${list(a.onEnter)}`);
+    if (a.onLeave.length) parts.push(`leaving${a.minStayMinutes ? ` after at least ${fmtMinutes(a.minStayMinutes)} inside` : ''}: ${list(a.onLeave)}`);
+    return parts.length ? [`${z.name} – ${parts.join('; ')}${a.cooldownMinutes ? ` (at most every ${fmtMinutes(a.cooldownMinutes)})` : ''}.`] : [];
+  });
+  if (actionLines.length) out.push({ rule: 'zoneActions', title: 'Zone actions', lines: actionLines });
   const tr = config.tracking;
   if (tr.enabled) {
     out.push({
       rule: 'tracking',
-      title: tr.liveOnly ? 'Live tracking (required)' : 'Background tracking',
+      title: tr.checkins === 'auto' ? 'Live tracking (required)' : 'Background tracking',
       lines: [
         'Your phone reports its location in the background with the OwnTracks app.',
-        ...(tr.liveOnly ? ['Manual check-ins are disabled – only live tracking counts.'] : []),
+        ...(tr.checkins === 'auto' ? ['Manual check-ins are disabled – only live tracking counts.'] : []),
         `If no location arrives for ${fmtMinutes(tr.heartbeatMinutes)}: ${list(tr.onHeartbeatMissed)}.`,
         ...(tr.quietHours ? [`No missing-signal penalties between ${tr.quietHours.start} and ${tr.quietHours.end}.`] : []),
         ...(tr.warnBeforeMinutes ? [`You get a warning ${fmtMinutes(tr.warnBeforeMinutes)} before a missing-signal penalty (if notifications are set up).`] : []),
-        ...((tr.countsAsCheckin || tr.liveOnly) && required.enabled ? ['Background locations inside a required zone count as check-ins.'] : []),
+        ...(tr.checkins !== 'manual' && required.enabled ? ['Background locations inside a required zone count as check-ins.'] : []),
+        ...(tr.checkins === 'manual' && required.enabled ? ['Required zones need manual check-ins; background locations are used for the other rules.'] : []),
         ...(config.antiCheat.liveVerificationEveryHours ? [`Random verification pictures, on average every ${config.antiCheat.liveVerificationEveryHours} h.`] : []),
       ],
     });
@@ -287,7 +296,7 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
     privacyLocked: state.privacyOverride === 'zone_only',
     matchMode: config.matchMode,
     maxAccuracyM: config.antiCheat.maxAccuracyM,
-    liveOnly: config.tracking.enabled && config.tracking.liveOnly,
+    liveOnly: config.tracking.enabled && config.tracking.checkins === 'auto',
     zones,
     rules: summarizeRules(config),
     freezeUntil: state.freezeUntil,
@@ -431,7 +440,7 @@ export function computeMetadata(config: LockationConfig, state: LockationState, 
   const overdue = r.enabled && Object.values(state.required.slots).some((s) => s.nextDeadline && now > new Date(s.nextDeadline));
   if (overdue) reasons.push('A required GPS check-in is overdue.');
 
-  const live = config.tracking.enabled && config.tracking.liveOnly;
+  const live = config.tracking.enabled && config.tracking.checkins === 'auto';
   let description = 'Prove your location';
   if (live && !state.tracking.deviceUser) {
     description = 'Set up live tracking!';
