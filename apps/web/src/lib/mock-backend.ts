@@ -1,5 +1,8 @@
 /** F13 – demo backend: runs the real rule engine in the browser, persisted in localStorage. */
 import {
+  applyHuntAction,
+  type HuntAction,
+  HuntActionError,
   buildLogEntry,
   buildSessionView,
   diffConfig,
@@ -264,10 +267,52 @@ export class MockBackend implements Backend {
     return this.view(s, config, s.state);
   }
 
-  /** Demo only: pretend OwnTracks sent this position from the background. */
-  async track(fix: Fix) {
+  async testNotification(): Promise<{ ok: true }> {
+    const { s } = this.ctx();
+    if (!s.notify?.[s.role]) throw new ApiError(409, 'not_subscribed', 'Set up notifications first.');
+    this.log(s, '🔔 ✅ Lockation test notification', 'Notifications work (demo – nothing is sent).');
+    this.save(s);
+    return { ok: true };
+  }
+
+  async huntAction(action: HuntAction) {
     const { s, config, state } = this.ctx();
-    const res = evaluateTracked(config, state, { fix }, { now: this.now(), sessionId: 'demo', evalId: crypto.randomUUID() });
+    let res;
+    try {
+      res = applyHuntAction(config, state, action, s.role, { now: this.now(), sessionId: 'demo', evalId: crypto.randomUUID() }, false);
+    } catch (e) {
+      if (e instanceof HuntActionError) throw new ApiError(403, 'hunt_action_not_allowed', e.message);
+      throw e;
+    }
+    for (const ev of res.events) this.log(s, 'Lockation', ev);
+    for (const n of res.notices.filter((x) => x.audience === 'wearer')) this.log(s, `🔔 ${n.title}`, n.message);
+    s.state = res.state;
+    this.save(s);
+    return this.view(s, config, s.state);
+  }
+
+  /** Demo: map clicks send a fake background location (stored per browser). */
+  get mapClickSends(): boolean {
+    try {
+      return localStorage.getItem('lockation-demo-click-sends') !== 'off';
+    } catch {
+      return true;
+    }
+  }
+  set mapClickSends(on: boolean) {
+    try {
+      localStorage.setItem('lockation-demo-click-sends', on ? 'on' : 'off');
+    } catch {
+      /* private mode – keep the default */
+    }
+  }
+
+  /** Demo only: pretend OwnTracks sent this position (like tapping ↑ in the app, which also completes the setup). */
+  async track(fix: Fix, opts: { ignoreSpeed?: boolean } = {}) {
+    const { s, config, state } = this.ctx();
+    // Map clicks jump kilometres within seconds – skip the speed plausibility check for them.
+    const cfg = opts.ignoreSpeed ? { ...config, antiCheat: { ...config.antiCheat, maxSpeedKmh: Number.POSITIVE_INFINITY } } : config;
+    const res = evaluateTracked(cfg, state, { fix, manual: true }, { now: this.now(), sessionId: 'demo', evalId: crypto.randomUUID() });
     res.record.consequences = res.record.consequences.map((c) => ({ ...c, ok: true }));
     if (res.consequences.length || res.events.length) {
       const entry = buildLogEntry('checkin', res.events, res.consequences, res.record);

@@ -84,6 +84,8 @@ All endpoints: `POST`, JSON, CORS restricted. Errors: `{error: {code, message}}`
 | `/api/tracking/unpair` | `{mainToken}` | `SessionView` |
 | `/api/notify/setup` | `{mainToken}` | `{topic, url, deepLink, view}` (503 without ntfy token) |
 | `/api/notify/stop` | `{mainToken}` | `SessionView` |
+| `/api/notify/test` | `{mainToken}` | `{ok:true}`; 409 not subscribed, 503 without token |
+| `/api/hunt` | `{mainToken, action: start\|pause\|resume\|abort}` | `SessionView`; 403 `hunt_action_not_allowed` |
 | `/api/notice/ack` | `{mainToken}` (wearer) | `SessionView` |
 | `/track/owntracks` | OwnTracks message (Basic auth) | `[]`, `[setWaypoints cmd]` and/or `[setConfiguration cmd]` |
 | `/webhook` | Chaster webhook | `204` |

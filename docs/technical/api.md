@@ -16,6 +16,8 @@ Errors: `{ "error": { "code", "message", "details"? } }`.
 | `/api/tracking/unpair` | `{ mainToken }` (wearer) | `SessionView` |
 | `/api/notify/setup` | `{ mainToken }` (wearer or keyholder) | `{ topic, url, deepLink, view }`; 503 `notifications_unavailable` without `NTFY_TOKEN` |
 | `/api/notify/stop` | `{ mainToken }` | `SessionView` |
+| `/api/notify/test` | `{ mainToken }` | `{ ok: true }` – test message to the own channel; 409 if not subscribed |
+| `/api/hunt` | `{ mainToken, action: "start" \| "pause" \| "resume" \| "abort" }` | `SessionView`; 403 `hunt_action_not_allowed` |
 | `/api/notice/ack` | `{ mainToken }` (wearer) | `SessionView` – clears the "rules changed" notice |
 | `/track/owntracks` | OwnTracks HTTP mode message, HTTP Basic auth with device credentials | `[]` or `[{_type:"cmd",action:"setWaypoints",…}]` |
 | `/webhook` | Chaster webhook, HTTP Basic auth | `204` |

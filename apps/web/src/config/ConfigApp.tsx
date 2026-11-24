@@ -1,4 +1,5 @@
 import {
+  minRequiredInterval,
   DISCLAIMER_VERSION,
   disclaimerAccepted,
   fmtMinutes,
@@ -27,7 +28,7 @@ import { ConsequenceEditor, NullableMinutesField, NumberField, OverrideField, Ti
 import { applyRoles, droppedRolesWithSettings, forbiddenTimeline, heartbeatWarningText, toggleRole, type RoleChoice } from './helpers.js';
 import { useReachability, type PlaceRef, type ReachCheck } from './useReachability.js';
 
-type Tab = 'zones' | 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'tracking' | 'notify' | 'anticheat' | 'privacy';
+type Tab = 'zones' | 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'tracking' | 'notify' | 'anticheat' | 'privacy' | 'file';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'zones', label: '🗺 Zones' },
   { id: 'required', label: '⏱ Required' },
@@ -39,6 +40,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'notify', label: '🔔 Notifications' },
   { id: 'anticheat', label: '🛡 Anti-cheat' },
   { id: 'privacy', label: '🔒 Privacy' },
+  { id: 'file', label: '💾 Import / Export' },
 ];
 
 const ROLE_CHIPS: { id: RoleChoice; label: string }[] = [
@@ -243,7 +245,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
     } else {
       const id = newId('z');
       edit((d) => {
-        d.zones.push({ id, name: (name ?? `Zone ${d.zones.length + 1}`).slice(0, 60), lat: p.lat, lng: p.lng, radiusM: 150, roles: [], required: { intervalCheckins: true, stayWindows: [], onMissed: [], onSuccess: [], onOutsideDuringWindow: [] }, forbidden: { windows: [], onEnter: [] }, reward: { onEnter: [] } });
+        d.zones.push({ id, name: (name ?? `Zone ${d.zones.length + 1}`).slice(0, 60), lat: p.lat, lng: p.lng, radiusM: 150, roles: [], required: { intervalCheckins: true, stayWindows: [], onMissed: [], onSuccess: [], onOutsideDuringWindow: [] }, forbidden: { windows: [], onEnter: [] }, reward: { onEnter: [] }, actions: { onEnter: [], onLeave: [], minStayMinutes: 0, cooldownMinutes: 0 } });
       });
       setSelected(id);
       if (tab !== 'zones') setTab('zones');
@@ -270,6 +272,17 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
       d.zones[i] = applyRoles(d.zones[i]!, next);
       // Marking the first zone with a role switches the matching rule on.
       for (const r of next) if (!z.roles.includes(r) && !d.rules[r].enabled && zonesWithRole(d, r).length === 1) d.rules[r].enabled = true;
+    });
+  }
+
+  /** One confirmation for all currently flagged places. */
+  function ackAll() {
+    const at = new Date().toISOString();
+    edit((d) => {
+      for (const p of [...d.zones, ...d.rules.hunt.checkpoints]) {
+        const st = reach[p.id];
+        if (st?.state === 'out_of_reach' && needsConfirmation(p.reachabilityAck, st)) p.reachabilityAck = { reasons: st.reasons.slice(0, 10), at };
+      }
     });
   }
 
@@ -309,8 +322,20 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
       {running && <p class="small muted" style={{ margin: 0 }}>Changes apply immediately; the wearer sees a summary of what changed.</p>}
 
       {unconfirmed.length > 0 && (
-        <div class="card small" data-testid="reach-blocker">
-          <strong class="warn-text">⚠ Safety check:</strong> {unconfirmed.map((p) => `"${p.name}" (${p.reasons.join(', ')})`).join('; ')} – confirm each place or move it before saving.
+        <div class="card small stack" data-testid="reach-blocker">
+          <strong class="warn-text">⚠ Safety check – these places may be out of reach:</strong>
+          <ul class="plain">
+            {unconfirmed.map((p) => (
+              <li key={p.id}>
+                <strong>{p.name}</strong>: {p.reasons.join(', ')}
+              </li>
+            ))}
+          </ul>
+          <label class="check">
+            <input type="checkbox" checked={false} data-testid="reach-ack-all" onChange={(e) => { if (checked(e)) ackAll(); }} />
+            I know – {unconfirmed.length === 1 ? 'this place is' : 'these places are'} intentionally hard to reach
+          </label>
+          <span class="muted">Or move the place. Saving is possible once confirmed.</span>
         </div>
       )}
       {serverIssues && serverIssues.length > 0 && (
@@ -427,12 +452,29 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
                   </span>
                 )}
                 <ReachNote status={reach[z.id]} ack={z.reachabilityAck} onAck={(on) => setAck('zone', z.id, reach[z.id], on)} />
+                <details class="zone-details full" data-testid="zone-actions" onClick={(e) => e.stopPropagation()} open={z.actions.onEnter.length + z.actions.onLeave.length > 0 && z.id === selected}>
+                  <summary class="small">
+                    ⚡ Actions on enter / leave{z.actions.onEnter.length + z.actions.onLeave.length ? ` (${z.actions.onEnter.length + z.actions.onLeave.length})` : ''}
+                  </summary>
+                  <div class="stack">
+                    <p class="small muted" style={{ margin: 0 }}>
+                      Independent of the role – also for neutral zones. Leaving counts once the wearer is clearly outside (with background tracking at
+                      once, otherwise at the next check-in outside).
+                    </p>
+                    <ConsequenceEditor label="When entering" value={z.actions.onEnter} commands={commands} onChange={(v) => edit((d) => { d.zones[i]!.actions.onEnter = v; })} />
+                    <ConsequenceEditor label="When leaving" value={z.actions.onLeave} commands={commands} onChange={(v) => edit((d) => { d.zones[i]!.actions.onLeave = v; })} />
+                    <div class="grid2">
+                      <NumberField path={`zones.${i}.actions.minStayMinutes`} label="Leaving counts only after at least" suffix="minutes inside" min={0} value={z.actions.minStayMinutes} hint="E.g. 45 min at the gym before 'unfreeze'." onChange={(v) => edit((d) => { d.zones[i]!.actions.minStayMinutes = v ?? 0; })} />
+                      <NumberField path={`zones.${i}.actions.cooldownMinutes`} label="Cooldown" suffix="minutes" min={0} value={z.actions.cooldownMinutes} hint="Minimum time between two runs of the same action." onChange={(v) => edit((d) => { d.zones[i]!.actions.cooldownMinutes = v ?? 0; })} />
+                    </div>
+                  </div>
+                </details>
               </li>
             ))}
           </ul>
           {config.zones.length === 0 && <p class="muted">No zones yet – tap the map or search an address.</p>}
           <p class="small muted">
-            Roles: <strong>Required</strong> and/or <strong>Reward</strong>, or <strong>Forbidden</strong>, or <strong>Neutral</strong> (map only). The rule tabs list the zones of their role.
+            Roles: <strong>Required</strong> and/or <strong>Reward</strong>, or <strong>Forbidden</strong>, or <strong>Neutral</strong> (no rule – for orientation or zone actions). The rule tabs list the zones of their role. Every zone can also run <strong>actions on enter / leave</strong>.
           </p>
           <div class="grid2" style={{ marginTop: '10px' }}>
             <label class="field">
@@ -454,9 +496,15 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
         <Section title="Required zones" enabled={R.required.enabled} onToggle={(v) => edit((d) => { d.rules.required.enabled = v; })}
           help={'The wearer must check in regularly inside each required zone (and/or anywhere). Required zones can also have "must stay inside" time windows.'}>
           <div class="grid2">
-            <label class="check">
+            <label class="check" style={{ alignItems: 'flex-start' }}>
               <input type="checkbox" checked={R.required.anywhere} onChange={(e) => edit((d) => { d.rules.required.anywhere = checked(e); })} />
-              Also require a check-in anywhere (proves the position)
+              <span>
+                Also require a check-in anywhere (proves the position)
+                <span class="small muted" style={{ display: 'block' }}>
+                  An extra deadline that doesn't depend on a zone: the wearer must check in somewhere at least once per interval, so their
+                  position is known regularly (useful with forbidden zones). With background tracking every location counts.
+                </span>
+              </span>
             </label>
             <label class="field">
               Several required zones
@@ -465,7 +513,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
                 <option value="any">One shared deadline – any zone counts (OR)</option>
               </select>
             </label>
-            <NumberField label="Interval (default)" suffix="minutes" min={15} value={R.required.intervalMinutes} hint={fmtMinutes(R.required.intervalMinutes)} onChange={(v) => edit((d) => { d.rules.required.intervalMinutes = v ?? 240; })} />
+            <NumberField path="rules.required.intervalMinutes" label="Interval (default)" suffix="minutes" min={minRequiredInterval(config)} value={R.required.intervalMinutes} hint={`${fmtMinutes(R.required.intervalMinutes)} · minimum ${minRequiredInterval(config)} min (${minRequiredInterval(config) === 1 ? 'background locations count as check-ins' : 'manual check-ins; 1 min with background tracking'})`} onChange={(v) => edit((d) => { d.rules.required.intervalMinutes = v ?? 240; })} />
             <NumberField label="Grace period (default)" suffix="minutes" min={0} value={R.required.graceMinutes} onChange={(v) => edit((d) => { d.rules.required.graceMinutes = v ?? 0; })} />
             <NumberField path="rules.required.warnBeforeMinutes" label="Warn before a deadline" suffix="minutes, empty = off" optional min={5} value={R.required.warnBeforeMinutes} hint="Sent to the wearer's notifications (ntfy) if set up." onChange={(v) => edit((d) => { d.rules.required.warnBeforeMinutes = v; })} />
             <TimeRange label="Quiet hours (no deadline inside)" value={R.required.quietHours} onChange={(v) => edit((d) => { d.rules.required.quietHours = v; })} />
@@ -495,7 +543,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
                 </label>
                 {z.required.intervalCheckins && (
                   <div class="grid2">
-                    <OverrideField label="Interval" suffix="minutes" min={15} value={z.required.intervalMinutes} inherited={R.required.intervalMinutes} format={fmtMinutes} onChange={(v) => editZone(z.id, (x) => { x.required.intervalMinutes = v; })} />
+                    <OverrideField path={`zones.${config.zones.indexOf(z)}.required.intervalMinutes`} label="Interval" suffix="minutes" min={minRequiredInterval(config)} value={z.required.intervalMinutes} inherited={R.required.intervalMinutes} format={fmtMinutes} onChange={(v) => editZone(z.id, (x) => { x.required.intervalMinutes = v; })} />
                     <OverrideField label="Grace period" suffix="minutes" min={0} value={z.required.graceMinutes} inherited={R.required.graceMinutes} format={fmtMinutes} onChange={(v) => editZone(z.id, (x) => { x.required.graceMinutes = v; })} />
                   </div>
                 )}
@@ -668,6 +716,43 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
                 <option value="any">Any order</option>
               </select>
             </label>
+            <label class="field">
+              Start
+              <select data-testid="hunt-start" value={R.hunt.start} onChange={(e) => edit((d) => { d.rules.hunt.start = (e.target as HTMLSelectElement).value as 'auto'; })}>
+                <option value="auto">Automatically when the lock starts</option>
+                <option value="wearer">The wearer starts it</option>
+                <option value="keyholder">The keyholder starts it</option>
+                <option value="scheduled">At a scheduled time</option>
+              </select>
+            </label>
+            {R.hunt.start === 'scheduled' && (
+              <>
+                <label class="field">
+                  Start at (your local time)
+                  <input
+                    type="datetime-local"
+                    value={R.hunt.startAt ? toLocalInput(R.hunt.startAt) : ''}
+                    onInput={(e) => {
+                      const v = (e.target as HTMLInputElement).value;
+                      edit((d) => { d.rules.hunt.startAt = v ? new Date(v).toISOString() : undefined; if (v) d.rules.hunt.startAfterMinutes = undefined; });
+                    }}
+                  />
+                </label>
+                <NumberField label="… or after the lock start" suffix="minutes" optional min={0} value={R.hunt.startAfterMinutes} onChange={(v) => edit((d) => { d.rules.hunt.startAfterMinutes = v; if (v !== undefined) d.rules.hunt.startAt = undefined; })} />
+              </>
+            )}
+            <label class="field">
+              Pause / resume
+              <select value={R.hunt.pauseBy} onChange={(e) => edit((d) => { d.rules.hunt.pauseBy = (e.target as HTMLSelectElement).value as 'keyholder'; })}>
+                <option value="nobody">Nobody</option>
+                <option value="keyholder">Keyholder only</option>
+                <option value="both">Wearer and keyholder</option>
+              </select>
+            </label>
+            <label class="check">
+              <input type="checkbox" checked={R.hunt.wearerCanAbort} onChange={(e) => edit((d) => { d.rules.hunt.wearerCanAbort = checked(e); })} />
+              The wearer may give up the hunt (counts as failed)
+            </label>
             {R.hunt.reveal !== 'all' && (
               <NumberField label="Wrong-guess cooldown" suffix="minutes" min={0} value={R.hunt.wrongCooldownMinutes} onChange={(v) => edit((d) => { d.rules.hunt.wrongCooldownMinutes = v ?? 0; })} />
             )}
@@ -690,22 +775,33 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
           )}
           <ConsequenceEditor label="Hunt completed" value={R.hunt.onComplete} commands={commands} onChange={(v) => edit((d) => { d.rules.hunt.onComplete = v; })} />
           {R.hunt.timeLimitMinutes && <ConsequenceEditor label="Time limit exceeded" value={R.hunt.onTimeout} commands={commands} onChange={(v) => edit((d) => { d.rules.hunt.onTimeout = v; })} />}
+          {R.hunt.wearerCanAbort && <ConsequenceEditor label="Wearer gives up" value={R.hunt.onAbort} commands={commands} onChange={(v) => edit((d) => { d.rules.hunt.onAbort = v; })} />}
+          <p class="small muted" style={{ margin: 0 }}>
+            The keyholder can always start the hunt early and end it (without consequences). A pause stops the time limit; checkpoints don't count while paused.
+          </p>
         </Section>
       )}
 
       {tab === 'tracking' && (
         <div class="card stack">
-          <h2>
-            Background tracking
-            <span class="grow" />
-            <label class="check small">
-              <input type="checkbox" checked={T.enabled} onChange={(e) => edit((d) => { d.tracking.enabled = checked(e); if (!d.tracking.enabled) { d.tracking.liveOnly = false; delete d.antiCheat.liveVerificationEveryHours; } })} />
-              enabled
-            </label>
-          </h2>
-          <p class="small muted" style={{ margin: 0 }}>
-            The wearer connects the free OwnTracks app (iPhone / Android), which reports the location in the background. All rules then also react to these background updates – without manual check-ins.
-          </p>
+          <h2>Check-ins &amp; background tracking</h2>
+          <label class="field">
+            How is the wearer's location collected?
+            <select data-testid="checkin-mode" value={checkinMode(T)} onChange={(e) => edit((d) => setCheckinMode(d, (e.target as HTMLSelectElement).value as CheckinMode))}>
+              <option value="manual">Manual check-ins only</option>
+              <option value="both">Manual check-ins + background tracking (OwnTracks)</option>
+              <option value="auto">Background tracking only – no manual check-ins</option>
+              {checkinMode(T) === 'legacy' && <option value="legacy">Background tracking, required zones only by manual check-in (older setting)</option>}
+            </select>
+            <span class="small muted">
+              {{
+                manual: 'The wearer taps "Check in" in Lockation. The position is only known at these moments.',
+                both: 'The free OwnTracks app (iPhone / Android) reports the position in the background; manual check-ins still work. Both count for required zones.',
+                auto: 'Only OwnTracks counts – the check-in button is hidden. The wearer must keep OwnTracks running.',
+                legacy: 'Background locations are used for forbidden/reward zones, the hunt and windows, but required zones need manual check-ins.',
+              }[checkinMode(T)]}
+            </span>
+          </label>
           {T.enabled && (
             <>
               <div class="grid2">
@@ -727,14 +823,6 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
                   </span>
                 </label>
                 <TimeRange label="Quiet hours – no missing-signal penalty or warning" value={T.quietHours} onChange={(v) => edit((d) => { d.tracking.quietHours = v; })} />
-                <label class="check">
-                  <input type="checkbox" checked={T.countsAsCheckin || T.liveOnly} disabled={T.liveOnly} onChange={(e) => edit((d) => { d.tracking.countsAsCheckin = checked(e); })} />
-                  Background updates in a required zone count as check-ins
-                </label>
-                <label class="check">
-                  <input type="checkbox" data-testid="live-only" checked={T.liveOnly} onChange={(e) => edit((d) => { d.tracking.liveOnly = checked(e); if (!d.tracking.liveOnly) delete d.antiCheat.liveVerificationEveryHours; })} />
-                  Live tracking only – disable manual check-ins
-                </label>
               </div>
               <ConsequenceEditor label="When no location arrives in time (phone off, app stopped, not set up)" repeating="missing signal" value={T.onHeartbeatMissed} commands={commands} onChange={(v) => edit((d) => { d.tracking.onHeartbeatMissed = v; })} />
             </>
@@ -806,9 +894,9 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
               optional
               min={1}
               max={168}
-              disabled={!(T.enabled && T.liveOnly)}
+              disabled={checkinMode(T) !== 'auto'}
               value={config.antiCheat.liveVerificationEveryHours}
-              hint={T.enabled && T.liveOnly ? undefined : 'Needs "Live tracking only" in the Tracking tab.'}
+              hint={checkinMode(T) === 'auto' ? undefined : 'Needs "Background tracking only" in the Tracking tab.'}
               onChange={(v) => edit((d) => { d.antiCheat.liveVerificationEveryHours = v; })}
             />
           </div>
@@ -837,6 +925,17 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
             Safety check: the coordinates of your zones and checkpoints (never the wearer's location) are looked up in OpenStreetMap (Overpass, Nominatim) to warn about places that are hard to reach.
           </p>
         </div>
+      )}
+
+      {tab === 'file' && (
+      <SettingsFile
+        config={config}
+        onImport={(next) => edit((d) => {
+          const keep = d.disclaimer;
+          for (const k of Object.keys(d)) delete (d as Record<string, unknown>)[k];
+          Object.assign(d, next, { disclaimer: keep });
+        })}
+      />
       )}
 
       {(!embedded || backend.demo) && (
@@ -869,10 +968,19 @@ export function ReachNote({ status, ack, onAck }: { status: ReachStatus | undefi
   const confirmed = !needsConfirmation(ack, status);
   return (
     <span class="full stack" data-testid="reach-flag" onClick={(e) => e.stopPropagation()}>
-      <span class="small warn-text">⚠ Possibly out of reach: {status.reasons.join(', ')}.</span>
-      <label class="check small">
-        <input type="checkbox" checked={confirmed} onChange={(e) => onAck(checked(e))} />I know – this place is intentionally hard to reach
-      </label>
+      <span class="small warn-text">
+        ⚠ Possibly out of reach: {status.reasons.join(', ')}.{' '}
+        {confirmed ? (
+          <span class="muted">
+            Confirmed as intentional ·{' '}
+            <button class="link" onClick={() => onAck(false)}>
+              undo
+            </button>
+          </span>
+        ) : (
+          <span class="muted">Confirm at the top of the page.</span>
+        )}
+      </span>
     </span>
   );
 }
@@ -950,4 +1058,79 @@ function IssueSummary({ count, onGo }: { count: Partial<Record<Tab, number>>; on
       ))}
     </span>
   );
+}
+
+/** datetime-local value (browser time) for an ISO instant. */
+function toLocalInput(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Export the whole configuration as a JSON file, or import one (validated; the disclaimer acceptance is kept). */
+export function SettingsFile({ config, onImport }: { config: LockationConfig; onImport: (c: LockationConfig) => void }) {
+  const [msg, setMsg] = useState<{ ok: boolean; text: string }>();
+  const download = () => {
+    const { disclaimer: _d, ...rest } = config;
+    const blob = new Blob([JSON.stringify(rest, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'lockation-config.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    setMsg({ ok: true, text: 'Exported lockation-config.json.' });
+  };
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    const res = importConfigText(await file.text());
+    if (res.ok) {
+      onImport(res.config);
+      setMsg({ ok: true, text: `Imported "${file.name}" – check the tabs and save.` });
+    } else setMsg({ ok: false, text: res.error });
+  };
+  return (
+    <div class="card stack" data-testid="settings-file">
+      <h2>💾 Settings file</h2>
+      <p class="small muted" style={{ margin: 0 }}>Export all settings as a file to reuse them for another lock, or import a file exported before. Importing replaces the current settings (not saved until you save).</p>
+      <div class="row">
+        <button onClick={download} data-testid="export-config">⬇ Export</button>
+        <label class="btn">
+          ⬆ Import…
+          <input type="file" accept="application/json,.json" style={{ display: 'none' }} data-testid="import-config" onChange={(e) => void upload((e.target as HTMLInputElement).files?.[0])} />
+        </label>
+      </div>
+      {msg && <p class={`small ${msg.ok ? '' : 'error'}`} style={{ margin: 0 }}>{msg.text}</p>}
+    </div>
+  );
+}
+
+/** Parse an exported settings file (v1 files are migrated). */
+export function importConfigText(text: string): { ok: true; config: LockationConfig } | { ok: false; error: string } {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return { ok: false, error: 'This is not a valid settings file (not JSON).' };
+  }
+  const res = parseConfig(raw);
+  if (!res.ok) {
+    const first = res.issues.slice(0, 3).map((i) => `${issueLabel(i.path, undefined) || i.path}: ${i.message}`).join('; ');
+    return { ok: false, error: `The file contains invalid settings (${res.issues.length} problem${res.issues.length === 1 ? '' : 's'}): ${first}` };
+  }
+  return { ok: true, config: res.config };
+}
+
+type CheckinMode = 'manual' | 'both' | 'auto' | 'legacy';
+
+/** One selector for tracking on/off and the check-in mode. */
+export function checkinMode(t: LockationConfig['tracking']): CheckinMode {
+  if (!t.enabled) return 'manual';
+  return t.checkins === 'manual' ? 'legacy' : t.checkins;
+}
+
+export function setCheckinMode(d: LockationConfig, mode: CheckinMode) {
+  d.tracking.enabled = mode !== 'manual';
+  d.tracking.checkins = mode === 'legacy' ? 'manual' : mode === 'manual' ? 'both' : mode;
+  if (mode !== 'auto') delete d.antiCheat.liveVerificationEveryHours;
+  if (mode === 'manual') d.rules.required.enabled = d.rules.required.enabled; // stay windows are flagged inline if used
 }

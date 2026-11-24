@@ -1,6 +1,9 @@
 /** Application service: orchestrates Chaster API, core engine, storage and notifications. */
 import {
+  applyHuntAction,
   buildLogEntry,
+  type HuntAction,
+  HuntActionError,
   buildSessionView,
   computeMetadata,
   diffConfig,
@@ -15,6 +18,7 @@ import {
   nextDueAt,
   type Notice,
   owntracksConfigLink,
+  owntracksLocatorInterval,
   owntracksMonitoring,
   owntracksSetMonitoring,
   owntracksWaypoints,
@@ -193,9 +197,38 @@ export class LockationService {
     const audience = this.audience(r);
     const topic = await this.store.createTopic(r.sessionId, audience, this.now());
     await this.ntfy
-      .send(topic, { title: 'Lockation', message: audience === 'wearer' ? 'Warnings for your lock will arrive here.' : 'Notifications about your wearer\'s lock will arrive here.', click: this.appUrl })
+      .send(topic, { title: '✅ Lockation test notification', message: audience === 'wearer' ? 'Notifications are set up. Warnings for your lock will arrive here.' : 'Notifications are set up. Updates about your wearer\'s lock will arrive here.', click: this.appUrl })
       .catch(() => undefined);
     return { topic, ...this.ntfy.links(topic), view: await this.view(r, r.state) };
+  }
+
+  /** Sends a test message to the caller's own notification channel. */
+  async testNotification(mainToken: string): Promise<{ ok: true }> {
+    const r = await this.resolve(mainToken);
+    if (!this.ntfy) throw new HttpError(503, 'notifications_unavailable', 'Notifications are not configured on this server.');
+    const topic = await this.store.topic(r.sessionId, this.audience(r));
+    if (!topic) throw new HttpError(409, 'not_subscribed', 'Set up notifications first.');
+    try {
+      await this.ntfy.send(topic, { title: '✅ Lockation test notification', message: 'Notifications work. Warnings and updates for this lock will arrive here.', click: this.appUrl });
+    } catch {
+      throw new HttpError(502, 'ntfy_failed', 'The notification server did not accept the message. Check the NTFY_TOKEN secret.');
+    }
+    return { ok: true };
+  }
+
+  // ---------- scavenger hunt control ----------
+  async huntAction(mainToken: string, action: HuntAction): Promise<SessionView> {
+    const r = await this.resolve(mainToken);
+    if (r.session.lock?.status && r.session.lock.status !== 'locked') throw new HttpError(409, 'not_locked', 'The lock is not running.');
+    let result: EvalResult;
+    try {
+      result = applyHuntAction(r.config, r.state, action, r.role, { now: this.now(), sessionId: r.sessionId, evalId: this.newId(), rng: this.rng }, r.isSelfLock);
+    } catch (e) {
+      if (e instanceof HuntActionError) throw new HttpError(403, 'hunt_action_not_allowed', e.message);
+      throw e;
+    }
+    await this.finish(r, result, 'tick');
+    return this.view(r, result.state);
   }
 
   async stopNotifications(mainToken: string): Promise<SessionView> {
@@ -334,9 +367,10 @@ export class LockationService {
     const now = this.now();
     const creds = await this.store.createDevice(r.sessionId, now);
     const monitoring = owntracksMonitoring(r.config);
+    const locatorInterval = owntracksLocatorInterval(r.config);
     const state: LockationState = {
       ...r.state,
-      tracking: { ...r.state.tracking, deviceUser: creds.username, pairedAt: now.toISOString(), waypointsHash: undefined, monitoring },
+      tracking: { ...r.state.tracking, deviceUser: creds.username, pairedAt: now.toISOString(), waypointsHash: undefined, monitoring, locatorInterval },
     };
     await this.persist(r, state);
     await this.client
@@ -344,7 +378,7 @@ export class LockationService {
       .catch(() => undefined);
     await this.notify(r, [{ audience: 'keyholder', kind: 'tracking', title: 'Lockation: tracking set up', message: 'The wearer set up background tracking (waiting for the first location).', priority: 'default', key: `tracking:paired:${now.toISOString()}` }]);
     const opts = { url: endpointUrl, username: creds.username, password: creds.password };
-    return { link: owntracksConfigLink({ ...opts, monitoring }), ...opts, view: await this.view(r, state) };
+    return { link: owntracksConfigLink({ ...opts, monitoring, locatorInterval }), ...opts, view: await this.view(r, state) };
   }
 
   async unpairTracking(mainToken: string): Promise<SessionView> {
@@ -410,9 +444,10 @@ export class LockationService {
       state = { ...state, tracking: { ...state.tracking, waypointsHash: wp.hash } };
     }
     const monitoring = owntracksMonitoring(c.config);
-    if (state.tracking.monitoring !== monitoring) {
-      response.push(owntracksSetMonitoring(monitoring));
-      state = { ...state, tracking: { ...state.tracking, monitoring } };
+    const locatorInterval = owntracksLocatorInterval(c.config);
+    if (state.tracking.monitoring !== monitoring || (state.tracking.locatorInterval ?? 300) !== locatorInterval) {
+      response.push(owntracksSetMonitoring(monitoring, locatorInterval));
+      state = { ...state, tracking: { ...state.tracking, monitoring, locatorInterval } };
     }
     await this.persist(c, state);
     await this.notify(c, notices);

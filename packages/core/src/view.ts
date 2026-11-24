@@ -1,7 +1,7 @@
 /** View models sent to the browser, Chaster metadata (F12) and privacy helpers (F9). */
 import { activeRoles, forbiddenTimings, type LockationConfig, owntracksMonitoring, type ZoneRole, zonesWithRole } from './config.js';
 import { describeConsequence, describeWhen, type Consequence } from './consequences.js';
-import { type CheckinRecord, type PlannedConsequence, visibleCheckpoints } from './engine.js';
+import { allowedHuntActions, type CheckinRecord, type HuntAction, huntDeadlineOf, huntScheduledStart, type PlannedConsequence, visibleCheckpoints } from './engine.js';
 import { earliestDeadline, effectivePrivacy, type LockationState, nextHeartbeatFrom, requiredSlots } from './state.js';
 import { activeWindowStart, formatLocalTime, formatWindow, MINUTE } from './time.js';
 
@@ -24,7 +24,7 @@ export interface ZoneView {
 }
 
 export interface RuleSummary {
-  rule: 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'tracking';
+  rule: 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'tracking' | 'zoneActions';
   title: string;
   lines: string[];
 }
@@ -65,7 +65,13 @@ export interface SessionView {
   required?: { nextDeadline?: string; overdue: boolean; missedCount: number; lastValidAt?: string; graceMinutes: number };
   requiredSlots?: RequiredSlotView[];
   hunt?: {
-    status: 'active' | 'completed' | 'failed';
+    status: 'not_started' | 'active' | 'paused' | 'completed' | 'failed' | 'aborted';
+    /** Actions the current viewer may perform (start / pause / resume / abort). */
+    actions: HuntAction[];
+    /** How the hunt starts (wearer / keyholder / auto / scheduled) and the scheduled time. */
+    start: 'auto' | 'wearer' | 'keyholder' | 'scheduled';
+    scheduledStartAt?: string;
+    pausedAt?: string;
     index: number;
     total: number;
     reveal: 'all' | 'hint' | 'distance' | 'map';
@@ -107,6 +113,8 @@ export interface SessionView {
     signalDueAt: string;
     /** OwnTracks mode the phone should use. */
     mode: 'move' | 'significant';
+    /** Locations arrive from the current pairing, but the setup isn't confirmed by a manual send yet. */
+    receiving: boolean;
   };
   /**
    * Last accepted position of the wearer. Always included for the wearer (rounded in zone-only mode);
@@ -133,8 +141,10 @@ export function trackingStatus(state: LockationState, heartbeatMinutes: number, 
   if (!t.deviceUser) return 'not_set_up';
   const seen = t.lastSeenAt ? Date.parse(t.lastSeenAt) : NaN;
   const paired = t.pairedAt ? Date.parse(t.pairedAt) : NaN;
-  // A message from an earlier pairing doesn't prove the current phone is connected.
-  if (!Number.isFinite(seen) || (Number.isFinite(paired) && seen < paired)) return 'waiting';
+  const verified = t.verifiedAt ? Date.parse(t.verifiedAt) : NaN;
+  // Setup is complete only after the wearer sent a location manually (OwnTracks ↑) with the current pairing.
+  if (!Number.isFinite(verified) || (Number.isFinite(paired) && verified < paired)) return 'waiting';
+  if (!Number.isFinite(seen)) return 'waiting';
   return now.getTime() - seen <= heartbeatMinutes * MINUTE ? 'connected' : 'no_signal';
 }
 
@@ -213,18 +223,27 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
       ],
     });
   }
+  const actionLines = config.zones.flatMap((z) => {
+    const a = z.actions;
+    const parts: string[] = [];
+    if (a.onEnter.length) parts.push(`entering: ${list(a.onEnter)}`);
+    if (a.onLeave.length) parts.push(`leaving${a.minStayMinutes ? ` after at least ${fmtMinutes(a.minStayMinutes)} inside` : ''}: ${list(a.onLeave)}`);
+    return parts.length ? [`${z.name} – ${parts.join('; ')}${a.cooldownMinutes ? ` (at most every ${fmtMinutes(a.cooldownMinutes)})` : ''}.`] : [];
+  });
+  if (actionLines.length) out.push({ rule: 'zoneActions', title: 'Zone actions', lines: actionLines });
   const tr = config.tracking;
   if (tr.enabled) {
     out.push({
       rule: 'tracking',
-      title: tr.liveOnly ? 'Live tracking (required)' : 'Background tracking',
+      title: tr.checkins === 'auto' ? 'Live tracking (required)' : 'Background tracking',
       lines: [
         'Your phone reports its location in the background with the OwnTracks app.',
-        ...(tr.liveOnly ? ['Manual check-ins are disabled – only live tracking counts.'] : []),
+        ...(tr.checkins === 'auto' ? ['Manual check-ins are disabled – only live tracking counts.'] : []),
         `If no location arrives for ${fmtMinutes(tr.heartbeatMinutes)}: ${list(tr.onHeartbeatMissed)}.`,
         ...(tr.quietHours ? [`No missing-signal penalties between ${tr.quietHours.start} and ${tr.quietHours.end}.`] : []),
         ...(tr.warnBeforeMinutes ? [`You get a warning ${fmtMinutes(tr.warnBeforeMinutes)} before a missing-signal penalty (if notifications are set up).`] : []),
-        ...((tr.countsAsCheckin || tr.liveOnly) && required.enabled ? ['Background locations inside a required zone count as check-ins.'] : []),
+        ...(tr.checkins !== 'manual' && required.enabled ? ['Background locations inside a required zone count as check-ins.'] : []),
+        ...(tr.checkins === 'manual' && required.enabled ? ['Required zones need manual check-ins; background locations are used for the other rules.'] : []),
         ...(config.antiCheat.liveVerificationEveryHours ? [`Random verification pictures, on average every ${config.antiCheat.liveVerificationEveryHours} h.`] : []),
       ],
     });
@@ -277,7 +296,7 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
     privacyLocked: state.privacyOverride === 'zone_only',
     matchMode: config.matchMode,
     maxAccuracyM: config.antiCheat.maxAccuracyM,
-    liveOnly: config.tracking.enabled && config.tracking.liveOnly,
+    liveOnly: config.tracking.enabled && config.tracking.checkins === 'auto',
     zones,
     rules: summarizeRules(config),
     freezeUntil: state.freezeUntil,
@@ -305,6 +324,7 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
       updates: state.tracking.trackedCount,
       signalDueAt: nextHeartbeatFrom(config, new Date(state.tracking.lastSeenAt ?? state.startedAt)).toISOString(),
       mode: owntracksModeName(config),
+      receiving: !!state.tracking.lastSeenAt && (!state.tracking.pairedAt || state.tracking.lastSeenAt >= state.tracking.pairedAt),
     };
   }
 
@@ -359,6 +379,10 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
     const open = h.checkpoints.filter((c) => !state.hunt.found.includes(c.id));
     view.hunt = {
       status: state.hunt.status,
+      actions: allowedHuntActions(config, state, role, isSelfLock),
+      start: h.start,
+      scheduledStartAt: huntScheduledStart(config, state)?.toISOString(),
+      pausedAt: state.hunt.pausedAt,
       index: state.hunt.index,
       total: h.checkpoints.length,
       reveal: h.reveal,
@@ -370,7 +394,7 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
       checkpoints: h.reveal === 'all' || h.reveal === 'map' ? visible.map((v) => ({ index: v.index, name: v.cp.name, hint: v.cp.hint, lat: v.cp.lat, lng: v.cp.lng, radiusM: v.cp.radiusM, status: v.status })) : [],
       guessesAllowed: h.reveal !== 'all' && active,
       terrainNote: hiddenDifficult ? 'One or more checkpoints are in difficult terrain – confirmed as intentional by the keyholder.' : undefined,
-      deadline: h.timeLimitMinutes ? new Date(Date.parse(state.hunt.startedAt ?? state.startedAt) + h.timeLimitMinutes * MINUTE).toISOString() : undefined,
+      deadline: huntDeadlineOf(config, state)?.toISOString(),
     };
   }
 
@@ -407,7 +431,7 @@ export interface ChasterMetadata {
 export function computeMetadata(config: LockationConfig, state: LockationState, now: Date): ChasterMetadata {
   const reasons: string[] = [];
   const h = config.rules.hunt;
-  if (h.enabled && h.blockUnlockUntilComplete && state.hunt.status === 'active') {
+  if (h.enabled && h.blockUnlockUntilComplete && ['not_started', 'active', 'paused'].includes(state.hunt.status)) {
     reasons.push(`Scavenger hunt not completed (${state.hunt.index}/${h.checkpoints.length} checkpoints).`);
   }
   const r = config.rules.required;
@@ -416,7 +440,7 @@ export function computeMetadata(config: LockationConfig, state: LockationState, 
   const overdue = r.enabled && Object.values(state.required.slots).some((s) => s.nextDeadline && now > new Date(s.nextDeadline));
   if (overdue) reasons.push('A required GPS check-in is overdue.');
 
-  const live = config.tracking.enabled && config.tracking.liveOnly;
+  const live = config.tracking.enabled && config.tracking.checkins === 'auto';
   let description = 'Prove your location';
   if (live && !state.tracking.deviceUser) {
     description = 'Set up live tracking!';
@@ -427,6 +451,10 @@ export function computeMetadata(config: LockationConfig, state: LockationState, 
     description = 'Live tracking active';
   } else if (config.tracking.enabled) {
     description = state.tracking.deviceUser ? 'Background tracking active' : 'Set up background tracking!';
+  } else if (h.enabled && state.hunt.status === 'not_started') {
+    description = h.start === 'wearer' ? 'Start your scavenger hunt!' : 'Scavenger hunt not started yet';
+  } else if (h.enabled && state.hunt.status === 'paused') {
+    description = 'Scavenger hunt paused';
   } else if (h.enabled && state.hunt.status === 'active') {
     description = `Scavenger hunt: checkpoint ${state.hunt.index + 1}/${h.checkpoints.length}`;
   }

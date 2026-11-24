@@ -30,10 +30,14 @@ uses the phone's battery-friendly location services.
 5. Give OwnTracks location access:
    - **iPhone:** Settings → OwnTracks → Location → **Always**, *Precise Location* on, and *Background App Refresh* on.
    - **Android:** App info → OwnTracks → Permissions → Location → **Allow all the time**; Battery → **Unrestricted**.
-6. Tap **↑** (publish) in OwnTracks once. Back in Lockation the card shows the real connection state:
+6. **Tap ↑ (publish) in OwnTracks once.** The setup is complete only with this first **manual** send – it proves that the
+   phone, the app and the connection work. The setup panel waits for it and then shows **✅ Setup complete**. Automatic
+   locations that arrive before are already evaluated, but the status stays *waiting* until you send manually.
+
+   Back in Lockation the card shows the real connection state:
    - **not set up** – no phone connected;
-   - **waiting for first location** – set up, but nothing has arrived from your phone yet (open OwnTracks once, check "Always");
-   - **connected** – a location arrived within the missing-signal time;
+   - **waiting for first location** – set up, but no manual send has arrived yet (tap ↑ in OwnTracks, check "Always");
+   - **connected** – setup confirmed and a location arrived within the missing-signal time;
    - **no signal** – the last location is older than that.
 
    Below it a live counter shows **"Next location expected by 14:32 · in 12:05"** – the latest time the next location must
@@ -77,9 +81,10 @@ phone is simply not moving.
 GPS edge cases: Lockation only treats you as having left a zone once you are clearly outside (accuracy taken into account),
 so a jumpy GPS at the edge of a zone doesn't trigger anything.
 
-## Live tracking only
+## Background tracking only
 
-The keyholder can make live tracking **mandatory**: manual check-ins are then switched off and the check-in button disappears.
+The keyholder chooses the **check-in mode** (Tracking tab): *manual check-ins only*, *manual check-ins + background tracking*
+(both count) or *background tracking only*. With **background tracking only** tracking is **mandatory**: manual check-ins are then switched off and the check-in button disappears.
 Everything is decided by the locations OwnTracks sends:
 
 - Being in a required zone (as reported in the background) counts as the check-in. After a missed deadline, the first location

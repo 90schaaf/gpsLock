@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   activeWindowStart,
+  allowedHuntActions,
+  applyHuntAction,
+  HuntActionError,
   buildSessionView,
   diffConfig,
   evaluateCheckin,
@@ -10,6 +13,7 @@ import {
   loadState,
   migrateConfig,
   nextDueAt,
+  owntracksLocatorInterval,
   owntracksMonitoring,
   owntracksWaypoints,
   parseConfig,
@@ -418,5 +422,134 @@ describe('validation reports inherited forbidden timings only once', () => {
     const own = parseConfig({ ...base, rules: { forbidden: { enabled: true } }, zones: [zone('bar', 'Bar', BAR, { roles: ['forbidden'], forbidden: { firstWarningAfterMinutes: 30 } })] });
     if (!own.ok) expect(own.issues.map((i) => i.path)).toEqual(['zones.0.forbidden.firstWarningAfterMinutes']);
     expect(own.ok).toBe(false);
+  });
+});
+
+describe('tracking setup is confirmed by a manual send', () => {
+  it('stays waiting for automatic locations; a manual (t=u) location verifies it', () => {
+    const c = cfg({ version: 2, tracking });
+    const r = new Run(c);
+    r.state.tracking.deviceUser = 'lo1';
+    r.state.tracking.pairedAt = T0.toISOString();
+    const auto = parseOwnTracks({ _type: 'location', lat: HOME.lat, lon: HOME.lng, acc: 10, tst: Math.floor(minutes(T0, 1).getTime() / 1000), t: 'p' }, c)!;
+    expect(auto.manual).toBeUndefined();
+    r.track(auto, minutes(T0, 1));
+    const v = () => buildSessionView({ role: 'wearer', isSelfLock: false, config: c, state: r.state, history: [], now: minutes(T0, 2) }).tracking!;
+    expect(v()).toMatchObject({ status: 'waiting', receiving: true });
+    const manual = parseOwnTracks({ _type: 'location', lat: HOME.lat, lon: HOME.lng, acc: 10, tst: Math.floor(minutes(T0, 2).getTime() / 1000), t: 'u' }, c)!;
+    const res = r.track(manual, minutes(T0, 2));
+    expect(kh(res.notices).map((n) => n.title)).toEqual(['Lockation: tracking connected']);
+    expect(v().status).toBe('connected');
+  });
+});
+
+describe('hunt control', () => {
+  const cps = [{ id: 'c1', name: 'North', ...north(HOME, 500), radiusM: 60, hint: 'n' }];
+  const config = (hunt: Record<string, unknown>) => cfg({ version: 2, rules: { hunt: { enabled: true, checkpoints: cps, timeLimitMinutes: 60, onTimeout: [{ type: 'add_time', seconds: 60 }], onAbort: [{ type: 'add_time', seconds: 86400 }], ...hunt } } });
+  const act = (r: Run, a: 'start' | 'pause' | 'resume' | 'abort', who: 'wearer' | 'keyholder', at: Date, self = false) => {
+    const res = applyHuntAction(r.config, r.state, a, who, { now: at, sessionId: 's1', evalId: `h${++r.n}` }, self);
+    r.state = res.state;
+    return res;
+  };
+
+  it('wearer start mode: hidden until started; keyholder can force-start', () => {
+    const r = new Run(config({ start: 'wearer' }));
+    expect(r.state.hunt.status).toBe('not_started');
+    expect(types(r.checkin(north(HOME, 500), minutes(T0, 1)))).toEqual([]); // doesn't count before the start
+    expect(allowedHuntActions(r.config, r.state, 'wearer')).toEqual(['start']);
+    act(r, 'start', 'wearer', minutes(T0, 5));
+    expect(r.state.hunt).toMatchObject({ status: 'active', startedAt: minutes(T0, 5).toISOString() });
+    const k = new Run(config({ start: 'keyholder' }));
+    expect(allowedHuntActions(k.config, k.state, 'wearer')).toEqual([]);
+    expect(() => act(k, 'start', 'wearer', T0)).toThrow(HuntActionError);
+    expect(act(k, 'start', 'keyholder', T0).events[0]).toMatch(/started/);
+  });
+
+  it('scheduled start by the tick; pause stops the time limit', () => {
+    const r = new Run(config({ start: 'scheduled', startAfterMinutes: 30 }));
+    expect(nextDueAt(r.config, r.state, T0)!.toISOString()).toBe(minutes(T0, 30).toISOString());
+    const s = r.tick(minutes(T0, 31));
+    expect(r.state.hunt.status).toBe('active');
+    expect(wearer(s.notices).map((n) => n.title)).toEqual(['Scavenger hunt started']);
+    act(r, 'pause', 'keyholder', minutes(T0, 41));
+    expect(() => act(r, 'resume', 'wearer', minutes(T0, 50))).toThrow(HuntActionError); // pauseBy keyholder
+    expect(types(r.tick(minutes(T0, 100)))).toEqual([]); // no timeout while paused
+    act(r, 'resume', 'keyholder', minutes(T0, 101)); // paused 60 min → deadline 31 + 60 + 60 = 151
+    expect(types(r.tick(minutes(T0, 150)))).toEqual([]);
+    expect(types(r.tick(minutes(T0, 152)))).toEqual(['add_time']);
+  });
+
+  it('abort: keyholder without consequences, wearer (if allowed) with onAbort', () => {
+    const k = new Run(config({}));
+    expect(types(act(k, 'abort', 'keyholder', minutes(T0, 5)))).toEqual([]);
+    expect(k.state.hunt.status).toBe('aborted');
+    const w = new Run(config({}));
+    expect(allowedHuntActions(w.config, w.state, 'wearer')).not.toContain('abort');
+    const w2 = new Run(config({ wearerCanAbort: true, pauseBy: 'both' }));
+    expect(allowedHuntActions(w2.config, w2.state, 'wearer')).toEqual(['pause', 'abort']);
+    const res = act(w2, 'abort', 'wearer', minutes(T0, 5));
+    expect(types(res)).toEqual(['add_time']);
+    expect(w2.state.hunt.status).toBe('failed');
+    expect(kh(res.notices).map((n) => n.kind)).toContain('hunt');
+  });
+
+  it('self-lock: the wearer may start but has no penalty-free abort', () => {
+    const r = new Run(config({ start: 'keyholder' }));
+    expect(allowedHuntActions(r.config, r.state, 'wearer', true)).toEqual(['start']);
+  });
+});
+
+describe('required interval minimum and OwnTracks report interval', () => {
+  const req = (tr: Record<string, unknown>, interval: number) =>
+    parseConfig({ version: 2, timezone: 'Europe/Zurich', zones: [zone('home', 'Home', HOME, { roles: ['required'] })], tracking: tr, rules: { required: { enabled: true, intervalMinutes: interval } } });
+  it('3 min with background check-ins, 5 min with manual check-ins only', () => {
+    expect(req({ enabled: true }, 3).ok).toBe(true);
+    expect(req({ enabled: true }, 2).ok).toBe(false);
+    expect(req({ enabled: true, checkins: 'manual' }, 3).ok).toBe(false);
+    expect(req({ enabled: false }, 4).ok).toBe(false);
+    expect(req({ enabled: false }, 5).ok).toBe(true);
+  });
+  it('OwnTracks reports every half interval (120–300 s) and switches to move mode', () => {
+    const c = cfg({ version: 2, zones: [zone('home', 'Home', HOME, { roles: ['required'] })], tracking: { enabled: true, heartbeatMinutes: 180 }, rules: { required: { enabled: true, intervalMinutes: 3 } } });
+    expect(owntracksLocatorInterval(c)).toBe(120); // 3-min interval → report every 2 min
+    expect(owntracksMonitoring(c)).toBe(2);
+    const slow = cfg({ version: 2, zones: [zone('home', 'Home', HOME, { roles: ['required'] })], tracking: { enabled: true, heartbeatMinutes: 180 }, rules: { required: { enabled: true, intervalMinutes: 240 } } });
+    expect(owntracksLocatorInterval(slow)).toBe(300);
+    expect(owntracksMonitoring(slow)).toBe(1);
+  });
+});
+
+describe('zone actions (enter / leave)', () => {
+  const gym = (actions: Record<string, unknown>, tr: Record<string, unknown> = tracking) =>
+    cfg({ version: 2, zones: [zone('gym', 'Gym', GYM, { actions })], tracking: tr });
+
+  it('leave after a minimum stay unfreezes (background tracking, neutral zone)', () => {
+    const r = new Run(gym({ onLeave: [{ type: 'unfreeze' }], minStayMinutes: 45 }));
+    r.at(GYM, minutes(T0, 0));
+    r.at(GYM, minutes(T0, 30));
+    expect(types(r.at(north(GYM, 600), minutes(T0, 32)))).toEqual([]); // only 30 min provably inside
+    r.at(GYM, minutes(T0, 40));
+    r.at(GYM, minutes(T0, 90));
+    const out = r.at(north(GYM, 600), minutes(T0, 92));
+    expect(types(out)).toEqual(['unfreeze']);
+    expect(out.events.join(' ')).toMatch(/Left "Gym" after 50 min/);
+  });
+
+  it('enter runs once per visit, with cooldown; works with manual check-ins', () => {
+    const r = new Run(gym({ onEnter: [{ type: 'remove_time', seconds: 60 }], cooldownMinutes: 120 }, { enabled: false }));
+    expect(types(r.checkin(GYM, minutes(T0, 0)))).toEqual(['remove_time']);
+    expect(types(r.checkin(GYM, minutes(T0, 5)))).toEqual([]); // still inside
+    r.checkin(north(GYM, 600), minutes(T0, 10));
+    expect(types(r.checkin(GYM, minutes(T0, 20)))).toEqual([]); // cooldown
+    r.checkin(north(GYM, 600), minutes(T0, 30));
+    expect(types(r.checkin(GYM, minutes(T0, 130)))).toEqual(['remove_time']);
+  });
+
+  it('is summarised for the wearer and in config diffs', () => {
+    const a = gym({});
+    const b = gym({ onLeave: [{ type: 'unfreeze' }], minStayMinutes: 45 });
+    const v = buildSessionView({ role: 'wearer', isSelfLock: true, config: b, state: initialState(b, T0), history: [], now: T0 });
+    expect(v.rules.find((x) => x.rule === 'zoneActions')?.lines).toEqual(['Gym – leaving after at least 45min inside: unfreeze.']);
+    expect(diffConfig(a, b)).toEqual(['"Gym" zone actions: entering nothing; leaving unfreeze (after 45min).']);
   });
 });
