@@ -14,7 +14,8 @@ const setup: ToySetup = ToySetupSchema.parse({
 function xtoys(script = buildXToysScript(setup)) {
   const vars: Record<string, string> = {};
   const calls: any[] = [];
-  const code = (action: string) => (script.globalTriggers.find((t) => t.action === action)!.actions[0] as { code: string }).code;
+  const code = (action: string) => (script.globalTriggers.find((t) => t.action === action)!.actions as { type: string; code?: string }[]).find((a) => a.type === 'customCode')!.code!;
+  let text = '';
   const run = (action: string, body: Record<string, string>, connected: Record<string, unknown[]> = {}) => {
     const scope: Record<string, string> = { ...vars };
     for (const [k, v] of Object.entries(body)) if (k !== 'action') scope[`trigger-${k}`] = v;
@@ -26,12 +27,12 @@ function xtoys(script = buildXToysScript(setup)) {
         vars[k] = v;
         scope[k] = v;
       },
-      (a: unknown) => calls.push(a),
+      (a: any) => (a.type === 'updateScript' ? (text = a.text) : calls.push(a)),
       () => connected,
     );
     return [...calls];
   };
-  return { run, vars };
+  return { run, vars, text: () => text };
 }
 
 describe('toy setup', () => {
@@ -75,13 +76,12 @@ describe('generated XToys script', () => {
     expect(s.initialActions).toContainEqual({ type: 'updateComponent', channel: 'part-estim|part-estim-a', action: 'setMaximum', actionChannel: '2', percentVolume: '30' });
     expect(s.initialActions).toContainEqual({ type: 'updateComponent', channel: 'part-vibrator-a', action: 'setMaximum', actionChannel: 'all', percentVolume: '100' });
     expect(s.finalActions).toHaveLength(2 + 1 + 2 + 1);
-    expect(s.globalTriggers.map((t) => t.action)).toEqual(['lockation', 'getToys']);
+    expect(s.globalTriggers.map((t) => t.action)).toEqual(['lockation', 'ping', 'rawVolume', 'getToys']);
   });
 
   it('is plain ES5 (XToys runs an ES5 interpreter)', () => {
     for (const t of buildXToysScript(setup).globalTriggers) {
-      const code = (t.actions[0] as { code: string }).code;
-      expect(code).not.toMatch(/=>|\blet\b|\bconst\b|`/);
+      for (const a of t.actions as { type: string; code?: string }[]) if (a.code) expect(a.code).not.toMatch(/=>|\blet\b|\bconst\b|`/);
     }
   });
 
@@ -122,5 +122,41 @@ describe('generated XToys script', () => {
     expect(calls[0]).toMatchObject({ action: 'send', format: 'raw', webhookAction: 'getToys' });
     expect(calls[0].webhookData['part-vibrator-a']).toEqual([{ name: 'Lovense Lush', channel: 'vibrate' }]);
     expect(calls[0].webhookData['part-estim|part-estim-a']).toEqual([]);
+  });
+});
+
+describe('debugging aids in the script', () => {
+  it('shows the received values first (no JavaScript), then the result', () => {
+    const lock = buildXToysScript(setup).globalTriggers.find((t) => t.action === 'lockation')!;
+    expect(lock.actions[0]).toEqual({ type: 'updateScript', action: 'setText', text: 'Lockation received: {trigger-cmd} {trigger-slot} ch {trigger-ch} level {trigger-level}' });
+    const x = xtoys();
+    x.run('lockation', toyCommand(setup, 'vibe', { cmd: 'play', shape: 'pulse', intensity: 40, seconds: 5 }));
+    expect(x.text()).toBe('Lockation: play part-vibrator-a ch all level 40 delta - pulse 5s');
+    x.run('lockation', { action: 'lockation', cmd: 'play', slot: 'part-vibrator-z', ch: 'all' });
+    expect(x.text()).toMatch(/unknown slot "part-vibrator-z"/);
+  });
+
+  it('reports JavaScript errors on the script screen instead of failing silently', () => {
+    const lock = buildXToysScript(setup).globalTriggers.find((t) => t.action === 'lockation')!;
+    const code = (lock.actions as { type: string; code?: string }[]).find((a) => a.code)!.code!;
+    let text = '';
+    const scope: Record<string, string> = { 'trigger-cmd': 'play', 'trigger-slot': 'part-vibrator-a', 'trigger-ch': 'all', 'trigger-level': '10', 'trigger-seconds': '2' };
+    new Function('getVariable', 'setVariable', 'callAction', code)(
+      (k: string) => scope[k],
+      () => undefined,
+      (a: any) => {
+        if (a.type === 'updateScript') text = a.text;
+        else if (a.action === 'setPattern') throw new Error('unknown action setPattern');
+      },
+    );
+    expect(text).toBe('Lockation: ERROR in play: unknown action setPattern');
+  });
+
+  it('ping and rawVolume work without JavaScript', () => {
+    const t = buildXToysScript(setup).globalTriggers;
+    expect(t.find((x) => x.action === 'ping')!.actions).toEqual([{ type: 'updateScript', action: 'setText', text: 'Lockation script is running – webhook OK ({trigger-note})' }]);
+    const raw = t.find((x) => x.action === 'rawVolume')!.actions as any[];
+    expect(raw.filter((a) => a.action === 'setVolume')).toHaveLength(6);
+    expect(raw.every((a) => !a.code)).toBe(true);
   });
 });

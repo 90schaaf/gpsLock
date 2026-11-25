@@ -172,22 +172,30 @@ function play(s, c, shape, lv, seconds) {
     pattern: { loop: false, length: String(seconds), id: id, name: 'Lockation ' + shape, channels: 1, type: 'draw', patternData: { loop: false, channels: 1, channelData: data } },
     patternControls: { id: id } });
 }
+// Debug: the script's text shows what happened (or the JavaScript error) – visible on the XToys script screen.
+function status(msg) { callAction({ type: 'updateScript', action: 'setText', text: 'Lockation: ' + msg }); }
 var cmd = String(tv('cmd', ''));
 var slot = String(tv('slot', ''));
 var ch = String(tv('ch', 'all'));
-if (cmd === 'stopAll') {
-  for (var s in SLOTS) { var cs = chans(s, 'all'); for (var i = 0; i < cs.length; i++) setLevel(s, cs[i], 0); }
-} else if (SLOTS[slot]) {
-  var list = chans(slot, ch);
-  for (var j = 0; j < list.length; j++) {
-    var c = list[j], max = maxOf(slot, c);
-    if (cmd === 'play') play(slot, c, String(tv('shape', 'constant')), clamp(num(tv('level', 0), 0), 0, max), clamp(num(tv('seconds', 10), 10), 1, ${MAX_TOY_SECONDS}));
-    else if (cmd === 'intensity') {
-      var d = tv('delta', null);
-      setLevel(slot, c, clamp(d === null ? num(tv('level', 0), 0) : level(slot, c) + num(d, 0), 0, max));
-    } else if (cmd === 'shock') callAction({ type: 'updateComponent', channel: slot, action: 'setShock2', actionChannel: c, percentVolume: String(clamp(num(tv('level', 0), 0), 0, max)), time: String(clamp(num(tv('seconds', 1), 1), 1, 10)), shock: true });
-    else if (cmd === 'stop') setLevel(slot, c, 0);
-  }
+try {
+  if (cmd === 'stopAll') {
+    for (var s in SLOTS) { var cs = chans(s, 'all'); for (var i = 0; i < cs.length; i++) setLevel(s, cs[i], 0); }
+    status('stop all');
+  } else if (SLOTS[slot]) {
+    var list = chans(slot, ch);
+    for (var j = 0; j < list.length; j++) {
+      var c = list[j], max = maxOf(slot, c);
+      if (cmd === 'play') play(slot, c, String(tv('shape', 'constant')), clamp(num(tv('level', 0), 0), 0, max), clamp(num(tv('seconds', 10), 10), 1, ${MAX_TOY_SECONDS}));
+      else if (cmd === 'intensity') {
+        var d = tv('delta', null);
+        setLevel(slot, c, clamp(d === null ? num(tv('level', 0), 0) : level(slot, c) + num(d, 0), 0, max));
+      } else if (cmd === 'shock') callAction({ type: 'updateComponent', channel: slot, action: 'setShock2', actionChannel: c, percentVolume: String(clamp(num(tv('level', 0), 0), 0, max)), time: String(clamp(num(tv('seconds', 1), 1), 1, 10)), shock: true });
+      else if (cmd === 'stop') setLevel(slot, c, 0);
+    }
+    status(cmd + ' ' + slot + ' ch ' + ch + ' level ' + tv('level', '-') + ' delta ' + tv('delta', '-') + ' ' + tv('shape', '') + ' ' + tv('seconds', '') + 's');
+  } else status('unknown slot "' + slot + '" (cmd "' + cmd + '") – download the script again after changing the toys');
+} catch (e) {
+  status('ERROR in ' + cmd + ': ' + (e && e.message ? e.message : String(e)));
 }
 `;
 }
@@ -231,7 +239,31 @@ export function buildXToysScript(setup: ToySetup) {
     initialActions,
     finalActions: stopAll,
     globalTriggers: [
-      { type: 'componentState', action: 'lockation', channel: WEBHOOK, parsedAction: 'lockation', actions: [{ type: 'customCode', code: proxyCode(meta), resultVar: 'result' }] },
+      {
+        type: 'componentState',
+        action: 'lockation',
+        channel: WEBHOOK,
+        parsedAction: 'lockation',
+        actions: [
+          // Shown first and without JavaScript: proves the call arrived and which values XToys passed on.
+          { type: 'updateScript', action: 'setText', text: 'Lockation received: {trigger-cmd} {trigger-slot} ch {trigger-ch} level {trigger-level}' },
+          { type: 'customCode', code: proxyCode(meta), resultVar: 'result' },
+        ],
+      },
+      // Debug triggers without JavaScript: is the webhook connected at all, and do the toy slots react?
+      { type: 'componentState', action: 'ping', channel: WEBHOOK, parsedAction: 'ping', actions: [{ type: 'updateScript', action: 'setText', text: 'Lockation script is running – webhook OK ({trigger-note})' }] },
+      {
+        type: 'componentState',
+        action: 'rawVolume',
+        channel: WEBHOOK,
+        parsedAction: 'rawVolume',
+        actions: [
+          { type: 'updateScript', action: 'setText', text: 'Lockation raw volume {trigger-level}% on all toys (no JavaScript)' },
+          ...Object.keys(meta).flatMap((slot) =>
+            Array.from({ length: meta[slot]!.channels }, (_, i) => ({ type: 'updateComponent', channel: slot, action: 'setVolume', actionChannel: meta[slot]!.channels > 1 ? String(i + 1) : 'all', rampTime: '0', percentVolume: '{trigger-level}' })),
+          ),
+        ],
+      },
       { type: 'componentState', action: 'getToys', channel: WEBHOOK, parsedAction: 'getToys', actions: [{ type: 'customCode', code: getToysCode(Object.keys(meta)), resultVar: 'result' }] },
     ],
     jobs: { Main: { steps: { START: { actions: [] } } } },

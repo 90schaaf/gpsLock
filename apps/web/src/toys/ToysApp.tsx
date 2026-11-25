@@ -76,17 +76,40 @@ const newToyId = (setup: ToySetup) => {
  * reading the answer, the request is repeated without reading it (`no-cors`) – it reaches XToys, but unconfirmed.
  */
 export async function sendToXToys(webhookId: string, body: ToyWebhookBody, fetchImpl: typeof fetch = fetch): Promise<'ok' | 'unconfirmed'> {
-  const url = `${xtoysWebhookUrl(webhookId)}?${new URLSearchParams(body).toString()}`;
+  const r = await sendRaw(webhookId, body, 'GET', fetchImpl);
+  if (r.outcome === 'error') throw new Error(r.detail);
+  return r.outcome;
+}
+
+export interface SendResult {
+  outcome: 'ok' | 'unconfirmed' | 'error';
+  /** What was sent (URL, and the JSON body for POST). */
+  request: string;
+  /** HTTP status and XToys' answer, or why it could not be read. */
+  detail: string;
+}
+
+/** Send any webhook message (debugging): GET with query parameters or POST with a JSON body. */
+export async function sendRaw(webhookId: string, params: Record<string, string>, method: 'GET' | 'POST', fetchImpl: typeof fetch = fetch): Promise<SendResult> {
+  const base = xtoysWebhookUrl(webhookId);
+  const url = method === 'GET' ? `${base}?${new URLSearchParams(params).toString()}` : base;
+  const init: RequestInit = method === 'GET' ? { method } : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params) };
+  const request = method === 'GET' ? `GET ${url}` : `POST ${url}\n${JSON.stringify(params)}`;
   try {
-    const res = await fetchImpl(url, { method: 'GET', mode: 'cors' });
-    if (!res.ok) throw new Error(`XToys answered ${res.status}${res.status === 404 ? ' – check the Webhook ID' : ''}`);
-    return 'ok';
+    const res = await fetchImpl(url, { ...init, mode: 'cors' });
+    const text = await res.text().catch(() => '');
+    const detail = `HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ''}`;
+    if (!res.ok) return { outcome: 'error', request, detail: `${detail}${res.status === 404 ? ' – check the Webhook ID' : ''}` };
+    return { outcome: 'ok', request, detail };
   } catch (e) {
-    if (e instanceof TypeError) {
-      await fetchImpl(url, { method: 'GET', mode: 'no-cors' });
-      return 'unconfirmed';
+    if (!(e instanceof TypeError)) return { outcome: 'error', request, detail: e instanceof Error ? e.message : String(e) };
+    // CORS: the browser hides the answer. Send again without reading it – it still reaches XToys.
+    try {
+      await fetchImpl(url, { ...init, mode: 'no-cors', ...(method === 'POST' ? { headers: { 'Content-Type': 'text/plain' } } : {}) });
+      return { outcome: 'unconfirmed', request, detail: 'sent, but the browser may not read XToys’ answer (CORS)' };
+    } catch (e2) {
+      return { outcome: 'error', request, detail: `network error: ${e2 instanceof Error ? e2.message : String(e2)}` };
     }
-    throw e;
   }
 }
 
@@ -239,6 +262,8 @@ export function ToysApp({ fetchImpl = fetch }: { fetchImpl?: typeof fetch }) {
           <ToyTester key={t.id} toy={t} disabled={!ready} onSend={(input, label) => send(t.id, input, label)} />
         ))}
       </div>
+
+      <DebugCard webhookId={webhookId} fetchImpl={fetchImpl} note={note} />
 
       <button class="danger-big" data-testid="toy-stop-all" disabled={!webhookId} onClick={() => send('all', { cmd: 'stop' }, '■ Stop all')}>
         ■ STOP ALL TOYS
@@ -400,5 +425,65 @@ function ToyTester({ toy, disabled, onSend }: { toy: Toy; disabled: boolean; onS
         <button onClick={() => onSend({ cmd: 'stop', channel: ch }, `■ ${tag}: stop`)}>■ Stop</button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Step-by-step checks: 1. ping (webhook → script, no JavaScript) · 2. raw volume (script → toys, no JavaScript)
+ * · 3. a normal command (JavaScript). The XToys script screen shows a "Lockation …" text for each step.
+ */
+function DebugCard({ webhookId, fetchImpl, note }: { webhookId: string; fetchImpl: typeof fetch; note: (t: string, ok?: boolean) => void }) {
+  const [method, setMethod] = useState<'GET' | 'POST'>('GET');
+  const [last, setLast] = useState<SendResult>();
+  const go = async (label: string, params: Record<string, string>) => {
+    if (!webhookId.trim()) return note('Enter your Webhook ID first.', false);
+    const r = await sendRaw(webhookId, params, method, fetchImpl);
+    setLast(r);
+    note(`${label} – ${r.detail}`, r.outcome !== 'error');
+  };
+  const pingUrl = webhookId ? `${xtoysWebhookUrl(webhookId)}?action=ping&note=address-bar` : '';
+  return (
+    <details class="card stack" data-testid="toy-debug">
+      <summary>
+        <strong>🔧 Something doesn't work? Debug step by step</strong>
+      </summary>
+      <p class="small" style={{ margin: 0 }}>
+        Keep the XToys script screen visible: each step changes its text to “Lockation …”.
+      </p>
+      <ol class="small" style={{ margin: 0, paddingLeft: '18px' }}>
+        <li>
+          <strong>Ping</strong> – should show “Lockation script is running – webhook OK”. Nothing? The webhook block isn't connected to <em>your private</em> webhook,
+          the ID is wrong, or the script isn't started. Also try it without this page: open{' '}
+          {pingUrl ? <a href={pingUrl} target="_blank" rel="noopener">this ping link</a> : 'the ping link'} in a new tab.
+        </li>
+        <li>
+          <strong>Raw volume 20 %</strong> – every connected toy should run at 20 % (no JavaScript involved). Text changes but no toy moves? A toy isn't connected to
+          its slot in XToys.
+        </li>
+        <li>
+          <strong>Test all toys</strong> above – the text first shows “Lockation received: …” (the values XToys passed on), then the result or “Lockation: ERROR …”.
+          Please send me that text.
+        </li>
+      </ol>
+      <div class="row">
+        <label class="small">
+          Send as{' '}
+          <select value={method} onChange={(e) => setMethod((e.target as HTMLSelectElement).value as 'GET' | 'POST')}>
+            <option value="GET">GET (query parameters)</option>
+            <option value="POST">POST (JSON body)</option>
+          </select>
+        </label>
+        <button onClick={() => go('Ping', { action: 'ping', note: new Date().toLocaleTimeString() })} data-testid="toy-ping">1. Ping</button>
+        <button onClick={() => go('Raw volume 20 %', { action: 'rawVolume', level: '20' })}>2. Raw volume 20 %</button>
+        <button onClick={() => go('Raw volume 0 %', { action: 'rawVolume', level: '0' })}>Raw volume 0 %</button>
+      </div>
+      {last && (
+        <pre class="small mono" style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }} data-testid="toy-last">
+          {last.request.replace(webhookId, '<your ID>')}
+          {'\n→ '}
+          {last.outcome}: {last.detail}
+        </pre>
+      )}
+    </details>
   );
 }
