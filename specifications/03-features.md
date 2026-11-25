@@ -192,19 +192,6 @@ view; with `all` the full list is sent. 5. Timeout once, extended by pauses. 6. 
 timezone, pause permissions, keyholder force-start and penalty-free end, wearer abort with `onAbort`. 7. Unlock blocker set
 while open, cleared afterwards. 8. Waypoints per reveal mode, re-push after a find.
 
-### F26 – Hidden zones (mystery zones)
-
-Zone flag `hidden` (+ optional `hiddenHint`, ≤ 200 chars).
-
-- Until discovered (`state.revealedZones[id]`), the wearer view omits the zone (`zones`, rule summaries via
-  `wearerVisibleConfig`), OwnTracks waypoints omit it, and `hiddenZones {count, forbidden, reward, other, hints}` tells the
-  wearer what exists. Detection runs on location fixes as for every zone.
-- Entering (presence starts) reveals it permanently: event + wearer notice (high for forbidden). Rules apply unchanged.
-- Validation: `required` + `hidden` is rejected; hidden zones are no mission targets (F25).
-- `diffConfig` never describes hidden zones (in the old or new config) – only "Hidden zones changed (now n …)".
-- Keyholder view: `ZoneView.hidden = 'hidden' | 'discovered'`; maps draw undiscovered hidden zones dashed with 🔍.
-- AC: no name, position or rule text of an undiscovered hidden zone reaches the wearer (view, OwnTracks, change notices).
-
 ### F25 – Surprise missions
 
 "Be at zone X by 14:30!" – `rules.mission`.
@@ -477,4 +464,3 @@ AC: 1. Zone-only record has no lat/lng. 2. Downgrade redacts. 3. Upgrade during 
 | F23 | Configuration changes during a lock | F23 (new ID) |
 | F24 | Settings import / export | F11 (new ID) |
 | F25 | Surprise missions | F25 (new) |
-| F26 | Hidden zones | F26 (new) |

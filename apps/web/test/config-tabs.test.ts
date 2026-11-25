@@ -181,18 +181,3 @@ describe('surprise missions in the demo', () => {
     expect(d.mission).toMatchObject({ active: undefined, declinesLeft: 0, stats: { declined: 1 } });
   });
 });
-
-describe('hidden zones in the demo', () => {
-  it('the wearer view leaves out the hidden zone and reports it as a count', async () => {
-    const { MockBackend, demoConfig } = await import('../src/lib/mock-backend.js');
-    const m = new Map<string, string>();
-    const b = new MockBackend({ getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) });
-    const cfg = demoConfig();
-    const target = cfg.zones.find((z) => !z.roles.includes('required'))!;
-    await b.configSave({ ...cfg, disclaimer: { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' }, zones: cfg.zones.map((z) => (z.id === target.id ? { ...z, hidden: true, hiddenHint: 'near water' } : z)) });
-    const v = await b.session();
-    expect(v.role).toBe('wearer');
-    expect(v.zones.some((z) => z.id === target.id)).toBe(false);
-    expect(v.hiddenZones).toMatchObject({ count: 1, hints: ['near water'] });
-  });
-});

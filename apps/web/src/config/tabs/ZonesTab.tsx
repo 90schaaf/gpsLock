@@ -1,7 +1,7 @@
 import { MAX_RADIUS_M, MIN_RADIUS_M, SMALL_RADIUS_HINT_M, zonesWithRole, type Zone } from '@lockation/core';
 import { ConsequenceEditor, NumberField } from '../editors.js';
 import { applyRoles, droppedRolesWithSettings, toggleRole, type RoleChoice } from '../helpers.js';
-import { checked, PlacesInfo, ReachNote, setAck, val, zoneColor, type TabProps } from '../shared.js';
+import { PlacesInfo, ReachNote, setAck, val, zoneColor, type TabProps } from '../shared.js';
 
 const ROLE_CHIPS: { id: RoleChoice; label: string }[] = [
   { id: 'required', label: '⏱ Required' },
@@ -19,7 +19,6 @@ export function ZonesTab({ config, edit, commands, reach, selected, setSelected 
       const i = d.zones.findIndex((x) => x.id === z.id);
       if (i < 0) return;
       d.zones[i] = applyRoles(d.zones[i]!, next);
-      if (next.includes('required')) d.zones[i]!.hidden = false; // the wearer has to know where to go
       // Marking the first zone with a role switches the matching rule on.
       for (const r of next) if (!z.roles.includes(r) && !d.rules[r].enabled && zonesWithRole(d, r).length === 1) d.rules[r].enabled = true;
     });
@@ -65,17 +64,6 @@ export function ZonesTab({ config, edit, commands, reach, selected, setSelected 
               <span class="small muted full" data-testid="small-radius-hint">
                 ⚠ Small zone: phone GPS indoors is often less precise than {z.radiusM} m – check-ins may be judged "outside".
               </span>
-            )}
-            {!z.roles.includes('required') && (
-              <div class="full stack" onClick={(e) => e.stopPropagation()} data-testid="zone-hidden">
-                <label class="check small">
-                  <input type="checkbox" checked={z.hidden} onChange={(e) => edit((d) => { d.zones[i]!.hidden = checked(e); })} />
-                  <span>🔍 <strong>Hidden (mystery zone)</strong> – the wearer doesn't see it until they walk into it. They only know how many hidden zones of which kind exist.</span>
-                </label>
-                {z.hidden && (
-                  <input placeholder='Optional hint for the wearer, e.g. "somewhere near the lake"' maxLength={200} value={z.hiddenHint ?? ''} onInput={(e) => edit((d) => { const v = val(e); if (v) d.zones[i]!.hiddenHint = v; else delete d.zones[i]!.hiddenHint; })} />
-                )}
-              </div>
             )}
             <ReachNote status={reach[z.id]} ack={z.reachabilityAck} onAck={(on) => setAck(edit, 'zone', z.id, reach[z.id], on)} />
             <details class="zone-details full" data-testid="zone-actions" onClick={(e) => e.stopPropagation()} open={z.actions.onEnter.length + z.actions.onLeave.length > 0 && z.id === selected}>

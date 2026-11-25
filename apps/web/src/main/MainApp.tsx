@@ -130,7 +130,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
     if (!view) return [];
     const out: MapCircle[] = view.zones.map((z) => {
       const kind = z.kinds.includes('forbidden') ? 'forbidden' : z.kinds.includes('required') ? 'required' : z.kinds.includes('reward') ? 'reward' : 'neutral';
-      return { id: z.id, lat: z.lat, lng: z.lng, radiusM: z.radiusM, color: ZONE_COLORS[kind], dashed: z.hidden === 'hidden', label: (z.hidden ? '🔍 ' : '') + `${z.name}${z.kinds.length ? ` (${z.kinds.join(', ')})` : ''}` };
+      return { id: z.id, lat: z.lat, lng: z.lng, radiusM: z.radiusM, color: ZONE_COLORS[kind], label: `${z.name}${z.kinds.length ? ` (${z.kinds.join(', ')})` : ''}` };
     });
     const cps = view.hunt?.checkpoints ?? [];
     if (cps.length) {
@@ -329,8 +329,6 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
             </ul>
           </div>
         )}
-
-        {view.hiddenZones && view.role === 'wearer' && <HiddenZonesNote hidden={view.hiddenZones} />}
 
         {view.mission && <MissionCard view={view} backend={backend} mock={mock} onView={setView} onError={(message) => setError({ message })} />}
 
@@ -707,28 +705,6 @@ export function HuntControls({ view, backend, onView, onError }: { view: Session
             </button>
           ))}
         </div>
-      )}
-    </div>
-  );
-}
-
-/** F26 – what the wearer knows about the hidden zones they haven't found yet. */
-function HiddenZonesNote({ hidden }: { hidden: NonNullable<SessionView['hiddenZones']> }) {
-  const parts = [
-    hidden.forbidden ? `${hidden.forbidden} forbidden` : '',
-    hidden.reward ? `${hidden.reward} reward` : '',
-    hidden.other ? `${hidden.other} other` : '',
-  ].filter(Boolean);
-  return (
-    <div class="card" data-testid="hidden-zones">
-      <h2>🔍 Hidden zones</h2>
-      <p style={{ margin: 0 }}>
-        There {hidden.count === 1 ? 'is' : 'are'} <strong>{hidden.count}</strong> hidden {hidden.count === 1 ? 'zone' : 'zones'} ({parts.join(', ')}). You only find out by walking into one – then it appears on the map.
-      </p>
-      {hidden.hints.length > 0 && (
-        <ul class="small" style={{ margin: 0 }}>
-          {hidden.hints.map((h, i) => <li key={i}>{h}</li>)}
-        </ul>
       )}
     </div>
   );

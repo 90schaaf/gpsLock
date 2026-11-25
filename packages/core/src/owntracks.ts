@@ -70,7 +70,7 @@ export function checkpointWaypointName(index: number, name: string): string {
  * Found checkpoints are dropped, so the hash changes and the next response pushes the new list.
  */
 export function owntracksWaypoints(config: LockationConfig, state?: LockationState) {
-  const waypoints = config.zones.filter((z) => !(z.hidden && !state?.revealedZones[z.id])).map((z) => ({
+  const waypoints = config.zones.map((z) => ({
     _type: 'waypoint',
     desc: z.name,
     lat: z.lat,

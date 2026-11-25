@@ -10,8 +10,6 @@ The configuration can be edited later while the lock is running (as far as Chast
 - **Tap the map** to add a zone, or **search an address** and pick a result.
 - Drag the coloured handle to move a zone; change name and radius in the list.
 - Radius: 20 m to 50 km. Choose at least **100–150 m** for places indoors – phone GPS is not exact; zones below 100 m show a hint. Small radii (20–80 m) suit outdoor spots such as hunt checkpoints.
-- **🔍 Hidden (mystery zone):** the wearer doesn't see the zone until they walk into it – only the number of hidden zones
-  and an optional hint. Not for required zones. See [Hidden zones](./rules#hidden-zones-mystery-zones).
 - **Limit:** at most **20 places per lock** – zones and scavenger-hunt checkpoints together. The Zones and Hunt tabs show how many are used. (iPhones watch at most 20 places per app, so all of them can be synced to OwnTracks.)
 - **Role** of each zone: *Required* and/or *Reward*, **or** *Forbidden*, **or** *Neutral*. The rule tabs only list the zones
   with their role. Changing a role removes that zone's settings of the old role (you are asked first).
