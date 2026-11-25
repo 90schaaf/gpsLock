@@ -30,7 +30,7 @@ import {
 } from '@lockation/core';
 import { applyAll } from './apply.js';
 import { sessionIdOf, type ChasterClient, type ChasterSession } from './chaster.js';
-import { deliverNotices, type Ntfy } from './notify.js';
+import { deliverNotices, type Ntfy, NtfyError } from './notify.js';
 import type { Store } from './store.js';
 import { HttpError } from './types.js';
 
@@ -172,8 +172,9 @@ export class LockationService {
     if (!topic) throw new HttpError(409, 'not_subscribed', 'Set up notifications first.');
     try {
       await this.ntfy.send(topic, { title: '✅ Lockation test notification', message: 'Notifications work. Warnings and updates for this lock will arrive here.', click: this.appUrl });
-    } catch {
-      throw new HttpError(502, 'ntfy_failed', 'The notification server did not accept the message. Check the NTFY_TOKEN secret.');
+    } catch (e) {
+      if (e instanceof NtfyError) throw new HttpError(502, 'ntfy_failed', `Notification server answered ${e.status}${e.detail ? ` (${e.detail})` : ''}. ${e.hint}`);
+      throw new HttpError(502, 'ntfy_failed', `The notification server could not be reached (${e instanceof Error ? e.message : String(e)}).`);
     }
     return { ok: true };
   }
