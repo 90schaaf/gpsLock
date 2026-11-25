@@ -81,7 +81,7 @@ describe('generated XToys script', () => {
     expect(s.initialActions).toContainEqual({ type: 'updateComponent', channel: 'part-estim|part-estim-a', action: 'setMaximum', actionChannel: '2', percentVolume: '30' });
     expect(s.initialActions).toContainEqual({ type: 'updateComponent', channel: 'part-vibrator-a', action: 'setMaximum', actionChannel: 'all', percentVolume: '100' });
     expect(s.finalActions).toHaveLength(2 + 1 + 2 + 1);
-    expect(s.globalTriggers.map((t) => t.action)).toEqual(['lockation', 'ping', 'rawVolume', 'getToys']);
+    expect(s.globalTriggers.map((t) => t.action)).toEqual(['lockation', 'getToys']);
   });
 
   it('is plain ES5 (XToys runs an ES5 interpreter)', () => {
@@ -158,13 +158,6 @@ describe('debugging aids in the script', () => {
     expect(text).toBe('Lockation: ERROR in play: unknown action setPattern');
   });
 
-  it('ping and rawVolume work without JavaScript', () => {
-    const t = buildXToysScript(setup).globalTriggers;
-    expect(t.find((x) => x.action === 'ping')!.actions).toEqual([{ type: 'updateScript', action: 'setText', text: 'Lockation script is running – webhook OK ({trigger-note})' }]);
-    const raw = t.find((x) => x.action === 'rawVolume')!.actions as any[];
-    expect(raw.filter((a) => a.action === 'setVolume')).toHaveLength(6);
-    expect(raw.every((a) => !a.code)).toBe(true);
-  });
 });
 
 describe('cloud webhook block', () => {

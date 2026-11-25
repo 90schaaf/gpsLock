@@ -263,8 +263,6 @@ export function ToysApp({ fetchImpl = fetch }: { fetchImpl?: typeof fetch }) {
         ))}
       </div>
 
-      <DebugCard webhookId={webhookId} fetchImpl={fetchImpl} note={note} />
-
       <button class="danger-big" data-testid="toy-stop-all" disabled={!webhookId} onClick={() => send('all', { cmd: 'stop' }, '■ Stop all')}>
         ■ STOP ALL TOYS
       </button>
@@ -428,62 +426,3 @@ function ToyTester({ toy, disabled, onSend }: { toy: Toy; disabled: boolean; onS
   );
 }
 
-/**
- * Step-by-step checks: 1. ping (webhook → script, no JavaScript) · 2. raw volume (script → toys, no JavaScript)
- * · 3. a normal command (JavaScript). The XToys script screen shows a "Lockation …" text for each step.
- */
-function DebugCard({ webhookId, fetchImpl, note }: { webhookId: string; fetchImpl: typeof fetch; note: (t: string, ok?: boolean) => void }) {
-  const [method, setMethod] = useState<'GET' | 'POST'>('GET');
-  const [last, setLast] = useState<SendResult>();
-  const go = async (label: string, params: Record<string, string>) => {
-    if (!webhookId.trim()) return note('Enter your Webhook ID first.', false);
-    const r = await sendRaw(webhookId, params, method, fetchImpl);
-    setLast(r);
-    note(`${label} – ${r.detail}`, r.outcome !== 'error');
-  };
-  const pingUrl = webhookId ? `${xtoysWebhookUrl(webhookId)}?action=ping&note=address-bar` : '';
-  return (
-    <details class="card stack" data-testid="toy-debug">
-      <summary>
-        <strong>🔧 Something doesn't work? Debug step by step</strong>
-      </summary>
-      <p class="small" style={{ margin: 0 }}>
-        Keep the XToys script screen visible: each step changes its text to “Lockation …”.
-      </p>
-      <ol class="small" style={{ margin: 0, paddingLeft: '18px' }}>
-        <li>
-          <strong>Ping</strong> – should show “Lockation script is running – webhook OK”. Nothing? The webhook block isn't connected to <em>your private</em> webhook,
-          the ID is wrong, or the script isn't started. Also try it without this page: open{' '}
-          {pingUrl ? <a href={pingUrl} target="_blank" rel="noopener">this ping link</a> : 'the ping link'} in a new tab.
-        </li>
-        <li>
-          <strong>Raw volume 20 %</strong> – every connected toy should run at 20 % (no JavaScript involved). Text changes but no toy moves? A toy isn't connected to
-          its slot in XToys.
-        </li>
-        <li>
-          <strong>Test all toys</strong> above – the text first shows “Lockation received: …” (the values XToys passed on), then the result or “Lockation: ERROR …”.
-          Please send me that text.
-        </li>
-      </ol>
-      <div class="row">
-        <label class="small">
-          Send as{' '}
-          <select value={method} onChange={(e) => setMethod((e.target as HTMLSelectElement).value as 'GET' | 'POST')}>
-            <option value="GET">GET (query parameters)</option>
-            <option value="POST">POST (JSON body)</option>
-          </select>
-        </label>
-        <button onClick={() => go('Ping', { action: 'ping', note: new Date().toLocaleTimeString() })} data-testid="toy-ping">1. Ping</button>
-        <button onClick={() => go('Raw volume 20 %', { action: 'rawVolume', level: '20' })}>2. Raw volume 20 %</button>
-        <button onClick={() => go('Raw volume 0 %', { action: 'rawVolume', level: '0' })}>Raw volume 0 %</button>
-      </div>
-      {last && (
-        <pre class="small mono" style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }} data-testid="toy-last">
-          {last.request.replace(webhookId, '<your ID>')}
-          {'\n→ '}
-          {last.outcome}: {last.detail}
-        </pre>
-      )}
-    </details>
-  );
-}

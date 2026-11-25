@@ -260,20 +260,6 @@ export function buildXToysScript(setup: ToySetup) {
           { type: 'customCode', code: proxyCode(meta), resultVar: 'result', variables: injected(TOY_WEBHOOK_KEYS), storeResult: false },
         ],
       },
-      // Debug triggers without JavaScript: is the webhook connected at all, and do the toy slots react?
-      { type: 'componentState', action: 'ping', channel: WEBHOOK, parsedAction: 'ping', actions: [{ type: 'updateScript', action: 'setText', text: 'Lockation script is running – webhook OK ({trigger-note})' }] },
-      {
-        type: 'componentState',
-        action: 'rawVolume',
-        channel: WEBHOOK,
-        parsedAction: 'rawVolume',
-        actions: [
-          { type: 'updateScript', action: 'setText', text: 'Lockation raw volume {trigger-level}% on all toys (no JavaScript)' },
-          ...Object.keys(meta).flatMap((slot) =>
-            Array.from({ length: meta[slot]!.channels }, (_, i) => ({ type: 'updateComponent', channel: slot, action: 'setVolume', actionChannel: meta[slot]!.channels > 1 ? String(i + 1) : 'all', rampTime: '0', percentVolume: '{trigger-level}' })),
-          ),
-        ],
-      },
       { type: 'componentState', action: 'getToys', channel: WEBHOOK, parsedAction: 'getToys', actions: [{ type: 'customCode', code: getToysCode(Object.keys(meta)), resultVar: 'result', variables: [], storeResult: false }] },
     ],
     jobs: { Main: { steps: { START: { actions: [] } } } },
