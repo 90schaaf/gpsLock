@@ -24,6 +24,14 @@ const bodies = {
   capabilities: z.object({ mainToken: z.string().optional(), configToken: z.string().optional() }),
   tracking: z.object({ mainToken: z.string().min(1) }),
   hunt: z.object({ mainToken: z.string().min(1), action: z.enum(['start', 'pause', 'resume', 'abort']) }),
+  mission: z.object({
+    mainToken: z.string().min(1),
+    action: z.discriminatedUnion('type', [
+      z.object({ type: z.literal('send'), zoneId: z.string().min(1).max(100), minutes: z.number().int().min(5).max(720).optional() }),
+      z.object({ type: z.literal('decline') }),
+      z.object({ type: z.literal('cancel') }),
+    ]),
+  }),
 };
 
 export interface Overrides {
@@ -154,6 +162,10 @@ export async function handleRequest(req: Request, env: Env, o: Overrides = {}): 
       case '/api/hunt': {
         const b = await parseBody(req, bodies.hunt);
         return json(await service.huntAction(b.mainToken, b.action), 200, cors);
+      }
+      case '/api/mission': {
+        const b = await parseBody(req, bodies.mission);
+        return json(await service.missionAction(b.mainToken, b.action), 200, cors);
       }
       case '/api/notify/stop': {
         const b = await parseBody(req, bodies.session);

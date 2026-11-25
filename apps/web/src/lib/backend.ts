@@ -1,5 +1,5 @@
 /** Backend abstraction: real Cloudflare Worker or in-browser demo (F13). */
-import type { CheckinPurpose, CheckinRecord, ConfigIssue, Fix, LockationConfig, SessionView, HuntAction } from '@lockation/core';
+import type { CheckinPurpose, CheckinRecord, ConfigIssue, Fix, LockationConfig, SessionView, HuntAction, MissionAction } from '@lockation/core';
 
 export interface CommandInfo {
   id: string;
@@ -55,6 +55,8 @@ export interface Backend {
   testNotification(): Promise<{ ok: true }>;
   /** Scavenger hunt control (who may do what depends on the lock settings). */
   huntAction(action: HuntAction): Promise<SessionView>;
+  /** Surprise missions: keyholder send / cancel, wearer decline. */
+  missionAction(action: MissionAction): Promise<SessionView>;
 }
 
 export class ApiError extends Error {
@@ -134,6 +136,9 @@ export class HttpBackend implements Backend {
   }
   async huntAction(action: HuntAction) {
     return this.post<SessionView>('/api/hunt', { ...this.main(), action });
+  }
+  async missionAction(action: MissionAction) {
+    return this.post<SessionView>('/api/mission', { ...this.main(), action });
   }
   async capabilities() {
     return this.post<{ commands: CommandInfo[]; live: boolean }>(

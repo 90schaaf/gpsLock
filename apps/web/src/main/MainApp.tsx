@@ -6,6 +6,7 @@ import { GeoError, geolocationGranted, getFix, watchFix } from '../lib/geolocati
 import { formatCountdown, useNow } from '../lib/time-ui.js';
 import { isEmbedded } from '../lib/hash.js';
 import type { MockBackend } from '../lib/mock-backend.js';
+import { MissionCard } from './MissionCard.js';
 import { NotificationsCard } from './NotificationsCard.js';
 import { TrackingCard } from './TrackingCard.js';
 
@@ -147,6 +148,11 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
         });
       }
     } else if (view.hunt?.target) out.push({ id: 'hunt', ...view.hunt.target, color: ZONE_COLORS.hunt, label: 'Next checkpoint', dashed: true });
+    const ma = view.mission?.active;
+    if (ma) {
+      const zc = out.find((c) => c.id === ma.zoneId);
+      if (zc) Object.assign(zc, { selected: true, permanentLabel: true, label: `🎯 ${ma.zoneName}` });
+    }
     return out;
   }, [view]);
 
@@ -323,6 +329,8 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
             </ul>
           </div>
         )}
+
+        {view.mission && <MissionCard view={view} backend={backend} mock={mock} onView={setView} onError={(message) => setError({ message })} />}
 
         {view.hunt && (
           <div class="card" data-testid="hunt-card">

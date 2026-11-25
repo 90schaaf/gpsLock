@@ -14,6 +14,7 @@ export const TABS: { id: Tab; label: string }[] = [
   { id: 'reward', label: '🏆 Reward' },
   { id: 'travel', label: '🚶 Travel' },
   { id: 'hunt', label: '🧭 Hunt' },
+  { id: 'mission', label: '🎯 Missions' },
   { id: 'tracking', label: '📡 Tracking' },
   { id: 'notify', label: '🔔 Notifications' },
   { id: 'anticheat', label: '🛡 Anti-cheat' },

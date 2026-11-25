@@ -10,6 +10,10 @@ import { diffConfig } from './diff.js';
 import {
   type Actor,
   applyHuntAction,
+  applyMissionAction,
+  type MissionAction,
+  MissionActionError,
+  startRandomMissionNow,
   type CheckinPurpose,
   type CheckinRecord,
   type EvalResult,
@@ -145,6 +149,34 @@ export class LockationApp<S extends LockSession = LockSession> {
       result = applyHuntAction(s.config, s.state, action, role as Actor, this.ctx(s), s.isSelfLock);
     } catch (e) {
       if (e instanceof HuntActionError) throw new AppError(403, 'hunt_action_not_allowed', e.message);
+      throw e;
+    }
+    await this.finish(s, result, 'tick');
+    return this.view(s, role);
+  }
+
+  /** F25 – keyholder sends / cancels a surprise mission, the wearer declines one. */
+  async missionAction(s: S, role: Role, action: MissionAction): Promise<SessionView> {
+    this.requireLocked(s);
+    let result: EvalResult;
+    try {
+      result = applyMissionAction(s.config, s.state, action, role as Actor, this.ctx(s), s.isSelfLock);
+    } catch (e) {
+      if (e instanceof MissionActionError) throw new AppError(403, 'mission_action_not_allowed', e.message);
+      throw e;
+    }
+    await this.finish(s, result, 'tick');
+    return this.view(s, role);
+  }
+
+  /** Demo / testing only: start a random mission now (ignores the schedule and the active hours). */
+  async randomMissionNow(s: S, role: Role): Promise<SessionView> {
+    this.requireLocked(s);
+    let result: EvalResult;
+    try {
+      result = startRandomMissionNow(s.config, s.state, this.ctx(s));
+    } catch (e) {
+      if (e instanceof MissionActionError) throw new AppError(409, 'mission_not_possible', e.message);
       throw e;
     }
     await this.finish(s, result, 'tick');

@@ -44,6 +44,8 @@ Each tab has an **enabled** switch and lists its zones; open a zone to override 
 - 🧭 **Hunt** – tap the map to place checkpoints **in order** and give each a hint. Choose *in order* or *any order* and the
   reveal mode (default *hint + pin all on the map*, which has no wrong guesses). With **Random route** the checkpoints become
   a pool: at the start, *at least … at most …* of them are drawn in random order – hunts become possible on self-locks.
+- 🎯 **Missions** – surprise missions: target zones (never forbidden ones), time to get there, random missions (how often,
+  from / until), whether the keyholder may send missions, declines per day, and the consequences *arrived in time* / *too late*.
 - 📡 **Tracking** – **How is the location collected?** *Manual check-ins only*, *manual check-ins + background tracking*
   (default with tracking; both count) or *background tracking only* (no check-in button). With [background tracking](./background-tracking): missing-signal time and consequences, optional
   **quiet hours** (no missing-signal penalties at night) and a **warning** before the penalty, **OwnTracks mode** (*Auto* /

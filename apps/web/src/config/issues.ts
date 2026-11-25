@@ -6,14 +6,14 @@ import type { ConfigIssue, LockationConfig } from '@lockation/core';
 import { createContext } from 'preact';
 import { useContext } from 'preact/hooks';
 
-export type Tab = 'zones' | 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'tracking' | 'notify' | 'anticheat' | 'privacy' | 'file';
+export type Tab = 'zones' | 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'mission' | 'tracking' | 'notify' | 'anticheat' | 'privacy' | 'file';
 
 export function issueTab(path: string): Tab {
   const p = path.split('.');
   if (p[0] === 'zones' && p.length > 2 && (p[2] === 'required' || p[2] === 'forbidden' || p[2] === 'reward')) return p[2];
   if (p[0] === 'rules') {
     const r = p[1];
-    if (r === 'required' || r === 'forbidden' || r === 'reward' || r === 'travel' || r === 'hunt') return r;
+    if (r === 'required' || r === 'forbidden' || r === 'reward' || r === 'travel' || r === 'hunt' || r === 'mission') return r;
   }
   if (p[0] === 'tracking') return 'tracking';
   if (p[0] === 'notifications') return 'notify';
@@ -51,6 +51,12 @@ const FIELD: Record<string, string> = {
   maxKmPerCheckin: 'Max per check-in',
   dailyCapKm: 'Daily cap',
   checkpoints: 'Checkpoints',
+  mission: 'Surprise missions',
+  zoneIds: 'Target zones',
+  leadMinutes: 'Time to get there',
+  declinesPerDay: 'Declines per day',
+  everyHours: 'On average every',
+  minDistanceM: 'Minimum distance',
   random: 'Random route',
   min: 'At least',
   max: 'At most',
@@ -140,6 +146,7 @@ const INLINE: { re: RegExp; visible: (c: LockationConfig) => boolean }[] = [
   { re: /^rules\.forbidden\.(firstWarningAfterMinutes|repeatWarningAfterMinutes)$/, visible: (c) => c.rules.forbidden.enabled },
   { re: /^rules\.required\.(warnBeforeMinutes|intervalMinutes)$/, visible: (c) => c.rules.required.enabled },
   { re: /^tracking\.(heartbeatMinutes|warnBeforeMinutes)$/, visible: (c) => c.tracking.enabled },
+  { re: /^rules\.mission\.(leadMinutes|warnBeforeMinutes|declinesPerDay)$/, visible: (c) => c.rules.mission.enabled },
   { re: /^antiCheat\.liveVerificationEveryHours$/, visible: () => true },
 ];
 

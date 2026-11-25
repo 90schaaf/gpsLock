@@ -139,6 +139,7 @@ All `/api/*` endpoints: `POST`, JSON, CORS restricted. Errors: `{error: {code, m
 | `/api/notify/stop` | `{mainToken}` | `SessionView` |
 | `/api/notice/ack` | `{mainToken}` (wearer) | `SessionView` (clears `rulesChanged`) |
 | `/api/hunt` | `{mainToken, action: "start" \| "pause" \| "resume" \| "abort"}` | `SessionView`; 403 `hunt_action_not_allowed` |
+| `/api/mission` | `{mainToken, action: {type: "send", zoneId, minutes?} \| {type: "decline"} \| {type: "cancel"}}` | `SessionView`; 403 `mission_action_not_allowed` |
 | `/track/owntracks` | OwnTracks message, Basic auth with device credentials | `[]`, `setWaypoints` and/or `setConfiguration` commands; 401 on wrong credentials |
 | `/webhook` | Chaster webhook, Basic auth | `204` |
 | `/health` | `GET` | `{ok: true, version, commit}` |

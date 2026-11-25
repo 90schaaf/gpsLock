@@ -192,6 +192,27 @@ view; with `all` the full list is sent. 5. Timeout once, extended by pauses. 6. 
 timezone, pause permissions, keyholder force-start and penalty-free end, wearer abort with `onAbort`. 7. Unlock blocker set
 while open, cleared afterwards. 8. Waypoints per reveal mode, re-push after a find.
 
+### F25 – Surprise missions
+
+"Be at zone X by 14:30!" – `rules.mission`.
+
+- **Targets:** `zoneIds` (empty = all) – **never forbidden zones** (validation rejects them; at least one target needed).
+  Random missions skip zones the wearer is in (presence) and zones closer than `minDistanceM` to the last accepted
+  position; the previous target only if nothing else is left.
+- **Random missions** (`random {enabled, everyHours, activeHours}`): the next one is scheduled `everyHours × (0.5 … 1.5)` after
+  the previous one ended (or the first tick); only within the active hours (lock timezone, start = end → all day),
+  otherwise moved into the next window. Missions are started by the tick (`state.mission.nextRandomAt`).
+- **Keyholder** (`keyholderCanSend`): send a mission by hand (zone, 5–720 min) or cancel the running one. Not on self-locks.
+- **Mission:** `leadMinutes` to get there; an accepted check-in or background location inside the zone between issue and
+  deadline → `onSuccess`. After the deadline + grace (5 min with tracking, else 1 min – late deliveries of fixes taken in
+  time) → `onFail` (counts as penalty). Optional reminder `warnBeforeMinutes` before the end.
+- **Decline:** the wearer may decline `declinesPerDay` missions per day (lock timezone) without penalty; the keyholder is told.
+- **Notifications:** wearer – mission (high), reminder (high), result; keyholder switch `mission`.
+- **UI:** Missions tab; mission card with countdown, decline / cancel / send, target highlighted on the map; lock-page
+  action shows "Mission: be at … by …" with a badge. Demo: *Random mission now*.
+- AC: a forbidden zone is never a target; a mission succeeds only inside the target before the deadline; fails once after the
+  grace; random missions never start outside the active hours; declines are limited per day.
+
 ### F7 – Consequences
 
 | type | params | Chaster call |
@@ -442,3 +463,4 @@ AC: 1. Zone-only record has no lat/lng. 2. Downgrade redacts. 3. Upgrade during 
 | F22 | Notifications | F22 (new ID) |
 | F23 | Configuration changes during a lock | F23 (new ID) |
 | F24 | Settings import / export | F11 (new ID) |
+| F25 | Surprise missions | F25 (new) |

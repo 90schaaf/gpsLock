@@ -9,6 +9,7 @@ import {
   type CheckinRecord,
   type Fix,
   type HuntAction,
+  type MissionAction,
   KNOWN_COMMANDS,
   loadState,
   type LockationConfig,
@@ -150,6 +151,11 @@ export class LockationService {
   async huntAction(mainToken: string, action: HuntAction): Promise<SessionView> {
     const r = await this.resolve(mainToken);
     return this.app.huntAction(r, r.role, action);
+  }
+
+  async missionAction(mainToken: string, action: MissionAction): Promise<SessionView> {
+    const r = await this.resolve(mainToken);
+    return this.app.missionAction(r, r.role, action);
   }
 
   // ---------- notifications (ntfy) ----------

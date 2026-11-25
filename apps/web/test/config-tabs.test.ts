@@ -163,3 +163,21 @@ describe('demo: draw a new random route', () => {
     expect(b.demoLog().some((l) => /new random route/.test(l.description))).toBe(true);
   });
 });
+
+describe('surprise missions in the demo', () => {
+  it('starts a random mission (never a forbidden zone) and the wearer can decline it', async () => {
+    const { MockBackend, demoConfig } = await import('../src/lib/mock-backend.js');
+    const m = new Map<string, string>();
+    const b = new MockBackend({ getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) });
+    const cfg = demoConfig();
+    await b.configSave({ ...cfg, disclaimer: { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' }, rules: { ...cfg.rules, mission: { ...cfg.rules.mission, enabled: true, minDistanceM: 0 } } });
+    await b.session();
+    const v = await b.demoMissionNow();
+    const target = cfg.zones.find((z) => z.id === v.mission?.active?.zoneId);
+    expect(target).toBeDefined();
+    expect(target!.roles).not.toContain('forbidden');
+    expect(v.mission?.actions).toContain('decline');
+    const d = await b.missionAction({ type: 'decline' });
+    expect(d.mission).toMatchObject({ active: undefined, declinesLeft: 0, stats: { declined: 1 } });
+  });
+});

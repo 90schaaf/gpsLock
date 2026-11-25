@@ -219,3 +219,22 @@ describe('ntfy errors are explained', () => {
     expect(body.error.message).toMatch(/answered 401 \(unauthorized\)\. The NTFY_TOKEN secret is wrong or expired/);
   });
 });
+
+describe('surprise mission endpoint', () => {
+  it('keyholder sends a mission (not to a forbidden zone), the wearer gets a push and may decline', async () => {
+    const target = config.zones.find((z: any) => !z.roles.includes('forbidden'))!;
+    const forbidden = config.zones.find((z: any) => z.roles.includes('forbidden'));
+    fake.addSession('s1', { ...config, rules: { ...config.rules, mission: { enabled: true, random: { enabled: false } } } } as any);
+    await subscribe('wearer-token');
+    ntfy.sent = [];
+    if (forbidden) expect((await post('/api/mission', { mainToken: 'kh-token', action: { type: 'send', zoneId: forbidden.id } })).status).toBe(403);
+    expect((await post('/api/mission', { mainToken: 'wearer-token', action: { type: 'send', zoneId: target.id } })).status).toBe(403);
+    const r = await post('/api/mission', { mainToken: 'kh-token', action: { type: 'send', zoneId: target.id, minutes: 20 } });
+    expect(r.status).toBe(200);
+    expect(((await r.json()) as any).mission.active.zoneName).toBe(target.name);
+    expect(ntfy.sent).toContainEqual(expect.objectContaining({ title: '🎯 Surprise mission' }));
+    const d = (await (await post('/api/mission', { mainToken: 'wearer-token', action: { type: 'decline' } })).json()) as any;
+    expect(d.mission.active).toBeUndefined();
+    expect(d.mission.stats.declined).toBe(1);
+  });
+});

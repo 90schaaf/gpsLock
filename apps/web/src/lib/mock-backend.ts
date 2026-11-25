@@ -5,6 +5,7 @@ import {
   type CheckinRecord,
   type Fix,
   type HuntAction,
+  type MissionAction,
   huntRoute,
   initialState,
   KNOWN_COMMANDS,
@@ -308,6 +309,21 @@ export class MockBackend implements Backend {
     return this.run(async () => {
       const d = await this.session_();
       return this.app.huntAction(d, d.store.role, action);
+    });
+  }
+
+  async missionAction(action: MissionAction) {
+    return this.run(async () => {
+      const d = await this.session_();
+      return this.app.missionAction(d, d.store.role, action);
+    });
+  }
+
+  /** Demo only: start a random surprise mission right now. */
+  async demoMissionNow() {
+    return this.run(async () => {
+      const d = await this.session_();
+      return this.app.randomMissionNow(d, d.store.role);
     });
   }
 

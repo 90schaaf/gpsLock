@@ -21,6 +21,7 @@ import { useReachability, type PlaceRef, type ReachCheck } from './useReachabili
 import { AntiCheatTab } from './tabs/AntiCheatTab.js';
 import { FileTab } from './tabs/FileTab.js';
 import { ForbiddenTab } from './tabs/ForbiddenTab.js';
+import { MissionsTab } from './tabs/MissionsTab.js';
 import { HuntTab } from './tabs/HuntTab.js';
 import { NotificationsTab } from './tabs/NotificationsTab.js';
 import { PrivacyTab } from './tabs/PrivacyTab.js';
@@ -42,6 +43,7 @@ const TAB_COMPONENTS: Record<Tab, (p: TabProps) => preact.JSX.Element> = {
   reward: RewardTab,
   travel: TravelTab,
   hunt: HuntTab,
+  mission: MissionsTab,
   tracking: TrackingTab,
   notify: NotificationsTab,
   anticheat: AntiCheatTab,

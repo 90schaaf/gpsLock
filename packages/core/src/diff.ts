@@ -56,7 +56,7 @@ export function diffConfig(before: LockationConfig, after: LockationConfig): str
 
   const R0 = before.rules;
   const R1 = after.rules;
-  for (const k of ['required', 'forbidden', 'reward', 'travel', 'hunt'] as const) {
+  for (const k of ['required', 'forbidden', 'reward', 'travel', 'hunt', 'mission'] as const) {
     if (R0[k].enabled !== R1[k].enabled) out.push(`${label(k)} ${R1[k].enabled ? 'enabled' : 'disabled'}.`);
   }
   const rq0 = R0.required;
@@ -81,6 +81,10 @@ export function diffConfig(before: LockationConfig, after: LockationConfig): str
     const { checkpoints: _b, ...h1 } = R1.hunt;
     if (!same(h0, h1)) out.push('Hunt settings changed.');
   }
+  if (R1.mission.enabled && R0.mission.enabled && !same(R0.mission, R1.mission)) {
+    const m = R1.mission;
+    out.push(`Surprise missions: ${fmtMinutes(m.leadMinutes)} to get there; in time: ${cons(m.onSuccess)}; too late: ${cons(m.onFail)}.`);
+  }
   const t0 = before.tracking;
   const t1 = after.tracking;
   if (t0.enabled !== t1.enabled) out.push(`Background tracking ${t1.enabled ? 'required' : 'no longer required'}.`);
@@ -99,5 +103,5 @@ export function diffConfig(before: LockationConfig, after: LockationConfig): str
 }
 
 function label(k: string): string {
-  return { required: 'Required zones', forbidden: 'Forbidden zones', reward: 'Reward zones', travel: 'Travel goals', hunt: 'Scavenger hunt' }[k] ?? k;
+  return { required: 'Required zones', forbidden: 'Forbidden zones', reward: 'Reward zones', travel: 'Travel goals', hunt: 'Scavenger hunt', mission: 'Surprise missions' }[k] ?? k;
 }

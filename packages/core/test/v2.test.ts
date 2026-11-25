@@ -6,6 +6,11 @@ import {
   allowedHuntActions,
   applyHuntAction,
   HuntActionError,
+  allowedMissionActions,
+  applyMissionAction,
+  MissionActionError,
+  missionDeclinesLeft,
+  startRandomMissionNow,
   buildSessionView,
   diffConfig,
   evaluateCheckin,
@@ -567,5 +572,91 @@ describe('hunt: random route', () => {
     const s = initialState(c, T0);
     const res = applyHuntAction(c, s, 'start', 'wearer', { now: T0, sessionId: 's1', evalId: 'h1', rng: () => 0.5 }, true);
     expect(res.state.hunt.route).toHaveLength(3);
+  });
+});
+
+describe('surprise missions (F25)', () => {
+  const zonesM = [zone('home', 'Home', HOME), zone('gym', 'Gym', GYM, { roles: ['reward'] }), zone('bar', 'Bar', BAR, { roles: ['forbidden'] })];
+  const mcfg = (mission: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) =>
+    cfg({
+      version: 2,
+      zones: zonesM,
+      rules: { mission: { enabled: true, leadMinutes: 30, onSuccess: [{ type: 'remove_time', seconds: 600 }], onFail: [{ type: 'add_time', seconds: 3600 }], ...mission } },
+      ...extra,
+    });
+  const mctx = (now: Date, rng = () => 0.5) => ({ now, sessionId: 's1', evalId: `m${now.getTime()}`, rng });
+
+  it('validates targets: never forbidden, at least one target, reminder before the end', () => {
+    const base = { version: 2, timezone: 'Europe/Zurich', zones: zonesM };
+    expect(parseConfig({ ...base, rules: { mission: { enabled: true } } }).ok).toBe(true);
+    expect(parseConfig({ ...base, rules: { mission: { enabled: true, zoneIds: ['bar'] } } }).ok).toBe(false);
+    expect(parseConfig({ ...base, zones: [zonesM[2]], rules: { mission: { enabled: true } } }).ok).toBe(false);
+    expect(parseConfig({ ...base, rules: { mission: { enabled: true, leadMinutes: 10, warnBeforeMinutes: 10 } } }).ok).toBe(false);
+    expect(parseConfig({ ...base, rules: { mission: { enabled: true, keyholderCanSend: false, random: { enabled: false } } } }).ok).toBe(false);
+  });
+
+  it('a random mission picks a non-forbidden zone away from the wearer; arriving in time succeeds', () => {
+    const r = new Run(mcfg());
+    r.at(HOME, minutes(T0, 1));
+    r.tick(minutes(T0, 2)); // schedules: 4 h × (0.5 + 0.5)
+    expect(r.state.mission.nextRandomAt).toBe(minutes(T0, 2 + 240).toISOString());
+    expect(nextDueAt(r.config, r.state, minutes(T0, 3))!.toISOString()).toBe(r.state.mission.nextRandomAt);
+    const start = r.tick(minutes(T0, 242));
+    expect(r.state.mission.active).toMatchObject({ zoneId: 'gym', by: 'random' }); // home: wearer is there; bar: forbidden
+    expect(wearer(start.notices)[0]).toMatchObject({ title: '🎯 Surprise mission', priority: 'high' });
+    expect(kh(start.notices)[0]).toMatchObject({ kind: 'mission' });
+    const v = buildSessionView({ role: 'wearer', isSelfLock: false, config: r.config, state: r.state, history: [], now: minutes(T0, 243) });
+    expect(v.mission).toMatchObject({ active: { zoneName: 'Gym' }, actions: ['decline'], declinesLeft: 1 });
+    const warn = r.tick(minutes(T0, 242 + 21));
+    expect(wearer(warn.notices)[0]!.title).toBe('🎯 Mission ends soon');
+    const arrive = r.at(GYM, minutes(T0, 242 + 25));
+    expect(types(arrive)).toContain('remove_time');
+    expect(r.state.mission).toMatchObject({ active: undefined, succeeded: 1, last: { zoneId: 'gym', outcome: 'success' } });
+    expect(r.state.mission.nextRandomAt).toBeDefined();
+  });
+
+  it('not there in time: the fail penalty after the grace time', () => {
+    const r = new Run(mcfg());
+    r.at(HOME, minutes(T0, 1));
+    r.tick(minutes(T0, 2));
+    r.tick(minutes(T0, 242));
+    expect(types(r.tick(minutes(T0, 242 + 30)))).toEqual([]); // at the deadline: still within the grace time
+    const fail = r.tick(minutes(T0, 242 + 30 + 1));
+    expect(types(fail)).toEqual(['add_time']);
+    expect(kh(fail.notices).map((n) => n.kind)).toEqual(expect.arrayContaining(['mission', 'penalty']));
+    expect(r.state.mission.failed).toBe(1);
+    expect(types(r.at(GYM, minutes(T0, 300)))).not.toContain('remove_time'); // too late
+  });
+
+  it('random missions only start within the active hours', () => {
+    const r = new Run(mcfg({ random: { everyHours: 10, activeHours: { start: '09:00', end: '21:00' } } }));
+    r.tick(T0); // 12:00 local + 10 h = 22:00 local → moved to 09:00 local + 30 min (rng 0.5)
+    expect(r.state.mission.nextRandomAt).toBe('2026-06-02T07:30:00.000Z');
+  });
+
+  it('keyholder sends and cancels; the wearer declines once per day; forbidden zones are refused', () => {
+    const c = mcfg({ random: { enabled: false } });
+    const s0 = initialState(c, T0);
+    expect(() => applyMissionAction(c, s0, { type: 'send', zoneId: 'bar' }, 'keyholder', mctx(T0))).toThrow(MissionActionError);
+    expect(() => applyMissionAction(c, s0, { type: 'send', zoneId: 'gym' }, 'wearer', mctx(T0))).toThrow(MissionActionError);
+    expect(allowedMissionActions(c, s0, 'keyholder', T0, true)).toEqual([]); // self-lock: nobody sends to themselves
+    const sent = applyMissionAction(c, s0, { type: 'send', zoneId: 'home', minutes: 15 }, 'keyholder', mctx(T0));
+    expect(sent.state.mission.active).toMatchObject({ zoneId: 'home', by: 'keyholder', dueAt: minutes(T0, 15).toISOString() });
+    const declined = applyMissionAction(c, sent.state, { type: 'decline' }, 'wearer', mctx(minutes(T0, 1)));
+    expect(declined.consequences).toEqual([]);
+    expect(kh(declined.notices)[0]!.title).toBe('Lockation: mission declined');
+    const again = applyMissionAction(c, declined.state, { type: 'send', zoneId: 'gym' }, 'keyholder', mctx(minutes(T0, 2)));
+    expect(allowedMissionActions(c, again.state, 'wearer', minutes(T0, 3))).toEqual([]); // no decline left today
+    const cancelled = applyMissionAction(c, again.state, { type: 'cancel' }, 'keyholder', mctx(minutes(T0, 3)));
+    expect(cancelled.state.mission).toMatchObject({ active: undefined, last: { outcome: 'cancelled' }, declined: 1 });
+    expect(missionDeclinesLeft(c, cancelled.state, minutes(T0, 24 * 60))).toBe(1); // next day
+  });
+
+  it('never targets a forbidden zone', () => {
+    const c = mcfg();
+    for (let i = 0; i < 20; i++) {
+      const res = startRandomMissionNow(c, initialState(c, T0), mctx(T0, () => i / 20));
+      expect(res.state.mission.active!.zoneId).not.toBe('bar');
+    }
   });
 });

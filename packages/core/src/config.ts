@@ -254,6 +254,37 @@ export const PrivacySchema = z
   .default({});
 export type CoordinatePrivacy = 'zone_only' | 'exact';
 
+/**
+ * F25 – surprise missions: "be at zone X within N minutes". Targets are never forbidden zones. Random missions come on
+ * average every `everyHours` (±50 %) and only within the active hours; the keyholder can also send one by hand.
+ */
+export const MissionRuleSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    /** Possible target zones (ids). Empty = every zone that is not forbidden. */
+    zoneIds: z.array(z.string()).max(MAX_PLACES).default([]),
+    /** Time to get there. */
+    leadMinutes: z.number().int().min(5).max(720).default(45),
+    random: z
+      .object({
+        enabled: z.boolean().default(true),
+        everyHours: z.number().min(0.5).max(168).default(4),
+        /** Random missions only start within these hours (lock timezone). Same start and end = all day. */
+        activeHours: z.object({ start: hhmm, end: hhmm }).default({ start: '09:00', end: '21:00' }),
+      })
+      .default({}),
+    /** Zones closer than this to the last known position are not picked for random missions. */
+    minDistanceM: z.number().int().min(0).max(100_000).default(300),
+    keyholderCanSend: z.boolean().default(true),
+    /** Missions the wearer may decline per day without penalty ("can't right now"). */
+    declinesPerDay: z.number().int().min(0).max(10).default(1),
+    /** Reminder before the mission ends (0 = none). */
+    warnBeforeMinutes: z.number().int().min(0).max(120).default(10),
+    onSuccess: ConsequenceListSchema,
+    onFail: ConsequenceListSchema,
+  })
+  .default({});
+
 /** Keyholder notification switches (ntfy). */
 export const KeyholderNotifySchema = z
   .object({
@@ -263,6 +294,7 @@ export const KeyholderNotifySchema = z
     requiredMissed: z.boolean().default(true),
     requiredDone: z.boolean().default(false),
     hunt: z.boolean().default(true),
+    mission: z.boolean().default(true),
     reward: z.boolean().default(false),
     verification: z.boolean().default(true),
   })
@@ -282,6 +314,7 @@ export const LockationConfigSchema = z
         reward: RewardRuleSchema,
         travel: TravelRuleSchema,
         hunt: HuntRuleSchema,
+        mission: MissionRuleSchema,
       })
       .default({}),
     tracking: TrackingSchema,
@@ -352,6 +385,17 @@ export const LockationConfigSchema = z
       issue(['antiCheat', 'liveVerificationEveryHours'], 'random verification pictures need "live tracking only"');
     }
     if (R.hunt.enabled && R.hunt.checkpoints.length === 0) issue(['rules', 'hunt', 'checkpoints'], 'add at least one checkpoint');
+    const M = R.mission;
+    if (M.enabled) {
+      M.zoneIds.forEach((id, i) => {
+        const z = cfg.zones.find((x) => x.id === id);
+        if (!z) issue(['rules', 'mission', 'zoneIds', i], `unknown zone "${id}"`);
+        else if (z.roles.includes('forbidden')) issue(['rules', 'mission', 'zoneIds', i], `"${z.name}" is forbidden and cannot be a mission target`);
+      });
+      if (!missionTargets(cfg).length) issue(['rules', 'mission', 'enabled'], 'add at least one zone that is not forbidden as a mission target');
+      if (!M.random.enabled && !M.keyholderCanSend) issue(['rules', 'mission', 'random', 'enabled'], 'enable random missions or let the keyholder send missions');
+      if (M.warnBeforeMinutes >= M.leadMinutes) issue(['rules', 'mission', 'warnBeforeMinutes'], 'the reminder must come before the mission ends');
+    }
     const rnd = R.hunt.random;
     if (rnd.enabled) {
       if (rnd.min > rnd.max) issue(['rules', 'hunt', 'random', 'min'], 'the minimum cannot be larger than the maximum');
@@ -490,4 +534,10 @@ export function owntracksMonitoring(cfg: LockationConfig): 1 | 2 {
   if (m === 'significant') return 1;
   const forbidden = cfg.rules.forbidden.enabled && zonesWithRole(cfg, 'forbidden').length > 0;
   return cfg.tracking.heartbeatMinutes < 60 || forbidden || owntracksLocatorInterval(cfg) < 300 ? 2 : 1;
+}
+
+/** Zones a surprise mission may send the wearer to: the selected ones (or all), never forbidden zones. */
+export function missionTargets(cfg: { zones: Zone[]; rules: { mission: { zoneIds: string[] } } }): Zone[] {
+  const pick = cfg.rules.mission.zoneIds;
+  return cfg.zones.filter((z) => !z.roles.includes('forbidden') && (!pick.length || pick.includes(z.id)));
 }

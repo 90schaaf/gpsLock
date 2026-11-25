@@ -79,6 +79,22 @@ export const LockationStateSchema = z.object({
       lastDistanceBand: z.string().optional(),
     })
     .default({}),
+  /** F25 – surprise missions. */
+  mission: z
+    .object({
+      active: z
+        .object({ id: z.string(), zoneId: z.string(), issuedAt: iso, dueAt: iso, by: z.enum(['random', 'keyholder']), warned: z.boolean().default(false) })
+        .optional(),
+      /** When the next random mission comes (within the active hours). */
+      nextRandomAt: iso.optional(),
+      declineDay: z.string().default(''),
+      declinesToday: z.number().default(0),
+      succeeded: z.number().default(0),
+      failed: z.number().default(0),
+      declined: z.number().default(0),
+      last: z.object({ zoneId: z.string(), outcome: z.enum(['success', 'failed', 'declined', 'cancelled']), at: iso }).optional(),
+    })
+    .default({}),
   /** Last run of the enter / leave actions per zone (cooldown). */
   zoneActions: z.record(z.object({ lastEnter: iso.optional(), lastLeave: iso.optional() })).default({}),
   /** F14 – zones the wearer is currently in (since = first seen, lastSeen = latest observation inside). */

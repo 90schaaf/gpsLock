@@ -1,7 +1,7 @@
 /** View models sent to the browser, Chaster metadata (F12) and privacy helpers (F9). */
-import { activeRoles, forbiddenTimings, type LockationConfig, owntracksMonitoring, type ZoneRole, zonesWithRole } from './config.js';
+import { activeRoles, forbiddenTimings, type LockationConfig, owntracksMonitoring, type ZoneRole, zonesWithRole, missionTargets } from './config.js';
 import { describeConsequence, describeWhen, type Consequence } from './consequences.js';
-import { allowedHuntActions, type CheckinRecord, type HuntAction, huntDeadlineOf, huntRoute, huntScheduledStart, huntTotal, type PlannedConsequence, visibleCheckpoints } from './engine.js';
+import { allowedHuntActions, allowedMissionActions, missionDeclinesLeft, type MissionActionType, type CheckinRecord, type HuntAction, huntDeadlineOf, huntRoute, huntScheduledStart, huntTotal, type PlannedConsequence, visibleCheckpoints } from './engine.js';
 import { earliestDeadline, effectivePrivacy, type LockationState, nextHeartbeatFrom, requiredSlots } from './state.js';
 import { activeWindowStart, formatLocalTime, formatWindow, MINUTE } from './time.js';
 
@@ -24,7 +24,7 @@ export interface ZoneView {
 }
 
 export interface RuleSummary {
-  rule: 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'tracking' | 'zoneActions';
+  rule: 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'mission' | 'tracking' | 'zoneActions';
   title: string;
   lines: string[];
 }
@@ -92,6 +92,20 @@ export interface SessionView {
     deadline?: string;
   };
   travel?: { totalKm: number; pendingKm: number; stepKm: number; kmToday: number; dailyCapKm: number };
+  /** F25 – surprise missions. */
+  mission?: {
+    active?: { zoneId: string; zoneName: string; issuedAt: string; dueAt: string; by: 'random' | 'keyholder'; target: { lat: number; lng: number; radiusM: number } };
+    /** Actions the current viewer may perform (keyholder: send / cancel, wearer: decline). */
+    actions: MissionActionType[];
+    declinesLeft: number;
+    leadMinutes: number;
+    /** Zones the keyholder can send the wearer to (keyholder only). */
+    targets?: { id: string; name: string }[];
+    random: boolean;
+    activeHours: string;
+    last?: { zoneName: string; outcome: 'success' | 'failed' | 'declined' | 'cancelled'; at: string };
+    stats: { succeeded: number; failed: number; declined: number };
+  };
   freezeUntil?: string;
   /** F14 – background tracking status. */
   tracking?: {
@@ -220,6 +234,23 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
         ...(hunt.reveal !== 'all' ? [`Wrong hunt guess: ${list(hunt.onWrong)}.`] : []),
         ...(hunt.timeLimitMinutes ? [`Time limit ${fmtMinutes(hunt.timeLimitMinutes)}: ${list(hunt.onTimeout)}.`] : []),
         ...(hunt.blockUnlockUntilComplete ? ['The lock cannot be unlocked until the hunt is completed.'] : []),
+      ],
+    });
+  }
+  const mission = config.rules.mission;
+  if (mission.enabled) {
+    const names = missionTargets(config).map((z) => z.name).join(', ');
+    const hours = mission.random.activeHours;
+    out.push({
+      rule: 'mission',
+      title: 'Surprise missions',
+      lines: [
+        ...(mission.random.enabled
+          ? [`At random times (on average every ${fmtMinutes(Math.round(mission.random.everyHours * 60))}${hours.start === hours.end ? '' : `, between ${hours.start} and ${hours.end}`}) you are sent to one of these zones: ${names}.`]
+          : []),
+        ...(mission.keyholderCanSend ? [`The keyholder can send you to one of these zones at any time${mission.random.enabled ? '' : `: ${names}`}.`] : []),
+        `You have ${fmtMinutes(mission.leadMinutes)} to get there (by check-in or background location). In time: ${list(mission.onSuccess)}. Too late: ${list(mission.onFail)}.`,
+        mission.declinesPerDay ? `You may decline ${mission.declinesPerDay === 1 ? 'one mission' : `${mission.declinesPerDay} missions`} per day without penalty.` : 'Missions cannot be declined.',
       ],
     });
   }
@@ -399,6 +430,24 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
     };
   }
 
+  const m = config.rules.mission;
+  if (m.enabled) {
+    const a = state.mission.active;
+    const zone = a ? config.zones.find((z) => z.id === a.zoneId) : undefined;
+    const lastZone = state.mission.last ? config.zones.find((z) => z.id === state.mission.last!.zoneId) : undefined;
+    view.mission = {
+      active: a && zone ? { zoneId: zone.id, zoneName: zone.name, issuedAt: a.issuedAt, dueAt: a.dueAt, by: a.by, target: { lat: zone.lat, lng: zone.lng, radiusM: zone.radiusM } } : undefined,
+      actions: allowedMissionActions(config, state, role, now, isSelfLock),
+      declinesLeft: missionDeclinesLeft(config, state, now),
+      leadMinutes: m.leadMinutes,
+      targets: role === 'keyholder' ? missionTargets(config).map((z) => ({ id: z.id, name: z.name })) : undefined,
+      random: m.random.enabled,
+      activeHours: m.random.activeHours.start === m.random.activeHours.end ? 'all day' : `${m.random.activeHours.start}–${m.random.activeHours.end}`,
+      last: state.mission.last ? { zoneName: lastZone?.name ?? 'a removed zone', outcome: state.mission.last.outcome, at: state.mission.last.at } : undefined,
+      stats: { succeeded: state.mission.succeeded, failed: state.mission.failed, declined: state.mission.declined },
+    };
+  }
+
   const t = config.rules.travel;
   if (t.enabled) {
     view.travel = {
@@ -443,8 +492,12 @@ export function computeMetadata(config: LockationConfig, state: LockationState, 
 
   const live = config.tracking.enabled && config.tracking.checkins === 'auto';
   let description = 'Prove your location';
+  const activeMission = config.rules.mission.enabled ? state.mission.active : undefined;
+  const missionZone = activeMission ? config.zones.find((z) => z.id === activeMission.zoneId) : undefined;
   if (live && !state.tracking.deviceUser) {
     description = 'Set up live tracking!';
+  } else if (activeMission && missionZone) {
+    description = `Mission: be at "${missionZone.name}" by ${formatLocalTime(new Date(activeMission.dueAt), config.timezone)}`;
   } else if (deadline) {
     const due = formatLocalTime(deadline, config.timezone);
     description = overdue ? (live ? 'Required location overdue!' : 'Check-in overdue!') : live ? `Be in a required zone by ${due}` : `Next check-in due ${due}`;
@@ -462,7 +515,7 @@ export function computeMetadata(config: LockationConfig, state: LockationState, 
   return {
     reasonsPreventingUnlocking: reasons,
     homeActions: [
-      { slug: 'checkin', title: live ? 'GPS live tracking' : 'GPS check-in', description, icon: 'map-marker-alt', ...(overdue || (live && !state.tracking.deviceUser) ? { badge: '!' } : {}) },
+      { slug: 'checkin', title: live ? 'GPS live tracking' : 'GPS check-in', description, icon: 'map-marker-alt', ...(overdue || (live && !state.tracking.deviceUser) || missionZone ? { badge: '!' } : {}) },
     ],
   };
 }

@@ -108,6 +108,20 @@ Time amounts are multiplied by the number of steps. Movements flagged as implaus
   hunt counts as failed and *wearer gives up* runs (e.g. add 1 day). Unlocking is no longer blocked by the hunt afterwards.
 - The other side is notified when someone starts, pauses, resumes or ends the hunt.
 
+## Surprise missions
+
+"🎯 Be at the café by 14:30!" – the wearer has to reach a zone in time.
+
+- **Targets:** the zones you tick in the 🎯 **Missions** tab (default: all). **Forbidden zones are never mission targets.**
+  Random missions skip the zone the wearer is in and zones closer than the *minimum distance*.
+- **Random missions:** on average every *n* hours (±50 %, so nobody can predict them), only between the *from / until* times
+  (lock time zone). They work on self-locks too.
+- **Sent by the keyholder:** pick a zone and the minutes on the main page; the keyholder can also cancel a running mission.
+- **Arrival** counts by check-in or background location inside the zone before the deadline → *arrived in time*.
+  Otherwise *too late* applies (with background tracking, a location taken in time still counts if it arrives up to 5 minutes later).
+- **Safety:** the wearer can decline a mission ("can't right now") without penalty – by default once per day. The keyholder is told.
+- The wearer gets a push notification for each mission and a reminder shortly before the end.
+
 ## Zone actions (enter / leave)
 
 Every zone – whatever its role, neutral too – can run consequences **when entering** and/or **when leaving** it
