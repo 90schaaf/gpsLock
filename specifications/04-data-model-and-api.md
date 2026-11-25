@@ -119,6 +119,16 @@ Missing or corrupt state is replaced by a fresh initial state.
 | `lastPosition` | wearer always (approximate in zone-only mode); keyholder only with exact sharing |
 | `presentZones`, `travel`, `freezeUntil`, `rulesChanged`, `notifications {available, subscribed}`, `stats`, `history` | |
 
+## Planned: toy control (F27)
+
+- Config: `rules.toy {enabled, onEmergencyStop: Consequence[]}`, zone `toy.whileInside? {action, intensity, pattern?}`,
+  consequence `{type: "toy", action, intensity, seconds, pattern?}`.
+- State: `toy {connectedAt?, verifiedAt?, disclaimerVersion?, limits {maxIntensity, maxSeconds, allowedHours?}, running?
+  {source, until}, lastActionAt?}` – the Webhook ID is **not** in the state.
+- D1 `toys`: `session_id` (PK), `webhook_id`, `created_at` – deleted on disconnect and on session end.
+- API: `/api/toy/connect {mainToken, webhookId, limits, disclaimerVersion}` (wearer), `/api/toy/test {mainToken}`,
+  `/api/toy/confirm {mainToken}`, `/api/toy/emergency-stop {mainToken}` (wearer; applies `onEmergencyStop`).
+
 ## Worker HTTP API
 
 All `/api/*` endpoints: `POST`, JSON, CORS restricted. Errors: `{error: {code, message, details?}}` with status

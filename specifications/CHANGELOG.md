@@ -2,6 +2,9 @@
 
 ## 2026-11-25
 
+- **Toy control via XToys (F27) specified** (not implemented): private webhook entered by the wearer, toy disclaimer, wearer
+  limits fixed while connected, consequence type `toy`, "while inside" with dead-man's switch, emergency stop with
+  punishment, no manual control and no automatic pause.
 - **Surprise zones (F26):** zone role `surprise` – visible zones whose outcome is drawn by weight on entering (reward,
   punishment, or a hold: stay for a while / until the keyholder releases, at the latest after `holdMinutes`); once or every
   visit; early leave consequences; map marks new / visited / used / holding; `/api/surprise` release.

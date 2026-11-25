@@ -31,6 +31,12 @@ Feature IDs refer to [03-features.md](03-features.md); details of past changes a
   the demo backend.
 - `/health` returns `{ok, version, commit}`.
 
+## Planned (specified 2026-11-25)
+
+| Item | Notes |
+|---|---|
+| Toy control via XToys (F27) | 1. toy check (connect, test action, Lockation XToys script, Android background test) · 2. consequence type `toy` with wearer limits and emergency stop · 3. "while inside" with dead-man's switch |
+
 ## Open
 
 | Item | Notes |
