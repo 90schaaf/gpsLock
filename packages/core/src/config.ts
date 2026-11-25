@@ -112,6 +112,12 @@ export const ZoneSchema = z.object({
   reward: ZoneRewardSchema,
   actions: ZoneActionsSchema,
   reachabilityAck: ReachabilityAckSchema.optional(),
+  /**
+   * F26 – mystery zone: invisible to the wearer (map, rules, OwnTracks) until they walk into it. The wearer only knows how
+   * many hidden zones of which kind exist and the optional `hiddenHint`.
+   */
+  hidden: z.boolean().default(false),
+  hiddenHint: z.string().max(200).optional(),
 });
 export type Zone = z.infer<typeof ZoneSchema>;
 
@@ -336,6 +342,7 @@ export const LockationConfigSchema = z
       ids.add(z.id);
       if (new Set(z.roles).size !== z.roles.length) issue(['zones', i, 'roles'], 'duplicate role');
       if (z.roles.includes('forbidden') && z.roles.length > 1) issue(['zones', i, 'roles'], 'a forbidden zone cannot have other roles');
+      if (z.hidden && z.roles.includes('required')) issue(['zones', i, 'hidden'], 'a required zone cannot be hidden – the wearer has to know where to go');
       const f = forbiddenTimings(cfg, z);
       const ownTimings = ['firstWarningAfterMinutes', 'firstPenaltyAfterMinutes', 'repeatEveryMinutes', 'repeatWarningAfterMinutes'].some((k) => z.forbidden[k as keyof typeof z.forbidden] !== undefined);
       // Inherited timings are validated once at rule level; only zones with own values report here.
@@ -391,6 +398,7 @@ export const LockationConfigSchema = z
         const z = cfg.zones.find((x) => x.id === id);
         if (!z) issue(['rules', 'mission', 'zoneIds', i], `unknown zone "${id}"`);
         else if (z.roles.includes('forbidden')) issue(['rules', 'mission', 'zoneIds', i], `"${z.name}" is forbidden and cannot be a mission target`);
+        else if (z.hidden) issue(['rules', 'mission', 'zoneIds', i], `"${z.name}" is hidden and cannot be a mission target`);
       });
       if (!missionTargets(cfg).length) issue(['rules', 'mission', 'enabled'], 'add at least one zone that is not forbidden as a mission target');
       if (!M.random.enabled && !M.keyholderCanSend) issue(['rules', 'mission', 'random', 'enabled'], 'enable random missions or let the keyholder send missions');
@@ -536,8 +544,18 @@ export function owntracksMonitoring(cfg: LockationConfig): 1 | 2 {
   return cfg.tracking.heartbeatMinutes < 60 || forbidden || owntracksLocatorInterval(cfg) < 300 ? 2 : 1;
 }
 
-/** Zones a surprise mission may send the wearer to: the selected ones (or all), never forbidden zones. */
+/** Zones a surprise mission may send the wearer to: the selected ones (or all), never forbidden or hidden zones. */
 export function missionTargets(cfg: { zones: Zone[]; rules: { mission: { zoneIds: string[] } } }): Zone[] {
   const pick = cfg.rules.mission.zoneIds;
-  return cfg.zones.filter((z) => !z.roles.includes('forbidden') && (!pick.length || pick.includes(z.id)));
+  return cfg.zones.filter((z) => !z.roles.includes('forbidden') && !z.hidden && (!pick.length || pick.includes(z.id)));
+}
+
+/** F26 – hidden zones the wearer has not discovered yet. */
+export function isUndiscovered(z: Zone, revealed: Record<string, string>): boolean {
+  return z.hidden && !revealed[z.id];
+}
+
+/** The configuration as the wearer may see it: undiscovered hidden zones removed. */
+export function wearerVisibleConfig<C extends { zones: Zone[] }>(cfg: C, revealed: Record<string, string>): C {
+  return cfg.zones.some((z) => isUndiscovered(z, revealed)) ? { ...cfg, zones: cfg.zones.filter((z) => !isUndiscovered(z, revealed)) } : cfg;
 }

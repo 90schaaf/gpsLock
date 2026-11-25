@@ -1,5 +1,5 @@
 /** View models sent to the browser, Chaster metadata (F12) and privacy helpers (F9). */
-import { activeRoles, forbiddenTimings, type LockationConfig, owntracksMonitoring, type ZoneRole, zonesWithRole, missionTargets } from './config.js';
+import { activeRoles, forbiddenTimings, isUndiscovered, type LockationConfig, owntracksMonitoring, type ZoneRole, wearerVisibleConfig, zonesWithRole, missionTargets } from './config.js';
 import { describeConsequence, describeWhen, type Consequence } from './consequences.js';
 import { allowedHuntActions, allowedMissionActions, missionDeclinesLeft, type MissionActionType, type CheckinRecord, type HuntAction, huntDeadlineOf, huntRoute, huntScheduledStart, huntTotal, type PlannedConsequence, visibleCheckpoints } from './engine.js';
 import { earliestDeadline, effectivePrivacy, type LockationState, nextHeartbeatFrom, requiredSlots } from './state.js';
@@ -21,6 +21,8 @@ export interface ZoneView {
   windowActive: boolean;
   /** F17 – the keyholder confirmed this place is intentionally hard to reach. */
   reachabilityNote?: string;
+  /** F26 – hidden zone (keyholder view: still hidden from the wearer; wearer view: discovered). */
+  hidden?: 'hidden' | 'discovered';
 }
 
 export interface RuleSummary {
@@ -60,6 +62,8 @@ export interface SessionView {
   /** F16 – manual check-ins are disabled; location only via live tracking. */
   liveOnly: boolean;
   zones: ZoneView[];
+  /** F26 – hidden zones the wearer has not found yet: count per kind and the keyholder's hints. */
+  hiddenZones?: { count: number; forbidden: number; reward: number; other: number; hints: string[] };
   rules: RuleSummary[];
   /** Earliest required deadline (summary); details per zone in `requiredSlots`. */
   required?: { nextDeadline?: string; overdue: boolean; missedCount: number; lastValidAt?: string; graceMinutes: number };
@@ -302,8 +306,11 @@ const reachNote = (ack: { reasons: string[] } | undefined) => (ack ? `${ack.reas
 
 export function buildSessionView({ role, isSelfLock, config, state, history, now }: BuildViewInput): SessionView {
   const privacy = effectivePrivacy(config, state);
+  // F26 – the wearer never sees undiscovered hidden zones (map, rule texts).
+  const seen = role === 'wearer' ? wearerVisibleConfig(config, state.revealedZones) : config;
+  const undiscovered = config.zones.filter((z) => isUndiscovered(z, state.revealedZones));
 
-  const zones: ZoneView[] = config.zones.map((z) => {
+  const zones: ZoneView[] = seen.zones.map((z) => {
     const kinds = activeRoles(config, z);
     const windows: string[] = [];
     let windowActive = false;
@@ -315,7 +322,8 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
       windows.push(`Forbidden ${z.forbidden.windows.map(formatWindow).join(', ')}`);
       windowActive ||= !!activeWindowStart(z.forbidden.windows, now, config.timezone);
     }
-    return { id: z.id, name: z.name, lat: z.lat, lng: z.lng, radiusM: z.radiusM, kinds, windows, windowActive, reachabilityNote: reachNote(z.reachabilityAck) };
+    const hidden = z.hidden ? (state.revealedZones[z.id] ? 'discovered' : 'hidden') : undefined;
+    return { id: z.id, name: z.name, lat: z.lat, lng: z.lng, radiusM: z.radiusM, kinds, windows, windowActive, reachabilityNote: reachNote(z.reachabilityAck), ...(hidden ? { hidden } : {}) };
   });
 
   const view: SessionView = {
@@ -328,7 +336,16 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
     maxAccuracyM: config.antiCheat.maxAccuracyM,
     liveOnly: config.tracking.enabled && config.tracking.checkins === 'auto',
     zones,
-    rules: summarizeRules(config),
+    rules: summarizeRules(seen),
+    hiddenZones: undiscovered.length
+      ? {
+          count: undiscovered.length,
+          forbidden: undiscovered.filter((z) => z.roles.includes('forbidden')).length,
+          reward: undiscovered.filter((z) => z.roles.includes('reward')).length,
+          other: undiscovered.filter((z) => !z.roles.includes('forbidden') && !z.roles.includes('reward')).length,
+          hints: undiscovered.map((z) => z.hiddenHint?.trim()).filter((h): h is string => !!h),
+        }
+      : undefined,
     freezeUntil: state.freezeUntil,
     stats: { checkins: state.checkinCount, accepted: state.acceptedCount, lastCheckinAt: state.lastAttemptAt },
     history: history.map((h) => (privacy === 'exact' ? h : redactRecord(h))),

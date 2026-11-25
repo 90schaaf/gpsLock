@@ -122,6 +122,19 @@ Time amounts are multiplied by the number of steps. Movements flagged as implaus
 - **Safety:** the wearer can decline a mission ("can't right now") without penalty – by default once per day. The keyholder is told.
 - The wearer gets a push notification for each mission and a reminder shortly before the end.
 
+## Hidden zones (mystery zones)
+
+Tick **🔍 Hidden** on a zone in the Zones tab and the wearer won't see it – not on the map, not in the rules, not in OwnTracks.
+
+- The wearer only learns **how many** hidden zones of which kind exist ("2 hidden zones: 1 forbidden, 1 reward") and the
+  optional **hint** per zone ("somewhere near the lake").
+- **Walking into it reveals it**: the wearer gets a notification and the zone appears on the map for the rest of the lock.
+  Its rules apply as usual – a hidden forbidden zone starts its penalty timeline, a hidden reward zone pays out.
+- Works with forbidden, reward and neutral zones (with zone actions). **Required zones cannot be hidden**, and hidden zones
+  are never surprise-mission targets – the wearer has to know where to go.
+- Change notices during a lock never describe hidden zones – only "Hidden zones changed".
+- The keyholder always sees all zones (hidden ones dashed with 🔍). The reachability check still applies.
+
 ## Zone actions (enter / leave)
 
 Every zone – whatever its role, neutral too – can run consequences **when entering** and/or **when leaving** it

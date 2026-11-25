@@ -5,11 +5,11 @@ import { checked, Section, type TabProps } from '../shared.js';
 /** F25 – surprise missions: "be at zone X within N minutes" (never a forbidden zone). */
 export function MissionsTab({ config, edit, commands, setTab }: TabProps) {
   const M = config.rules.mission;
-  const eligible = config.zones.filter((z) => !z.roles.includes('forbidden'));
+  const eligible = config.zones.filter((z) => !z.roles.includes('forbidden') && !z.hidden);
   const targets = missionTargets(config);
   const toggleZone = (id: string, on: boolean) =>
     edit((d) => {
-      const all = d.zones.filter((z) => !z.roles.includes('forbidden')).map((z) => z.id);
+      const all = d.zones.filter((z) => !z.roles.includes('forbidden') && !z.hidden).map((z) => z.id);
       const cur = new Set(d.rules.mission.zoneIds.length ? d.rules.mission.zoneIds : all);
       if (on) cur.add(id);
       else cur.delete(id);
@@ -21,12 +21,12 @@ export function MissionsTab({ config, edit, commands, setTab }: TabProps) {
       title="Surprise missions"
       enabled={M.enabled}
       onToggle={(v) => edit((d) => { d.rules.mission.enabled = v; })}
-      help='"Be at the café by 14:30!" – at a random time (or sent by the keyholder) the wearer has to reach one of the zones below in time. Forbidden zones are never mission targets.'
+      help='"Be at the café by 14:30!" – at a random time (or sent by the keyholder) the wearer has to reach one of the zones below in time. Forbidden and hidden zones are never mission targets.'
     >
       <h3>Target zones</h3>
       {eligible.length === 0 ? (
         <p class="small muted">
-          No zone can be a target yet – missions only go to zones that are not forbidden.{' '}
+          No zone can be a target yet – missions only go to zones that are neither forbidden nor hidden.{' '}
           <button class="link" onClick={() => setTab('zones')}>Add a zone</button>
         </p>
       ) : (

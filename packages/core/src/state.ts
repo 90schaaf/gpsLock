@@ -97,6 +97,8 @@ export const LockationStateSchema = z.object({
     .default({}),
   /** Last run of the enter / leave actions per zone (cooldown). */
   zoneActions: z.record(z.object({ lastEnter: iso.optional(), lastLeave: iso.optional() })).default({}),
+  /** F26 – hidden zones the wearer discovered (zone id → time). */
+  revealedZones: z.record(iso).default({}),
   /** F14 – zones the wearer is currently in (since = first seen, lastSeen = latest observation inside). */
   presence: z.record(z.object({ since: iso, lastSeen: iso })).default({}),
   tracking: z

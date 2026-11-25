@@ -17,7 +17,15 @@ export function diffConfig(before: LockationConfig, after: LockationConfig): str
   const oldZones = new Map(before.zones.map((z) => [z.id, z]));
   const newZones = new Map(after.zones.map((z) => [z.id, z]));
 
+  // F26 – hidden zones are never described (name, place, role); only that something about them changed.
+  const isHidden = (id: string) => !!(oldZones.get(id)?.hidden || newZones.get(id)?.hidden);
+  const hiddenOf = (c: LockationConfig) => c.zones.filter((z) => isHidden(z.id));
+  if (!same(hiddenOf(before), hiddenOf(after))) {
+    const n = after.zones.filter((z) => z.hidden).length;
+    out.push(`Hidden zones changed (${n ? `now ${n} hidden ${n === 1 ? 'zone' : 'zones'}` : 'none left'}).`);
+  }
   for (const z of after.zones) {
+    if (isHidden(z.id)) continue;
     const o = oldZones.get(z.id);
     if (!o) {
       out.push(`Zone "${z.name}" added (${roleText(z)}, ${Math.round(z.radiusM)} m).`);
@@ -52,7 +60,7 @@ export function diffConfig(before: LockationConfig, after: LockationConfig): str
       out.push(`"${z.name}" zone actions: entering ${cons(a.onEnter)}; leaving ${cons(a.onLeave)}${a.minStayMinutes ? ` (after ${fmtMinutes(a.minStayMinutes)})` : ''}.`);
     }
   }
-  for (const o of before.zones) if (!newZones.has(o.id)) out.push(`Zone "${o.name}" removed.`);
+  for (const o of before.zones) if (!newZones.has(o.id) && !isHidden(o.id)) out.push(`Zone "${o.name}" removed.`);
 
   const R0 = before.rules;
   const R1 = after.rules;

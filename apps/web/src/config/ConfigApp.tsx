@@ -174,7 +174,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
   const flagged = (id: string) => reach[id]?.state === 'out_of_reach';
   const circles: MapCircle[] = isHunt
     ? R.hunt.checkpoints.map((c, i) => ({ id: c.id, lat: c.lat, lng: c.lng, radiusM: c.radiusM, color: ZONE_COLORS.hunt, label: `${flagged(c.id) ? '⚠ ' : ''}${i + 1}. ${c.name}`, draggable: true, selected: c.id === selected }))
-    : config.zones.map((z) => ({ id: z.id, lat: z.lat, lng: z.lng, radiusM: z.radiusM, color: zoneColor(z), label: `${flagged(z.id) ? '⚠ ' : ''}${z.name}`, draggable: true, selected: z.id === selected }));
+    : config.zones.map((z) => ({ id: z.id, lat: z.lat, lng: z.lng, radiusM: z.radiusM, color: zoneColor(z), label: `${flagged(z.id) ? '⚠ ' : ''}${z.hidden ? '🔍 ' : ''}${z.name}`, draggable: true, selected: z.id === selected, dashed: z.hidden }));
 
   const accepted = disclaimerAccepted(config);
   const tabIssues = issuesForTab(issues, tab, config);
@@ -198,7 +198,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
     } else {
       const id = newId('z');
       edit((d) => {
-        d.zones.push({ id, name: (name ?? `Zone ${d.zones.length + 1}`).slice(0, 60), lat: p.lat, lng: p.lng, radiusM: 150, roles: [], required: { intervalCheckins: true, stayWindows: [], onMissed: [], onSuccess: [], onOutsideDuringWindow: [] }, forbidden: { windows: [], onEnter: [] }, reward: { onEnter: [] }, actions: { onEnter: [], onLeave: [], minStayMinutes: 0, cooldownMinutes: 0 } });
+        d.zones.push({ id, name: (name ?? `Zone ${d.zones.length + 1}`).slice(0, 60), lat: p.lat, lng: p.lng, radiusM: 150, roles: [], required: { intervalCheckins: true, stayWindows: [], onMissed: [], onSuccess: [], onOutsideDuringWindow: [] }, forbidden: { windows: [], onEnter: [] }, reward: { onEnter: [] }, actions: { onEnter: [], onLeave: [], minStayMinutes: 0, cooldownMinutes: 0 }, hidden: false });
       });
       setSelected(id);
       if (tab !== 'zones') setTab('zones');

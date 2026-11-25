@@ -2,6 +2,8 @@
 
 ## 2026-11-25
 
+- **Hidden zones (F26):** zone flag `hidden` + `hiddenHint`; invisible to the wearer (view, rules, OwnTracks, change notices)
+  until entered (`state.revealedZones`); the wearer sees the count per kind and the hints. Not for required zones, no mission targets.
 - **Surprise missions (F25):** `rules.mission` – random (every n min ±50 %, within active hours) or sent by the keyholder:
   reach a non-forbidden zone within `leadMinutes`; `onSuccess` / `onFail`, reminder, penalty-free declines per day,
   keyholder cancel. `state.mission`, `/api/mission`, keyholder notification switch `mission`, Missions tab, mission card.

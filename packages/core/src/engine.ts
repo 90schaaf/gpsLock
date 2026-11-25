@@ -417,6 +417,7 @@ function runRules(config: LockationConfig, state: LockationState, fix: Fix | und
   const presentBefore = new Set(Object.keys(state.presence));
   const left = updatePresence(config, state, fix, inside, at, o.forced);
   const entered = Object.keys(state.presence).filter((id) => !presentBefore.has(id));
+  discoverZones(config, state, entered, at, plan);
   evalZoneActions(config, state, entered, left, rctx, plan);
 
   evalHunt(config, state, fix, rctx, plan, o.source === 'manual' ? o.purpose : 'general', o.forcedCheckpoint);
@@ -1393,4 +1394,25 @@ export function startRandomMissionNow(config: LockationConfig, prevState: Lockat
   const plan = new Planner(ctx);
   startMission(config, state, candidates[Math.floor((ctx.rng ?? Math.random)() * candidates.length)]!, 'random', m.leadMinutes, ctx.now, plan);
   return { state, consequences: plan.list, events: plan.events, notices: plan.finish() };
+}
+
+// ---------- F26 hidden zones ----------
+
+/** Entering a hidden zone reveals it to the wearer (map, rules, OwnTracks) for the rest of the lock. */
+function discoverZones(config: LockationConfig, state: LockationState, entered: string[], at: Date, plan: Planner) {
+  for (const id of entered) {
+    const z = config.zones.find((x) => x.id === id);
+    if (!z?.hidden || state.revealedZones[id]) continue;
+    state.revealedZones[id] = at.toISOString();
+    const kind = z.roles.includes('forbidden') ? 'forbidden zone' : z.roles.includes('reward') ? 'reward zone' : 'zone';
+    plan.event(`Hidden ${kind} discovered: "${z.name}".`);
+    plan.notify({
+      audience: 'wearer',
+      title: '🔍 Hidden zone discovered',
+      message: `You found the hidden ${kind} "${z.name}"${z.roles.includes('forbidden') ? ' – leave it quickly!' : '.'}`,
+      priority: z.roles.includes('forbidden') ? 'high' : 'default',
+      key: `hidden:${id}`,
+      zoneId: id,
+    });
+  }
 }

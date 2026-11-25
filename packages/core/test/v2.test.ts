@@ -11,6 +11,7 @@ import {
   MissionActionError,
   missionDeclinesLeft,
   startRandomMissionNow,
+  missionTargets,
   buildSessionView,
   diffConfig,
   evaluateCheckin,
@@ -658,5 +659,55 @@ describe('surprise missions (F25)', () => {
       const res = startRandomMissionNow(c, initialState(c, T0), mctx(T0, () => i / 20));
       expect(res.state.mission.active!.zoneId).not.toBe('bar');
     }
+  });
+});
+
+describe('hidden zones (F26)', () => {
+  const zonesH = [
+    zone('home', 'Home', HOME, { roles: ['required'] }),
+    zone('bar', 'Secret bar', BAR, { roles: ['forbidden'], hidden: true, hiddenHint: 'somewhere north-west' }),
+    zone('gym', 'Treasure', GYM, { roles: ['reward'], hidden: true }),
+  ];
+  const hcfg = () => cfg({ version: 2, zones: zonesH, rules: { forbidden: { enabled: true, firstWarningAfterMinutes: null, firstPenaltyAfterMinutes: 0, onEnter: [{ type: 'add_time', seconds: 3600 }] }, reward: { enabled: true, onEnter: [{ type: 'remove_time', seconds: 600 }] } } });
+  const wview = (c: LockationConfig, s: LockationState) => buildSessionView({ role: 'wearer', isSelfLock: false, config: c, state: s, history: [], now: T0 });
+
+  it('validation: a required zone cannot be hidden; hidden zones are no mission targets', () => {
+    const base = { version: 2, timezone: 'Europe/Zurich' };
+    expect(parseConfig({ ...base, zones: [zone('a', 'A', HOME, { roles: ['required'], hidden: true })] }).ok).toBe(false);
+    expect(parseConfig({ ...base, zones: [zone('a', 'A', HOME), zone('b', 'B', GYM, { hidden: true })], rules: { mission: { enabled: true, zoneIds: ['b'] } } }).ok).toBe(false);
+    const c = parseConfig({ ...base, zones: [zone('a', 'A', HOME), zone('b', 'B', GYM, { hidden: true })], rules: { mission: { enabled: true } } });
+    expect(c.ok && missionTargets(c.config).map((z) => z.id)).toEqual(['a']);
+  });
+
+  it('the wearer sees only the count and hints; the keyholder sees everything', () => {
+    const c = hcfg();
+    const s = initialState(c, T0);
+    const v = wview(c, s);
+    expect(v.zones.map((z) => z.id)).toEqual(['home']);
+    expect(JSON.stringify(v.rules)).not.toMatch(/Secret bar|Treasure/);
+    expect(v.hiddenZones).toEqual({ count: 2, forbidden: 1, reward: 1, other: 0, hints: ['somewhere north-west'] });
+    const k = buildSessionView({ role: 'keyholder', isSelfLock: false, config: c, state: s, history: [], now: T0 });
+    expect(k.zones.find((z) => z.id === 'bar')!.hidden).toBe('hidden');
+    expect(owntracksWaypoints(c, s).command.waypoints.waypoints.map((w: any) => w.desc)).toEqual(['Home']);
+  });
+
+  it('walking into a hidden zone reveals it and its rule still applies', () => {
+    const r = new Run(hcfg());
+    const res = r.checkin(BAR, minutes(T0, 5));
+    expect(types(res)).toContain('add_time');
+    expect(wearer(res.notices).some((n) => n.title === '🔍 Hidden zone discovered')).toBe(true);
+    const v = wview(r.config, r.state);
+    expect(v.zones.map((z) => z.id)).toEqual(['home', 'bar']);
+    expect(v.zones.find((z) => z.id === 'bar')!.hidden).toBe('discovered');
+    expect(v.hiddenZones).toMatchObject({ count: 1, reward: 1 });
+    expect(owntracksWaypoints(r.config, r.state).command.waypoints.waypoints.map((w: any) => w.desc)).toEqual(['Home', 'Secret bar']);
+  });
+
+  it('change notices never describe hidden zones', () => {
+    const before = hcfg();
+    const after = cfg({ version: 2, zones: [...zonesH, zone('x', 'New trap', north(HOME, 2000), { roles: ['forbidden'], hidden: true })], rules: { forbidden: { enabled: true }, reward: { enabled: true } } });
+    const d = diffConfig(before, after);
+    expect(d.join(' ')).not.toMatch(/New trap|Secret bar|Treasure/);
+    expect(d).toContain('Hidden zones changed (now 3 hidden zones).');
   });
 });
