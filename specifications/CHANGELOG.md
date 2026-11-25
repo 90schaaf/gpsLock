@@ -2,7 +2,7 @@
 
 ## 2026-11-25
 
-- **Surprise missions (F25):** `rules.mission` – random (every n h ±50 %, within active hours) or sent by the keyholder:
+- **Surprise missions (F25):** `rules.mission` – random (every n min ±50 %, within active hours) or sent by the keyholder:
   reach a non-forbidden zone within `leadMinutes`; `onSuccess` / `onFail`, reminder, penalty-free declines per day,
   keyholder cancel. `state.mission`, `/api/mission`, keyholder notification switch `mission`, Missions tab, mission card.
 - **Random hunt route:** `rules.hunt.random {enabled, min, max}` – at the start (or first evaluation of a running hunt) N ∈ [min, max]

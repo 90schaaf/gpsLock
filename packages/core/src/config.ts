@@ -256,7 +256,7 @@ export type CoordinatePrivacy = 'zone_only' | 'exact';
 
 /**
  * F25 – surprise missions: "be at zone X within N minutes". Targets are never forbidden zones. Random missions come on
- * average every `everyHours` (±50 %) and only within the active hours; the keyholder can also send one by hand.
+ * average every `everyMinutes` (±50 %) and only within the active hours; the keyholder can also send one by hand.
  */
 export const MissionRuleSchema = z
   .object({
@@ -268,7 +268,7 @@ export const MissionRuleSchema = z
     random: z
       .object({
         enabled: z.boolean().default(true),
-        everyHours: z.number().min(0.5).max(168).default(4),
+        everyMinutes: z.number().int().min(5).max(10_080).default(240),
         /** Random missions only start within these hours (lock timezone). Same start and end = all day. */
         activeHours: z.object({ start: hhmm, end: hhmm }).default({ start: '09:00', end: '21:00' }),
       })

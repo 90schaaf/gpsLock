@@ -55,7 +55,7 @@ const FIELD: Record<string, string> = {
   zoneIds: 'Target zones',
   leadMinutes: 'Time to get there',
   declinesPerDay: 'Declines per day',
-  everyHours: 'On average every',
+  everyMinutes: 'On average every',
   minDistanceM: 'Minimum distance',
   random: 'Random route',
   min: 'At least',

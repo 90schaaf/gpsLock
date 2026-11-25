@@ -199,7 +199,7 @@ while open, cleared afterwards. 8. Waypoints per reveal mode, re-push after a fi
 - **Targets:** `zoneIds` (empty = all) – **never forbidden zones** (validation rejects them; at least one target needed).
   Random missions skip zones the wearer is in (presence) and zones closer than `minDistanceM` to the last accepted
   position; the previous target only if nothing else is left.
-- **Random missions** (`random {enabled, everyHours, activeHours}`): the next one is scheduled `everyHours × (0.5 … 1.5)` after
+- **Random missions** (`random {enabled, everyMinutes, activeHours}`): the next one is scheduled `everyMinutes × (0.5 … 1.5)` after
   the previous one ended (or the first tick); only within the active hours (lock timezone, start = end → all day),
   otherwise moved into the next window. Missions are started by the tick (`state.mission.nextRandomAt`).
 - **Keyholder** (`keyholderCanSend`): send a mission by hand (zone, 5–720 min) or cancel the running one. Not on self-locks.

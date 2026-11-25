@@ -1212,7 +1212,7 @@ function scheduleRandomMission(config: LockationConfig, state: LockationState, f
     state.mission.nextRandomAt = undefined;
     return;
   }
-  let at = new Date(from.getTime() + m.random.everyHours * 60 * MINUTE * (0.5 + rng()));
+  let at = new Date(from.getTime() + m.random.everyMinutes * MINUTE * (0.5 + rng()));
   const quiet = missionQuiet(config);
   if (isInQuietHours(at, quiet, config.timezone)) at = new Date(adjustForQuietHours(at, quiet, config.timezone).getTime() + Math.floor(rng() * 60) * MINUTE);
   state.mission.nextRandomAt = at.toISOString();

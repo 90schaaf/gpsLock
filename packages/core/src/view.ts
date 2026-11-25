@@ -246,7 +246,7 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
       title: 'Surprise missions',
       lines: [
         ...(mission.random.enabled
-          ? [`At random times (on average every ${fmtMinutes(Math.round(mission.random.everyHours * 60))}${hours.start === hours.end ? '' : `, between ${hours.start} and ${hours.end}`}) you are sent to one of these zones: ${names}.`]
+          ? [`At random times (on average every ${fmtMinutes(mission.random.everyMinutes)}${hours.start === hours.end ? '' : `, between ${hours.start} and ${hours.end}`}) you are sent to one of these zones: ${names}.`]
           : []),
         ...(mission.keyholderCanSend ? [`The keyholder can send you to one of these zones at any time${mission.random.enabled ? '' : `: ${names}`}.`] : []),
         `You have ${fmtMinutes(mission.leadMinutes)} to get there (by check-in or background location). In time: ${list(mission.onSuccess)}. Too late: ${list(mission.onFail)}.`,

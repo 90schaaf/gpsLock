@@ -1,4 +1,4 @@
-import { missionTargets } from '@lockation/core';
+import { fmtMinutes, missionTargets } from '@lockation/core';
 import { ConsequenceEditor, NumberField } from '../editors.js';
 import { checked, Section, type TabProps } from '../shared.js';
 
@@ -54,7 +54,7 @@ export function MissionsTab({ config, edit, commands, setTab }: TabProps) {
         </label>
         {M.random.enabled && (
           <div class="grid2">
-            <NumberField path="rules.mission.random.everyHours" label="On average every" suffix="hours (±50 %)" min={0.5} max={168} step={0.5} value={M.random.everyHours} onChange={(v) => edit((d) => { d.rules.mission.random.everyHours = v ?? 4; })} />
+            <NumberField path="rules.mission.random.everyMinutes" label="On average every" suffix="minutes (±50 %)" min={5} max={10080} value={M.random.everyMinutes} hint={`≈ ${fmtMinutes(M.random.everyMinutes)}, randomly between ${fmtMinutes(Math.round(M.random.everyMinutes / 2))} and ${fmtMinutes(Math.round(M.random.everyMinutes * 1.5))}.`} onChange={(v) => edit((d) => { d.rules.mission.random.everyMinutes = v ?? 240; })} />
             <NumberField path="rules.mission.minDistanceM" label="Minimum distance" suffix="m from the wearer" min={0} value={M.minDistanceM} onChange={(v) => edit((d) => { d.rules.mission.minDistanceM = v ?? 0; })} />
             <label class="field">
               {`Only from (lock time zone: ${config.timezone})`}

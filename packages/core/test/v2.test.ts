@@ -629,7 +629,7 @@ describe('surprise missions (F25)', () => {
   });
 
   it('random missions only start within the active hours', () => {
-    const r = new Run(mcfg({ random: { everyHours: 10, activeHours: { start: '09:00', end: '21:00' } } }));
+    const r = new Run(mcfg({ random: { everyMinutes: 600, activeHours: { start: '09:00', end: '21:00' } } }));
     r.tick(T0); // 12:00 local + 10 h = 22:00 local → moved to 09:00 local + 30 min (rng 0.5)
     expect(r.state.mission.nextRandomAt).toBe('2026-06-02T07:30:00.000Z');
   });
