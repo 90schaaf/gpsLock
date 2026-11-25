@@ -121,12 +121,14 @@ Missing or corrupt state is replaced by a fresh initial state.
 
 ## Planned: toy control (F27)
 
-- Config: `rules.toy {enabled, onEmergencyStop: Consequence[]}`, zone `toy.whileInside? {action, intensity, pattern?}`,
-  consequence `{type: "toy", action, intensity, seconds, pattern?}`.
-- State: `toy {connectedAt?, verifiedAt?, disclaimerVersion?, limits {maxIntensity, maxSeconds, allowedHours?}, running?
-  {source, until}, lastActionAt?}` – the Webhook ID is **not** in the state.
+- Config: `rules.toy {enabled, onEmergencyStop: Consequence[], required?: {offlineMinutes, warnBeforeMinutes?, onOffline:
+  Consequence[]}, pingMinutes}`, zone `toy.whileInside? {action, target, intensity, pattern?}`, consequence `{type: "toy",
+  action, target, intensity, seconds, pattern?}`; `target` = `"genitals" | "anal" | "nipples" | "other" | "all"`.
+- State: `toy {connectedAt?, verifiedAt?, disclaimerVersion?, toys: [{id, name, bodyPart, maxIntensity, maxSeconds}],
+  liveness {status, lastPongAt?, nextPingAt?, missedCount}, running: {[toyId]: {source, until}}, emergencyStops}` – the
+  Webhook ID is **not** in the state.
 - D1 `toys`: `session_id` (PK), `webhook_id`, `created_at` – deleted on disconnect and on session end.
-- API: `/api/toy/connect {mainToken, webhookId, limits, disclaimerVersion}` (wearer), `/api/toy/test {mainToken}`,
+- API: `/api/toy/connect {mainToken, webhookId, toys, disclaimerVersion}` (wearer), `/api/toy/test {mainToken}`,
   `/api/toy/confirm {mainToken}`, `/api/toy/emergency-stop {mainToken}` (wearer; applies `onEmergencyStop`).
 
 ## Worker HTTP API
