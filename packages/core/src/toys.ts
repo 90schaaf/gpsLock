@@ -134,7 +134,15 @@ export const xtoysWebsocketUrl = (webhookId: string) => `wss://webhook.xtoys.app
 
 // ---------- the generated XToys script ----------
 
-const WEBHOOK = 'local-webhook-a';
+/**
+ * The cloud webhook block (`webhook`, reached via https://webhook.xtoys.app/<id>). Not `local-webhook` – that one only
+ * listens on the phone's local network. Reference: the Bondage Club XToys integration's script.
+ */
+const WEBHOOK = 'webhook-a';
+
+/** Webhook keys passed into the JavaScript (XToys injects them via the action's `variables` list as `t_<key>`). */
+export const TOY_WEBHOOK_KEYS = ['cmd', 'slot', 'ch', 'shape', 'level', 'delta', 'seconds'] as const;
+const injected = (keys: readonly string[]) => keys.map((k) => ({ name: `t_${k}`, value: `trigger-${k}`, expression: null }));
 
 /**
  * ES5 JavaScript of the `lockation` webhook trigger (runs inside XToys' JS interpreter). `SLOTS` is injected:
@@ -143,7 +151,9 @@ const WEBHOOK = 'local-webhook-a';
 function proxyCode(slots: Record<string, { channels: number; max: number[] }>): string {
   return `// Lockation proxy – generated, do not edit (re-download it from the Lockation toy page instead).
 var SLOTS = ${JSON.stringify(slots)};
-function tv(k, d) { var v = getVariable('trigger-' + k); return (v === undefined || v === null || v === '') ? d : v; }
+var TV = { ${TOY_WEBHOOK_KEYS.map((k) => `${k}: typeof t_${k} === 'undefined' ? undefined : t_${k}`).join(', ')} };
+// A key that was not sent may arrive empty or as the unresolved name ("trigger-delta" / "{trigger-delta}").
+function tv(k, d) { var v = TV[k]; if (v === undefined || v === null) return d; v = String(v); return (v === '' || v.indexOf('trigger-') >= 0) ? d : v; }
 function num(v, d) { var n = Number(v); return isNaN(n) ? d : n; }
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, Math.round(v))); }
 function chans(s, ch) { var out = []; if (ch === 'all') { for (var i = 1; i <= SLOTS[s].channels; i++) out.push(String(i)); } else out.push(ch); return out; }
@@ -218,7 +228,7 @@ callAction({ type: 'updateComponent', channel: '${WEBHOOK}', action: 'send', for
 export function buildXToysScript(setup: ToySetup) {
   const slots = toySlots(setup);
   const meta: Record<string, { channels: number; max: number[] }> = {};
-  const channels: Record<string, unknown> = { [WEBHOOK]: { name: null, type: 'local-webhook', outbound: true, hideWebhookInfo: false } };
+  const channels: Record<string, unknown> = { [WEBHOOK]: { type: 'webhook', outbound: true, hideWebhookInfo: false } };
   const initialActions: unknown[] = [];
   for (const t of setup.toys) {
     const slot = slots[t.id]!;
@@ -247,7 +257,7 @@ export function buildXToysScript(setup: ToySetup) {
         actions: [
           // Shown first and without JavaScript: proves the call arrived and which values XToys passed on.
           { type: 'updateScript', action: 'setText', text: 'Lockation received: {trigger-cmd} {trigger-slot} ch {trigger-ch} level {trigger-level}' },
-          { type: 'customCode', code: proxyCode(meta), resultVar: 'result' },
+          { type: 'customCode', code: proxyCode(meta), resultVar: 'result', variables: injected(TOY_WEBHOOK_KEYS), storeResult: false },
         ],
       },
       // Debug triggers without JavaScript: is the webhook connected at all, and do the toy slots react?
@@ -264,7 +274,7 @@ export function buildXToysScript(setup: ToySetup) {
           ),
         ],
       },
-      { type: 'componentState', action: 'getToys', channel: WEBHOOK, parsedAction: 'getToys', actions: [{ type: 'customCode', code: getToysCode(Object.keys(meta)), resultVar: 'result' }] },
+      { type: 'componentState', action: 'getToys', channel: WEBHOOK, parsedAction: 'getToys', actions: [{ type: 'customCode', code: getToysCode(Object.keys(meta)), resultVar: 'result', variables: [], storeResult: false }] },
     ],
     jobs: { Main: { steps: { START: { actions: [] } } } },
     queues: [],

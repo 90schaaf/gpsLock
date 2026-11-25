@@ -246,7 +246,9 @@ manual.
 - One XToys script, provided by Lockation and documented in the guide, receives every webhook call and **dispatches it to
   the right toy and channel** given in the request body. One webhook ID controls all toys of the wearer.
 - The script is **generated from the wearer's toy list** (`buildXToysScript`, format of the official export
-  `examples/xtoys/local webhook.json`): a `local-webhook` block (the private webhook, outbound enabled), one output slot per
+  `examples/xtoys/local webhook.json`; webhook block and variable injection as in the Bondage Club XToys integration): a
+  `webhook` block (the **cloud** private webhook, outbound enabled – *not* `local-webhook`, which only listens on the
+  phone's LAN), webhook keys injected into the JavaScript via the action's `variables` list (`t_<key>`), one output slot per
   toy (`part-vibrator`, `part-vibrator|part-vibrator`, `part-estim|part-estim`, key `<type>-a…h`), `setMaximum` per
   channel as initial actions (the wearer limits, enforced again in XToys), a `lockation` webhook trigger whose ES5 code
   dispatches `{cmd, slot, ch, shape, level, delta, seconds}` (`setVolume` / `setPattern` / `setShock2` with `actionChannel`

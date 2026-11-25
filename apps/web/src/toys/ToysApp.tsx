@@ -222,8 +222,8 @@ export function ToysApp({ fetchImpl = fetch }: { fetchImpl?: typeof fetch }) {
         <ol class="small" style={{ margin: 0, paddingLeft: '18px' }}>
           <li>Download the script (it is made for exactly the toys above – download it again after changes).</li>
           <li>In XToys, import it as a new script.</li>
-          <li>Connect the <strong>webhook block</strong> to your <strong>private webhook</strong> and enable <em>Script can send outbound messages</em>.</li>
-          <li>Connect each real toy to its slot (named like the toy above, e.g. “{setup.toys[0]?.name ?? 'Bullet'} ({setup.toys[0]?.bodyPart ?? 'genitals'})”) and start the script.</li>
+          <li>Start it. The script uses your account's <strong>Private Webhook</strong> (XToys → your profile) – enter that Webhook ID below. If XToys asks how to connect the webhook, choose the private (cloud) webhook, not the local one, and allow <em>Script can send outbound messages</em>.</li>
+          <li>Connect each real toy to its slot (named like the toy above, e.g. “{setup.toys[0]?.name ?? 'Bullet'} ({setup.toys[0]?.bodyPart ?? 'genitals'})”).</li>
         </ol>
         <div class="row">
           <button class="primary" disabled={!valid.success || setup.toys.length === 0} data-testid="toy-script" onClick={() => download('lockation-xtoys-script.json', JSON.stringify(buildXToysScript(setup), null, 2))}>

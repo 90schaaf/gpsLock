@@ -27,8 +27,9 @@ public or in a car), never use them while driving, e-stim never across the chest
    Set the **maximum intensity** (per channel) and the **maximum duration** of one action. These limits are applied by
    Lockation **and** built into the XToys script.
 2. **XToys script** – download it (it is made for exactly your toys; download it again after changes), import it in
-   XToys, connect the **webhook block** to your **private webhook** (enable *Script can send outbound messages*) and
-   connect each real toy to its slot. Start the script.
+   XToys, connect each real toy to its slot and start it. The script listens on your account's **Private Webhook**
+   (cloud) – if XToys asks how to connect the webhook, choose the private one, **not the local webhook** (that one only
+   works inside your own network), and allow *Script can send outbound messages*.
 3. **Webhook ID** – XToys → your profile → *Private Webhook*. Enter it on the test page. It stays in your browser (only
    if you tick *Remember*) and is never sent to Lockation.
 

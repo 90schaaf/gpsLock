@@ -14,13 +14,17 @@ const setup: ToySetup = ToySetupSchema.parse({
 function xtoys(script = buildXToysScript(setup)) {
   const vars: Record<string, string> = {};
   const calls: any[] = [];
-  const code = (action: string) => (script.globalTriggers.find((t) => t.action === action)!.actions as { type: string; code?: string }[]).find((a) => a.type === 'customCode')!.code!;
+  const action_ = (action: string) => (script.globalTriggers.find((t) => t.action === action)!.actions as { type: string; code?: string; variables?: { name: string; value: string }[] }[]).find((a) => a.type === 'customCode')!;
   let text = '';
   const run = (action: string, body: Record<string, string>, connected: Record<string, unknown[]> = {}) => {
     const scope: Record<string, string> = { ...vars };
     for (const [k, v] of Object.entries(body)) if (k !== 'action') scope[`trigger-${k}`] = v;
     calls.length = 0;
-    const fn = new Function('getVariable', 'setVariable', 'callAction', 'getConnectedBlocks', code(action));
+    const a = action_(action);
+    const injected = a.variables ?? [];
+    // Like XToys: a key that was not sent stays unresolved ("trigger-<key>").
+    const values = injected.map((v) => scope[v.value] ?? v.value);
+    const fn = new Function('getVariable', 'setVariable', 'callAction', 'getConnectedBlocks', ...injected.map((v) => v.name), a.code!);
     fn(
       (k: string) => scope[k],
       (k: string, v: string) => {
@@ -29,6 +33,7 @@ function xtoys(script = buildXToysScript(setup)) {
       },
       (a: any) => (a.type === 'updateScript' ? (text = a.text) : calls.push(a)),
       () => connected,
+      ...values,
     );
     return [...calls];
   };
@@ -71,7 +76,7 @@ describe('commands', () => {
 describe('generated XToys script', () => {
   it('has the webhook block, one slot per toy with caps, and stops everything at the end', () => {
     const s = buildXToysScript(setup);
-    expect(s.channels['local-webhook-a']).toMatchObject({ type: 'local-webhook', outbound: true });
+    expect(s.channels['webhook-a']).toMatchObject({ type: 'webhook', outbound: true });
     expect(s.channels['part-estim|part-estim-a']).toEqual({ type: 'part-estim|part-estim', name: 'E-stim box (genitals)' });
     expect(s.initialActions).toContainEqual({ type: 'updateComponent', channel: 'part-estim|part-estim-a', action: 'setMaximum', actionChannel: '2', percentVolume: '30' });
     expect(s.initialActions).toContainEqual({ type: 'updateComponent', channel: 'part-vibrator-a', action: 'setMaximum', actionChannel: 'all', percentVolume: '100' });
@@ -138,16 +143,17 @@ describe('debugging aids in the script', () => {
 
   it('reports JavaScript errors on the script screen instead of failing silently', () => {
     const lock = buildXToysScript(setup).globalTriggers.find((t) => t.action === 'lockation')!;
-    const code = (lock.actions as { type: string; code?: string }[]).find((a) => a.code)!.code!;
+    const act = (lock.actions as { type: string; code?: string; variables?: { name: string; value: string }[] }[]).find((a) => a.code)!;
     let text = '';
     const scope: Record<string, string> = { 'trigger-cmd': 'play', 'trigger-slot': 'part-vibrator-a', 'trigger-ch': 'all', 'trigger-level': '10', 'trigger-seconds': '2' };
-    new Function('getVariable', 'setVariable', 'callAction', code)(
+    new Function('getVariable', 'setVariable', 'callAction', ...act.variables!.map((v) => v.name), act.code!)(
       (k: string) => scope[k],
       () => undefined,
       (a: any) => {
         if (a.type === 'updateScript') text = a.text;
         else if (a.action === 'setPattern') throw new Error('unknown action setPattern');
       },
+      ...act.variables!.map((v) => scope[v.value] ?? v.value),
     );
     expect(text).toBe('Lockation: ERROR in play: unknown action setPattern');
   });
@@ -158,5 +164,25 @@ describe('debugging aids in the script', () => {
     const raw = t.find((x) => x.action === 'rawVolume')!.actions as any[];
     expect(raw.filter((a) => a.action === 'setVolume')).toHaveLength(6);
     expect(raw.every((a) => !a.code)).toBe(true);
+  });
+});
+
+describe('cloud webhook block', () => {
+  it('uses the "webhook" block (cloud), not "local-webhook" (LAN only), and injects the keys as variables', () => {
+    const s = buildXToysScript(setup);
+    expect(s.channels['webhook-a']).toEqual({ type: 'webhook', outbound: true, hideWebhookInfo: false });
+    expect(Object.values(s.channels).some((c: any) => c.type === 'local-webhook')).toBe(false);
+    const lock = s.globalTriggers.find((t) => t.action === 'lockation')!;
+    expect(lock.channel).toBe('webhook-a');
+    const act = (lock.actions as any[]).find((a) => a.type === 'customCode');
+    expect(act.variables).toContainEqual({ name: 't_level', value: 'trigger-level', expression: null });
+    expect(act.variables.map((v: any) => v.name)).toEqual(['t_cmd', 't_slot', 't_ch', 't_shape', 't_level', 't_delta', 't_seconds']);
+  });
+
+  it('treats keys that were not sent (unresolved "trigger-…") as missing', () => {
+    const x = xtoys();
+    x.run('lockation', toyCommand(setup, 'duo', { cmd: 'play', shape: 'constant', intensity: 60, seconds: 5, channel: 'A' }));
+    // "intensity" without delta: t_delta arrives as "trigger-delta" → absolute level is used
+    expect(x.run('lockation', toyCommand(setup, 'duo', { cmd: 'intensity', intensity: 30, channel: 'A' }))[0].percentVolume).toBe('30');
   });
 });
