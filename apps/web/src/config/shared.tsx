@@ -10,10 +10,12 @@ export type { Tab };
 export const TABS: { id: Tab; label: string }[] = [
   { id: 'zones', label: '🗺 Zones' },
   { id: 'required', label: '⏱ Required' },
+  { id: 'surprise', label: '🎁 Surprise' },
   { id: 'forbidden', label: '⛔ Forbidden' },
   { id: 'reward', label: '🏆 Reward' },
   { id: 'travel', label: '🚶 Travel' },
   { id: 'hunt', label: '🧭 Hunt' },
+  { id: 'mission', label: '🎯 Missions' },
   { id: 'tracking', label: '📡 Tracking' },
   { id: 'notify', label: '🔔 Notifications' },
   { id: 'anticheat', label: '🛡 Anti-cheat' },
@@ -37,6 +39,8 @@ export interface TabProps {
   setTab: (t: Tab) => void;
   /** A lock is running for this configuration. */
   running: boolean;
+  /** Demo-only actions (undefined outside the demo). */
+  demo?: { redrawHuntRoute(): Promise<{ drawn: boolean; names: string[] }> };
 }
 
 export const newId = (prefix: string) => `${prefix}${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
@@ -49,6 +53,7 @@ export function zoneColor(z: Zone): string {
   if (z.roles.includes('forbidden')) return ZONE_COLORS.forbidden;
   if (z.roles.includes('required')) return ZONE_COLORS.required;
   if (z.roles.includes('reward')) return ZONE_COLORS.reward;
+  if (z.roles.includes('surprise')) return ZONE_COLORS.surprise;
   return ZONE_COLORS.neutral;
 }
 

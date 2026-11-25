@@ -126,3 +126,79 @@ describe('hunt "Start at" uses the lock timezone', () => {
     unmount();
   });
 });
+
+describe('hunt tab: random route', () => {
+  it('a random hunt in the demo draws a route and shows its size', async () => {
+    const { MockBackend, demoConfig } = await import('../src/lib/mock-backend.js');
+    const m = new Map<string, string>();
+    const b = new MockBackend({ getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) });
+    const cfg = demoConfig();
+    const cps = [0, 1, 2].map((i) => ({ ...cfg.rules.hunt.checkpoints[0]!, id: `r${i}`, name: `R${i}`, lat: cfg.rules.hunt.checkpoints[0]!.lat + i * 0.003 }));
+    await b.configSave({ ...cfg, disclaimer: { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' }, rules: { ...cfg.rules, hunt: { ...cfg.rules.hunt, checkpoints: cps, random: { enabled: true, min: 2, max: 3 } } } });
+    const v = await b.session();
+    expect(v.hunt?.randomRoute).toMatchObject({ drawn: true, min: 2, max: 3, pool: 3 });
+    expect([2, 3]).toContain(v.hunt?.total);
+  });
+});
+
+describe('demo: draw a new random route', () => {
+  it('resets the hunt progress and draws a route within the range', async () => {
+    const { MockBackend, demoConfig } = await import('../src/lib/mock-backend.js');
+    const m = new Map<string, string>();
+    const b = new MockBackend({ getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) });
+    const cfg = demoConfig();
+    const base = cfg.rules.hunt.checkpoints[0]!;
+    const cps = [0, 1, 2, 3].map((i) => ({ ...base, id: `r${i}`, name: `R${i}`, lat: base.lat + i * 0.003 }));
+    await b.configSave({ ...cfg, disclaimer: { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' }, rules: { ...cfg.rules, hunt: { ...cfg.rules.hunt, checkpoints: cps, random: { enabled: true, min: 2, max: 3 } } } });
+    await b.session();
+    for (let i = 0; i < 5; i++) {
+      const r = await b.redrawHuntRoute();
+      expect(r.drawn).toBe(true);
+      expect(r.names.length).toBeGreaterThanOrEqual(2);
+      expect(r.names.length).toBeLessThanOrEqual(3);
+      expect(new Set(r.names).size).toBe(r.names.length);
+      const v = await b.session();
+      expect(v.hunt).toMatchObject({ index: 0, status: 'active', total: r.names.length });
+    }
+    expect(b.demoLog().some((l) => /new random route/.test(l.description))).toBe(true);
+  });
+});
+
+describe('surprise missions in the demo', () => {
+  it('starts a random mission (never a forbidden zone) and the wearer can decline it', async () => {
+    const { MockBackend, demoConfig } = await import('../src/lib/mock-backend.js');
+    const m = new Map<string, string>();
+    const b = new MockBackend({ getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) });
+    const cfg = demoConfig();
+    await b.configSave({ ...cfg, disclaimer: { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' }, rules: { ...cfg.rules, mission: { ...cfg.rules.mission, enabled: true, minDistanceM: 0 } } });
+    await b.session();
+    const v = await b.demoMissionNow();
+    const target = cfg.zones.find((z) => z.id === v.mission?.active?.zoneId);
+    expect(target).toBeDefined();
+    expect(target!.roles).not.toContain('forbidden');
+    expect(v.mission?.actions).toContain('decline');
+    const d = await b.missionAction({ type: 'decline' });
+    expect(d.mission).toMatchObject({ active: undefined, declinesLeft: 0, stats: { declined: 1 } });
+  });
+});
+
+describe('surprise zones', () => {
+  it('role chips: surprise excludes the other roles', async () => {
+    const { toggleRole, isValidRoleSet } = await import('../src/config/helpers.js');
+    expect(toggleRole(['required', 'reward'], 'surprise')).toEqual(['surprise']);
+    expect(toggleRole(['surprise'], 'reward')).toEqual(['reward']);
+    expect(toggleRole(['surprise'], 'surprise')).toEqual([]);
+    expect(isValidRoleSet(['surprise', 'reward'])).toBe(false);
+  });
+
+  it('map marks new, visited, used and holding surprise zones differently', async () => {
+    const { surpriseCircle } = await import('../src/main/SurpriseCard.js');
+    const z = (status: 'new' | 'visited' | 'used' | 'holding') => surpriseCircle({ id: 'g', name: 'Park', lat: 0, lng: 0, radiusM: 50, kinds: ['surprise'], windows: [], windowActive: false, surprise: { status, visits: status === 'new' ? 0 : 1, once: status === 'used' } });
+    expect(z('new')).toMatchObject({ label: '🎁 Park' });
+    expect(z('new').dashed).toBeFalsy();
+    expect(z('visited')).toMatchObject({ label: '🎁✓ Park', dashed: true });
+    expect(z('used')).toMatchObject({ label: '✓ Park', dashed: true });
+    expect(z('holding')).toMatchObject({ label: '⏳ Park', selected: true });
+    expect(z('used').color).not.toBe(z('new').color);
+  });
+});

@@ -4,14 +4,16 @@
  */
 import {
   type Checkpoint,
+  type SurpriseOutcome,
   forbiddenTimings,
   type KeyholderNotifyKind,
   type LockationConfig,
   matchModeOf,
+  missionTargets,
   type Zone,
   zonesWithRole,
 } from './config.js';
-import { appliesAt, type Consequence, describeConsequence, scaleConsequence } from './consequences.js';
+import { appliesAt, type Consequence, describeConsequence, formatDuration, scaleConsequence } from './consequences.js';
 import { distanceBand, haversineM, isInside, roundCoord } from './geo.js';
 import {
   cloneState,
@@ -123,6 +125,8 @@ const PENALTY_SOURCES = new Set([
   'hunt.onWrong',
   'hunt.onTimeout',
   'hunt.onAbort',
+  'mission.onFail',
+  'surprise.onEarlyLeave',
   'antiCheat.implausible',
 ]);
 
@@ -255,6 +259,7 @@ export function evaluateCheckin(
   const plan = new Planner(ctx);
   const now = ctx.now;
   syncSlots(config, state, now);
+  ensureRoute(config, state, ctx.rng ?? Math.random);
   state.checkinCount += 1;
   state.lastAttemptAt = now.toISOString();
   const record = newRecord(config, state, ctx.evalId, now, fix, purpose, plan.events);
@@ -322,6 +327,7 @@ export function evaluateTracked(config: LockationConfig, prevState: LockationSta
   const plan = new Planner(ctx);
   const now = ctx.now;
   syncSlots(config, state, now);
+  ensureRoute(config, state, ctx.rng ?? Math.random);
   const fix = input.fix;
   const at = new Date(Math.min(fix?.timestamp ?? input.transition?.at ?? now.getTime(), now.getTime()));
 
@@ -414,12 +420,14 @@ function runRules(config: LockationConfig, state: LockationState, fix: Fix | und
   const left = updatePresence(config, state, fix, inside, at, o.forced);
   const entered = Object.keys(state.presence).filter((id) => !presentBefore.has(id));
   evalZoneActions(config, state, entered, left, rctx, plan);
+  evalSurprise(config, state, entered, left, rctx, plan);
 
   evalHunt(config, state, fix, rctx, plan, o.source === 'manual' ? o.purpose : 'general', o.forcedCheckpoint);
   evalRequired(config, state, inside, rctx, plan, o.source);
   if (fix || o.forced) evalStayWindows(config, state, inside, rctx, plan);
   evalForbidden(config, state, inside, left, zones, rctx, plan, o.source, ctx.now);
   evalReward(config, state, inside, left, zones, rctx, plan, o.source);
+  evalMission(config, state, inside, rctx, plan);
   if (fix && o.countDistance) evalTravel(config, state, fix, rctx, plan);
 }
 
@@ -483,13 +491,46 @@ function evalZoneActions(config: LockationConfig, state: LockationState, entered
 
 // ---------- F6 hunt ----------
 
+/**
+ * The checkpoints of this hunt in hunt order: the drawn random route, or all checkpoints. Before a random route is drawn
+ * the hunt has no checkpoints yet.
+ */
+export function huntRoute(config: LockationConfig, state: LockationState): Checkpoint[] {
+  const h = config.rules.hunt;
+  if (!h.random.enabled) return h.checkpoints;
+  if (!state.hunt.route) return [];
+  const byId = new Map(h.checkpoints.map((c) => [c.id, c]));
+  return state.hunt.route.map((id) => byId.get(id)).filter((c): c is Checkpoint => !!c);
+}
+
+/** Number of checkpoints the hunt will have (random route: drawn length, or the range before the draw). */
+export function huntTotal(config: LockationConfig, state: LockationState): number {
+  const h = config.rules.hunt;
+  return h.random.enabled && !state.hunt.route ? h.random.max : huntRoute(config, state).length;
+}
+
+/** Draw the random route once the hunt is running (uses the evaluation's random generator). */
+function ensureRoute(config: LockationConfig, state: LockationState, rng: () => number) {
+  const h = config.rules.hunt;
+  if (!h.enabled || !h.random.enabled || state.hunt.route || !['active', 'paused'].includes(state.hunt.status)) return;
+  const pool = [...h.checkpoints];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [pool[i], pool[j]] = [pool[j]!, pool[i]!];
+  }
+  const min = Math.min(h.random.min, pool.length);
+  const max = Math.min(Math.max(h.random.max, min), pool.length);
+  const n = min + Math.floor(rng() * (max - min + 1));
+  state.hunt.route = pool.slice(0, n).map((c) => c.id);
+}
+
 /** Checkpoints the wearer may see (and that may be synced to OwnTracks), with their status. */
 export function visibleCheckpoints(config: LockationConfig, state: LockationState): { cp: Checkpoint; index: number; status: 'found' | 'current' | 'open' | 'upcoming' }[] {
   const h = config.rules.hunt;
   if (!h.enabled) return [];
   if (state.hunt.status === 'not_started') return [];
   const found = new Set(state.hunt.found);
-  const all = h.checkpoints.map((cp, index) => {
+  const all = huntRoute(config, state).map((cp, index) => {
     let status: 'found' | 'current' | 'open' | 'upcoming';
     if (h.order === 'any') status = found.has(cp.id) ? 'found' : 'open';
     else status = index < state.hunt.index ? 'found' : index === state.hunt.index ? 'current' : 'upcoming';
@@ -505,7 +546,9 @@ function evalHunt(config: LockationConfig, state: LockationState, fix: Fix | und
   const hunt = config.rules.hunt;
   if (!hunt.enabled || state.hunt.status !== 'active') return;
   const isIn = (cp: Checkpoint) => cp.id === forcedCheckpoint || (!!fix && isInside(fix, cp, matchModeOf(config, cp)));
-  const total = hunt.checkpoints.length;
+  const route = huntRoute(config, state);
+  const total = route.length;
+  if (!total) return;
   const complete = () => {
     state.hunt.status = 'completed';
     plan.event(`Scavenger hunt completed – all ${total} checkpoints found!`);
@@ -519,7 +562,7 @@ function evalHunt(config: LockationConfig, state: LockationState, fix: Fix | und
 
   if (hunt.order === 'any') {
     const done = new Set(state.hunt.found);
-    const hits = hunt.checkpoints.filter((cp) => !done.has(cp.id) && isIn(cp));
+    const hits = route.filter((cp) => !done.has(cp.id) && isIn(cp));
     for (const cp of hits) {
       state.hunt.found.push(cp.id);
       found(cp, state.hunt.found.length);
@@ -532,7 +575,7 @@ function evalHunt(config: LockationConfig, state: LockationState, fix: Fix | und
       return;
     }
   } else {
-    const target = hunt.checkpoints[state.hunt.index];
+    const target = route[state.hunt.index];
     if (!target) return;
     if (isIn(target)) {
       state.hunt.index += 1;
@@ -546,7 +589,7 @@ function evalHunt(config: LockationConfig, state: LockationState, fix: Fix | und
 
   // Wrong guesses: only an explicit manual hunt guess, never with all targets visible.
   if (purpose !== 'hunt' || hunt.reveal === 'all' || !fix) return;
-  const open = hunt.order === 'any' ? hunt.checkpoints.filter((c) => !state.hunt.found.includes(c.id)) : [hunt.checkpoints[state.hunt.index]!];
+  const open = hunt.order === 'any' ? route.filter((c) => !state.hunt.found.includes(c.id)) : [route[state.hunt.index]!];
   const nearest = Math.min(...open.map((c) => haversineM(fix, c)));
   const band = distanceBand(nearest);
   state.hunt.lastDistanceBand = band;
@@ -862,6 +905,7 @@ export function evaluateTick(config: LockationConfig, prevState: LockationState,
   const plan = new Planner(ctx);
   const now = ctx.now;
   syncSlots(config, state, now);
+  ensureRoute(config, state, ctx.rng ?? Math.random);
 
   // F2 required: warnings before deadlines, then missed deadlines (per slot)
   const r = config.rules.required;
@@ -951,6 +995,7 @@ export function evaluateTick(config: LockationConfig, prevState: LockationState,
     const at = huntScheduledStart(config, state);
     if (at && now.getTime() >= at.getTime()) {
       startHunt(state, now);
+      ensureRoute(config, state, ctx.rng ?? Math.random);
       plan.event('Scavenger hunt started (scheduled).');
       plan.notify({ audience: 'wearer', title: 'Scavenger hunt started', message: 'Your scavenger hunt has started – open Lockation for the first checkpoint.', priority: 'high', key: 'hunt:started' });
       plan.notify({ audience: 'keyholder', kind: 'hunt', title: 'Lockation: hunt started', message: 'The scheduled scavenger hunt has started.', key: 'hunt:started' });
@@ -965,6 +1010,12 @@ export function evaluateTick(config: LockationConfig, prevState: LockationState,
       plan.notify({ audience: 'keyholder', kind: 'hunt', title: 'Lockation: hunt failed', message: 'The scavenger hunt time limit was exceeded.', key: 'hunt:failed' });
     }
   }
+
+  // F26 surprise zones: release holds that are over
+  tickSurprise(config, state, now, plan);
+
+  // F25 surprise missions: end overdue ones, remind, start random ones
+  tickMission(config, state, ctx, plan);
 
   // Live-only: random verification pictures
   const every = config.antiCheat.liveVerificationEveryHours;
@@ -1033,6 +1084,15 @@ export function nextDueAt(config: LockationConfig, state: LockationState, now: D
   if (h.enabled && state.hunt.status === 'active') push(huntDeadlineOf(config, state)?.getTime());
   if (h.enabled && state.hunt.status === 'not_started' && h.start === 'scheduled') push(huntScheduledStart(config, state)?.getTime());
   if (state.nextLiveVerification) push(Date.parse(state.nextLiveVerification));
+  if (config.rules.surprise.enabled) for (const st of Object.values(state.surprise.zones)) if (st.active) push(Date.parse(st.active.until));
+  const m = config.rules.mission;
+  if (m.enabled) {
+    const a = state.mission.active;
+    if (a) {
+      push(Date.parse(a.dueAt) + missionGraceMs(config));
+      if (m.warnBeforeMinutes && !a.warned) push(Date.parse(a.dueAt) - m.warnBeforeMinutes * MINUTE);
+    } else if (m.random.enabled) push(state.mission.nextRandomAt ? Date.parse(state.mission.nextRandomAt) : now.getTime());
+  }
   if (!times.length) return undefined;
   return new Date(Math.max(now.getTime(), Math.min(...times)));
 }
@@ -1102,6 +1162,7 @@ export function applyHuntAction(config: LockationConfig, prevState: LockationSta
   switch (action) {
     case 'start':
       startHunt(state, now);
+      ensureRoute(config, state, ctx.rng ?? Math.random);
       plan.event(`${who} started the scavenger hunt${actor === 'keyholder' && h.start !== 'keyholder' ? ' (forced)' : ''}.`);
       tell('Hunt started', `${who} started the scavenger hunt.`);
       break;
@@ -1135,5 +1196,320 @@ export function applyHuntAction(config: LockationConfig, prevState: LockationSta
       break;
   }
   trackFreeze(state, plan.list, now);
+  return { state, consequences: plan.list, events: plan.events, notices: plan.finish() };
+}
+
+// ---------- F25 surprise missions ----------
+
+export type MissionActionType = 'send' | 'decline' | 'cancel';
+export type MissionAction = { type: 'send'; zoneId: string; minutes?: number } | { type: 'decline' } | { type: 'cancel' };
+export class MissionActionError extends Error {}
+
+/** Late background locations (taken in time, delivered a bit later) still count: the mission fails after this grace. */
+export function missionGraceMs(config: LockationConfig): number {
+  return (config.tracking.enabled ? 5 : 1) * MINUTE;
+}
+
+/** Random missions start only within the active hours = outside these "quiet" hours. */
+const missionQuiet = (config: LockationConfig) => ({ start: config.rules.mission.random.activeHours.end, end: config.rules.mission.random.activeHours.start });
+
+function scheduleRandomMission(config: LockationConfig, state: LockationState, from: Date, rng: () => number) {
+  const m = config.rules.mission;
+  if (!m.enabled || !m.random.enabled) {
+    state.mission.nextRandomAt = undefined;
+    return;
+  }
+  let at = new Date(from.getTime() + m.random.everyMinutes * MINUTE * (0.5 + rng()));
+  const quiet = missionQuiet(config);
+  if (isInQuietHours(at, quiet, config.timezone)) at = new Date(adjustForQuietHours(at, quiet, config.timezone).getTime() + Math.floor(rng() * 60) * MINUTE);
+  state.mission.nextRandomAt = at.toISOString();
+}
+
+/** Penalty-free declines left today (lock timezone). */
+export function missionDeclinesLeft(config: LockationConfig, state: LockationState, now: Date): number {
+  const used = state.mission.declineDay === dayKey(now, config.timezone) ? state.mission.declinesToday : 0;
+  return Math.max(0, config.rules.mission.declinesPerDay - used);
+}
+
+/**
+ * Zones a random mission may pick right now: the mission targets (never forbidden) without the zones the wearer is in
+ * or close to; the previous target only if nothing else is left.
+ */
+export function missionCandidates(config: LockationConfig, state: LockationState): Zone[] {
+  const m = config.rules.mission;
+  const here = state.lastAccepted;
+  const far = missionTargets(config).filter((z) => !state.presence[z.id] && !(here && haversineM(here, z) - z.radiusM < m.minDistanceM));
+  const fresh = far.filter((z) => z.id !== state.mission.last?.zoneId);
+  return fresh.length ? fresh : far;
+}
+
+function startMission(config: LockationConfig, state: LockationState, zone: Zone, by: 'random' | 'keyholder', minutes: number, now: Date, plan: Planner) {
+  const m = config.rules.mission;
+  const id = now.toISOString();
+  const due = new Date(now.getTime() + minutes * MINUTE);
+  const at = formatLocalTime(due, config.timezone);
+  state.mission.active = { id, zoneId: zone.id, issuedAt: now.toISOString(), dueAt: due.toISOString(), by, warned: false };
+  state.mission.nextRandomAt = undefined;
+  plan.event(`Surprise mission${by === 'keyholder' ? ' from the keyholder' : ''}: be at "${zone.name}" by ${at}.`);
+  const decline = missionDeclinesLeft(config, state, now) ? " Can't right now? You can decline it in Lockation." : '';
+  plan.notify({
+    audience: 'wearer',
+    title: '🎯 Surprise mission',
+    message: `Be at "${zone.name}" by ${at} (${minutes} min). In time: ${list(m.onSuccess)}. Too late: ${list(m.onFail)}.${decline}`,
+    priority: 'high',
+    key: `mission:${id}:start`,
+  });
+  if (by === 'random') {
+    plan.notify({ audience: 'keyholder', kind: 'mission', title: 'Lockation: surprise mission', message: `The wearer was sent to "${zone.name}" (by ${at}).`, key: `mission:${id}:start` });
+  }
+}
+
+function endMission(config: LockationConfig, state: LockationState, outcome: 'success' | 'failed' | 'declined' | 'cancelled', at: Date, rng: () => number) {
+  const a = state.mission.active!;
+  state.mission.last = { zoneId: a.zoneId, outcome, at: at.toISOString() };
+  state.mission.active = undefined;
+  if (outcome === 'success') state.mission.succeeded += 1;
+  if (outcome === 'failed') state.mission.failed += 1;
+  if (outcome === 'declined') state.mission.declined += 1;
+  scheduleRandomMission(config, state, at, rng);
+}
+
+/** An accepted observation inside the target zone before the deadline completes the mission. */
+function evalMission(config: LockationConfig, state: LockationState, inside: Set<string>, ctx: EvalContext, plan: Planner) {
+  const m = config.rules.mission;
+  const a = state.mission.active;
+  if (!m.enabled || !a || !inside.has(a.zoneId)) return;
+  const t = ctx.now.getTime();
+  if (t < Date.parse(a.issuedAt) || t > Date.parse(a.dueAt)) return;
+  const name = config.zones.find((z) => z.id === a.zoneId)?.name ?? 'the target';
+  plan.addStable('mission.onSuccess', m.onSuccess, `mission:${a.id}:success`);
+  plan.event(`Surprise mission accomplished – arrived at "${name}" in time${m.onSuccess.length ? `: ${list(m.onSuccess)}` : ''}.`);
+  plan.notify({ audience: 'wearer', title: '🎯 Mission accomplished', message: `You made it to "${name}" in time${m.onSuccess.length ? `: ${list(m.onSuccess)}` : ''}.`, key: `mission:${a.id}:success` });
+  plan.notify({ audience: 'keyholder', kind: 'mission', title: 'Lockation: mission accomplished', message: `The wearer reached "${name}" in time.`, key: `mission:${a.id}:success` });
+  endMission(config, state, 'success', ctx.now, ctx.rng ?? Math.random);
+}
+
+function tickMission(config: LockationConfig, state: LockationState, ctx: EvalContext, plan: Planner) {
+  const m = config.rules.mission;
+  const now = ctx.now;
+  const rng = ctx.rng ?? Math.random;
+  if (!m.enabled) {
+    state.mission.active = undefined;
+    state.mission.nextRandomAt = undefined;
+    return;
+  }
+  const a = state.mission.active;
+  if (a) {
+    const zone = config.zones.find((z) => z.id === a.zoneId);
+    const due = Date.parse(a.dueAt);
+    if (!zone || zone.roles.includes('forbidden')) {
+      plan.event('Surprise mission cancelled – its zone was changed.');
+      endMission(config, state, 'cancelled', now, rng);
+    } else if (now.getTime() >= due + missionGraceMs(config)) {
+      plan.addStable('mission.onFail', m.onFail, `mission:${a.id}:fail`);
+      plan.event(`Surprise mission failed – not at "${zone.name}" in time${m.onFail.length ? `: ${list(m.onFail)}` : ''}.`);
+      plan.notify({ audience: 'wearer', title: '🎯 Mission failed', message: `You didn't reach "${zone.name}" in time${m.onFail.length ? `: ${list(m.onFail)}` : ''}.`, key: `mission:${a.id}:fail` });
+      plan.notify({ audience: 'keyholder', kind: 'mission', title: 'Lockation: mission failed', message: `The wearer didn't reach "${zone.name}" in time.`, key: `mission:${a.id}:fail` });
+      endMission(config, state, 'failed', now, rng);
+    } else if (m.warnBeforeMinutes && !a.warned && now.getTime() >= due - m.warnBeforeMinutes * MINUTE && now.getTime() < due) {
+      a.warned = true;
+      const left = Math.max(1, Math.round((due - now.getTime()) / MINUTE));
+      plan.notify({ audience: 'wearer', title: '🎯 Mission ends soon', message: `${left} min left to reach "${zone.name}". Too late: ${list(m.onFail)}.`, priority: 'high', key: `mission:${a.id}:warn` });
+    }
+  }
+  if (state.mission.active || !m.random.enabled) return;
+  if (!state.mission.nextRandomAt) {
+    scheduleRandomMission(config, state, now, rng);
+    return;
+  }
+  if (now.getTime() < Date.parse(state.mission.nextRandomAt)) return;
+  const quiet = missionQuiet(config);
+  const candidates = missionCandidates(config, state);
+  if (isInQuietHours(now, quiet, config.timezone) || !candidates.length) {
+    scheduleRandomMission(config, state, now, rng);
+    return;
+  }
+  startMission(config, state, candidates[Math.floor(rng() * candidates.length)]!, 'random', m.leadMinutes, now, plan);
+}
+
+/** Which mission actions an actor may perform right now. */
+export function allowedMissionActions(config: LockationConfig, state: LockationState, actor: Actor, now: Date, selfLock = false): MissionActionType[] {
+  const m = config.rules.mission;
+  if (!m.enabled) return [];
+  const a = state.mission.active;
+  const out: MissionActionType[] = [];
+  if (actor === 'keyholder' && !selfLock && !a && m.keyholderCanSend) out.push('send');
+  if (actor === 'wearer' && a && missionDeclinesLeft(config, state, now) > 0) out.push('decline');
+  if (actor === 'keyholder' && !selfLock && a) out.push('cancel');
+  return out;
+}
+
+/** Keyholder sends / cancels a mission, the wearer declines one. Throws `MissionActionError` if not allowed. */
+export function applyMissionAction(config: LockationConfig, prevState: LockationState, action: MissionAction, actor: Actor, ctx: EvalContext, selfLock = false): EvalResult {
+  const now = ctx.now;
+  if (!allowedMissionActions(config, prevState, actor, now, selfLock).includes(action.type)) {
+    throw new MissionActionError(`The ${actor} cannot ${action.type} a surprise mission right now.`);
+  }
+  const state = cloneState(prevState);
+  const plan = new Planner(ctx);
+  const m = config.rules.mission;
+  const rng = ctx.rng ?? Math.random;
+  switch (action.type) {
+    case 'send': {
+      const zone = missionTargets(config).find((z) => z.id === action.zoneId);
+      if (!zone) throw new MissionActionError('Pick one of the mission zones (forbidden zones cannot be mission targets).');
+      const minutes = action.minutes ?? m.leadMinutes;
+      if (!Number.isInteger(minutes) || minutes < 5 || minutes > 720) throw new MissionActionError('The time to get there must be 5–720 minutes.');
+      startMission(config, state, zone, 'keyholder', minutes, now, plan);
+      break;
+    }
+    case 'decline': {
+      const a = state.mission.active!;
+      const name = config.zones.find((z) => z.id === a.zoneId)?.name ?? 'the target';
+      const day = dayKey(now, config.timezone);
+      if (state.mission.declineDay !== day) {
+        state.mission.declineDay = day;
+        state.mission.declinesToday = 0;
+      }
+      state.mission.declinesToday += 1;
+      plan.event(`The wearer declined the surprise mission to "${name}" (no penalty).`);
+      plan.notify({ audience: 'keyholder', kind: 'mission', title: 'Lockation: mission declined', message: `The wearer can't go to "${name}" right now and declined the mission.`, key: `mission:${a.id}:declined` });
+      endMission(config, state, 'declined', now, rng);
+      break;
+    }
+    case 'cancel': {
+      const a = state.mission.active!;
+      plan.event('The keyholder cancelled the surprise mission.');
+      plan.notify({ audience: 'wearer', title: '🎯 Mission cancelled', message: 'The keyholder cancelled your surprise mission.', key: `mission:${a.id}:cancelled` });
+      endMission(config, state, 'cancelled', now, rng);
+      break;
+    }
+  }
+  trackFreeze(state, plan.list, now);
+  return { state, consequences: plan.list, events: plan.events, notices: plan.finish() };
+}
+
+/** Testing / demo: start a random mission now, ignoring the schedule and the active hours. */
+export function startRandomMissionNow(config: LockationConfig, prevState: LockationState, ctx: EvalContext): EvalResult {
+  const m = config.rules.mission;
+  if (!m.enabled) throw new MissionActionError('Surprise missions are not enabled.');
+  if (prevState.mission.active) throw new MissionActionError('A surprise mission is already running.');
+  const state = cloneState(prevState);
+  const candidates = missionCandidates(config, state);
+  if (!candidates.length) throw new MissionActionError('No mission zone is far enough away right now.');
+  const plan = new Planner(ctx);
+  startMission(config, state, candidates[Math.floor((ctx.rng ?? Math.random)() * candidates.length)]!, 'random', m.leadMinutes, ctx.now, plan);
+  return { state, consequences: plan.list, events: plan.events, notices: plan.finish() };
+}
+
+// ---------- F26 surprise zones ----------
+
+export type SurpriseAction = { type: 'release'; zoneId: string };
+export class SurpriseActionError extends Error {}
+
+function drawOutcome(outcomes: SurpriseOutcome[], rng: () => number): SurpriseOutcome | undefined {
+  const total = outcomes.reduce((a, o) => a + o.weight, 0);
+  let r = rng() * total;
+  for (const o of outcomes) {
+    r -= o.weight;
+    if (r < 0) return o;
+  }
+  return outcomes[outcomes.length - 1];
+}
+
+const outcomeOf = (z: Zone, id: string) => z.surprise.outcomes.find((o) => o.id === id);
+
+function releaseSurprise(z: Zone, o: SurpriseOutcome | undefined, st: LockationState['surprise']['zones'][string], by: 'time' | 'keyholder', plan: Planner) {
+  const a = st.active!;
+  st.active = undefined;
+  const cons = o?.onReleased ?? [];
+  plan.addStable('surprise.onReleased', cons, `surprise:${z.id}:${a.since}:released`);
+  plan.event(`Released from the surprise zone "${z.name}"${by === 'keyholder' ? ' by the keyholder' : ''}${cons.length ? `: ${list(cons)}` : ''}.`);
+  plan.notify({ audience: 'wearer', title: '🎁 Released', message: `You may leave "${z.name}" now${cons.length ? ` – ${list(cons)}` : ''}.`, priority: 'high', key: `surprise:${z.id}:${a.since}:released` });
+  if (by === 'time') plan.notify({ audience: 'keyholder', kind: 'surprise', title: 'Lockation: surprise zone', message: `The wearer stayed in "${z.name}" long enough and was released.`, key: `surprise:${z.id}:${a.since}:released` });
+}
+
+/** Entering draws an outcome (respecting once / repeat + cooldown); leaving during a hold is an early leave. */
+function evalSurprise(config: LockationConfig, state: LockationState, entered: string[], left: LeftZone[], ctx: EvalContext, plan: Planner) {
+  if (!config.rules.surprise.enabled) return;
+  const now = ctx.now;
+  for (const l of left) {
+    const st = state.surprise.zones[l.id];
+    const a = st?.active;
+    const z = config.zones.find((x) => x.id === l.id);
+    if (!a || !z) continue;
+    const o = outcomeOf(z, a.outcomeId);
+    if (l.end >= Date.parse(a.until)) {
+      releaseSurprise(z, o, st, 'time', plan);
+      continue;
+    }
+    st.active = undefined;
+    const cons = o?.onEarlyLeave ?? [];
+    plan.addStable('surprise.onEarlyLeave', cons, `surprise:${z.id}:${a.since}:early`);
+    plan.event(`Left the surprise zone "${z.name}" too early${cons.length ? `: ${list(cons)}` : ''}.`);
+    plan.notify({ audience: 'wearer', title: '🎁 Left too early', message: `You left "${z.name}" before you were released${cons.length ? `: ${list(cons)}` : ''}.`, priority: 'high', key: `surprise:${z.id}:${a.since}:early` });
+    plan.notify({ audience: 'keyholder', kind: 'surprise', title: 'Lockation: surprise zone left early', message: `The wearer left "${z.name}" before being released.`, key: `surprise:${z.id}:${a.since}:early` });
+  }
+  for (const id of entered) {
+    const z = config.zones.find((x) => x.id === id);
+    if (!z?.roles.includes('surprise') || !z.surprise.outcomes.length) continue;
+    const st = (state.surprise.zones[id] ??= { visits: 0 });
+    if (st.active) continue;
+    if (z.surprise.visits === 'once' && st.visits > 0) continue;
+    if (z.surprise.visits === 'repeat' && msSince(st.lastAt, now) < z.surprise.cooldownMinutes * MINUTE) continue;
+    const o = drawOutcome(z.surprise.outcomes, ctx.rng ?? Math.random)!;
+    const atIso = now.toISOString();
+    st.visits += 1;
+    st.lastAt = atIso;
+    st.lastOutcome = o.label;
+    plan.addStable('surprise.onEnter', o.onEnter, `surprise:${id}:${atIso}:enter`);
+    let hold = '';
+    if (o.hold !== 'none' && o.holdMinutes) {
+      const until = new Date(now.getTime() + o.holdMinutes * MINUTE);
+      st.active = { outcomeId: o.id, since: atIso, until: until.toISOString(), mode: o.hold };
+      const t = formatLocalTime(until, config.timezone);
+      hold =
+        o.hold === 'stay'
+          ? ` Stay inside for ${formatDuration(o.holdMinutes * 60)} (until ${t}) to be released.`
+          : ` Stay inside until the keyholder releases you (at the latest ${t}).`;
+      if (o.onEarlyLeave.length) hold += ` Leaving early: ${list(o.onEarlyLeave)}.`;
+    }
+    plan.event(`Surprise zone "${z.name}": ${o.label}${o.onEnter.length ? ` – ${list(o.onEnter)}` : ''}.`);
+    plan.notify({ audience: 'wearer', title: `🎁 Surprise: ${o.label}`, message: `"${z.name}"${o.onEnter.length ? `: ${list(o.onEnter)}.` : '.'}${hold}`, priority: 'high', key: `surprise:${id}:${atIso}:enter`, zoneId: id });
+    plan.notify({ audience: 'keyholder', kind: 'surprise', title: 'Lockation: surprise zone', message: `The wearer entered "${z.name}": ${o.label}${o.onEnter.length ? ` (${list(o.onEnter)})` : ''}.`, key: `surprise:${id}:${atIso}:enter` });
+  }
+}
+
+/** Holds end at their time while the wearer is still inside (leaving is detected by the next location). */
+function tickSurprise(config: LockationConfig, state: LockationState, now: Date, plan: Planner) {
+  for (const [id, st] of Object.entries(state.surprise.zones)) {
+    if (!st.active) continue;
+    const z = config.zones.find((x) => x.id === id);
+    if (!config.rules.surprise.enabled || !z?.roles.includes('surprise')) {
+      st.active = undefined;
+      continue;
+    }
+    if (now.getTime() >= Date.parse(st.active.until)) releaseSurprise(z, outcomeOf(z, st.active.outcomeId), st, 'time', plan);
+  }
+}
+
+/** Status of a surprise zone for the map: never visited, visited (repeatable), used up (once), or holding the wearer. */
+export function surpriseStatus(z: Zone, state: LockationState): 'new' | 'visited' | 'used' | 'holding' {
+  const st = state.surprise.zones[z.id];
+  if (st?.active) return 'holding';
+  if (!st?.visits) return 'new';
+  return z.surprise.visits === 'once' ? 'used' : 'visited';
+}
+
+/** Keyholder releases the wearer from a surprise zone hold early. */
+export function applySurpriseAction(config: LockationConfig, prevState: LockationState, action: SurpriseAction, actor: Actor, ctx: EvalContext, selfLock = false): EvalResult {
+  if (actor !== 'keyholder' || selfLock) throw new SurpriseActionError('Only the keyholder can release the wearer from a surprise zone.');
+  const z = config.zones.find((x) => x.id === action.zoneId);
+  if (!z || !prevState.surprise.zones[z.id]?.active) throw new SurpriseActionError('The wearer is not held in this zone.');
+  const state = cloneState(prevState);
+  const plan = new Planner(ctx);
+  const st = state.surprise.zones[z.id]!;
+  releaseSurprise(z, outcomeOf(z, st.active!.outcomeId), st, 'keyholder', plan);
+  trackFreeze(state, plan.list, ctx.now);
   return { state, consequences: plan.list, events: plan.events, notices: plan.finish() };
 }

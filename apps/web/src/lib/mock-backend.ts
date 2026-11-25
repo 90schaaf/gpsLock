@@ -5,6 +5,9 @@ import {
   type CheckinRecord,
   type Fix,
   type HuntAction,
+  type MissionAction,
+  type SurpriseAction,
+  huntRoute,
   initialState,
   KNOWN_COMMANDS,
   loadState,
@@ -65,6 +68,22 @@ export function demoConfig(center = { lat: 47.3769, lng: 8.5417 }): LockationCon
         forbidden: { windows: [{ start: '20:00', end: '02:00' }], onEnter: [{ type: 'pillory', durationMinutes: 30, reason: 'Visited the bar' }] },
       },
       { id: 'casino', name: 'Casino', ...off(-0.004, 0.009), radiusM: 100, roles: ['forbidden'], matchMode: 'strict' },
+      {
+        id: 'park',
+        name: 'Mystery park',
+        ...off(0.007, -0.006),
+        radiusM: 120,
+        roles: ['surprise'],
+        surprise: {
+          visits: 'repeat',
+          cooldownMinutes: 30,
+          outcomes: [
+            { id: 'treasure', label: 'Treasure!', weight: 2, onEnter: [{ type: 'remove_time', seconds: 1800 }] },
+            { id: 'trap', label: 'Trap – stay 10 minutes', weight: 2, hold: 'stay', holdMinutes: 10, onReleased: [{ type: 'remove_time', seconds: 600 }], onEarlyLeave: [{ type: 'add_time', seconds: 3600 }] },
+            { id: 'bad', label: 'Bad luck!', weight: 1, onEnter: [{ type: 'add_time', seconds: 1800 }] },
+          ],
+        },
+      },
     ],
     rules: {
       required: {
@@ -81,6 +100,7 @@ export function demoConfig(center = { lat: 47.3769, lng: 8.5417 }): LockationCon
         onEnter: [{ type: 'add_time', seconds: 3600 }, { type: 'freeze', durationMinutes: 60, when: { nth: 3 } }],
       },
       reward: { enabled: true, maxPerDay: 1, onEnter: [{ type: 'remove_time', seconds: 1800 }] },
+      surprise: { enabled: true },
       travel: { enabled: true, stepKm: 1, onStep: [{ type: 'remove_time', seconds: 300 }] },
       hunt: {
         enabled: true,
@@ -310,6 +330,28 @@ export class MockBackend implements Backend {
     });
   }
 
+  async surpriseAction(action: SurpriseAction) {
+    return this.run(async () => {
+      const d = await this.session_();
+      return this.app.surpriseAction(d, d.store.role, action);
+    });
+  }
+
+  async missionAction(action: MissionAction) {
+    return this.run(async () => {
+      const d = await this.session_();
+      return this.app.missionAction(d, d.store.role, action);
+    });
+  }
+
+  /** Demo only: start a random surprise mission right now. */
+  async demoMissionNow() {
+    return this.run(async () => {
+      const d = await this.session_();
+      return this.app.randomMissionNow(d, d.store.role);
+    });
+  }
+
   /** Demo: map clicks send a fake background location (stored per browser). */
   get mapClickSends(): boolean {
     try {
@@ -332,6 +374,37 @@ export class MockBackend implements Backend {
     const { results } = await this.app.tracked(d, [{ fix, manual: true }], { ignoreSpeed: opts.ignoreSpeed });
     const record: CheckinRecord = results[0]!.record;
     return { record, view: await this.app.view(d, d.store.role) };
+  }
+
+  /**
+   * Demo only: restart the hunt with a newly drawn random route (uses the saved configuration). In a real lock the route
+   * is fixed once drawn – re-drawing until an easy route comes up would be cheating.
+   */
+  async redrawHuntRoute(): Promise<{ drawn: boolean; names: string[] }> {
+    const store = this.load();
+    const config = parseConfigOrDefault(store.config);
+    const now = this.now();
+    const state = store.state ? loadState(store.state, config, now, now) : initialState(config, now);
+    const auto = config.rules.hunt.start === 'auto';
+    state.hunt = {
+      ...state.hunt,
+      route: undefined,
+      index: 0,
+      found: [],
+      lastDistanceBand: undefined,
+      lastWrongAt: undefined,
+      pausedAt: undefined,
+      pausedMs: 0,
+      status: auto ? 'active' : 'not_started',
+      startedAt: auto ? now.toISOString() : undefined,
+    };
+    store.state = state;
+    this.save(store);
+    const d = await this.session_(); // the simulated cron tick draws the route of a running hunt
+    const names = huntRoute(d.config, d.state).map((c) => c.name);
+    this.log(d.store, 'Lockation (demo)', names.length ? `Hunt restarted with a new random route: ${names.join(' → ')}.` : 'Hunt reset – the route is drawn when the hunt starts.');
+    this.save(d.store);
+    return { drawn: names.length > 0, names };
   }
 
   demoLog() {

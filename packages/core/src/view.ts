@@ -1,7 +1,7 @@
 /** View models sent to the browser, Chaster metadata (F12) and privacy helpers (F9). */
-import { activeRoles, forbiddenTimings, type LockationConfig, owntracksMonitoring, type ZoneRole, zonesWithRole } from './config.js';
+import { activeRoles, forbiddenTimings, type LockationConfig, owntracksMonitoring, type ZoneRole, zonesWithRole, missionTargets } from './config.js';
 import { describeConsequence, describeWhen, type Consequence } from './consequences.js';
-import { allowedHuntActions, type CheckinRecord, type HuntAction, huntDeadlineOf, huntScheduledStart, type PlannedConsequence, visibleCheckpoints } from './engine.js';
+import { surpriseStatus, allowedHuntActions, allowedMissionActions, missionDeclinesLeft, type MissionActionType, type CheckinRecord, type HuntAction, huntDeadlineOf, huntRoute, huntScheduledStart, huntTotal, type PlannedConsequence, visibleCheckpoints } from './engine.js';
 import { earliestDeadline, effectivePrivacy, type LockationState, nextHeartbeatFrom, requiredSlots } from './state.js';
 import { activeWindowStart, formatLocalTime, formatWindow, MINUTE } from './time.js';
 
@@ -21,10 +21,12 @@ export interface ZoneView {
   windowActive: boolean;
   /** F17 – the keyholder confirmed this place is intentionally hard to reach. */
   reachabilityNote?: string;
+  /** F26 – surprise zone: map status, visits, what happened last and (if shown) the possible outcomes. */
+  surprise?: { status: 'new' | 'visited' | 'used' | 'holding'; visits: number; last?: string; possible?: string[]; once: boolean };
 }
 
 export interface RuleSummary {
-  rule: 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'tracking' | 'zoneActions';
+  rule: 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'mission' | 'surprise' | 'tracking' | 'zoneActions';
   title: string;
   lines: string[];
 }
@@ -79,6 +81,8 @@ export interface SessionView {
     hint?: string;
     distanceBand?: string;
     target?: { lat: number; lng: number; radiusM: number };
+    /** Random route: whether it is drawn yet, the range and the pool size (the wearer only learns the count after the draw). */
+    randomRoute?: { drawn: boolean; min: number; max: number; pool: number };
     /** Visible checkpoints with status (reveal `all`: every checkpoint; `map`: the current/open ones). */
     checkpoints: HuntCheckpointView[];
     /** Hints of the open checkpoints (any-order mode with hint/distance reveal). */
@@ -90,6 +94,22 @@ export interface SessionView {
     deadline?: string;
   };
   travel?: { totalKm: number; pendingKm: number; stepKm: number; kmToday: number; dailyCapKm: number };
+  /** F26 – surprise zones that currently hold the wearer. */
+  surpriseHolds?: { zoneId: string; zoneName: string; label: string; mode: 'stay' | 'keyholder'; since: string; until: string; canRelease: boolean }[];
+  /** F25 – surprise missions. */
+  mission?: {
+    active?: { zoneId: string; zoneName: string; issuedAt: string; dueAt: string; by: 'random' | 'keyholder'; target: { lat: number; lng: number; radiusM: number } };
+    /** Actions the current viewer may perform (keyholder: send / cancel, wearer: decline). */
+    actions: MissionActionType[];
+    declinesLeft: number;
+    leadMinutes: number;
+    /** Zones the keyholder can send the wearer to (keyholder only). */
+    targets?: { id: string; name: string }[];
+    random: boolean;
+    activeHours: string;
+    last?: { zoneName: string; outcome: 'success' | 'failed' | 'declined' | 'cancelled'; at: string };
+    stats: { succeeded: number; failed: number; declined: number };
+  };
   freezeUntil?: string;
   /** F14 – background tracking status. */
   tracking?: {
@@ -213,11 +233,41 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
       rule: 'hunt',
       title: 'Scavenger hunt',
       lines: [
-        `${hunt.checkpoints.length} checkpoints, ${hunt.order === 'any' ? 'in any order' : 'in a fixed order'}${hunt.reveal === 'all' ? ' – all shown on the map' : ''}.`,
+        `${hunt.random.enabled ? `Random route: ${hunt.random.min === hunt.random.max ? hunt.random.min : `${hunt.random.min}–${hunt.random.max}`} of ${hunt.checkpoints.length} possible checkpoints, drawn at the start` : `${hunt.checkpoints.length} checkpoints`}, ${hunt.order === 'any' ? 'in any order' : 'in a fixed order'}${hunt.reveal === 'all' ? ' – all shown on the map' : ''}.`,
         `Each checkpoint: ${list(hunt.onCheckpoint)}. Completed: ${list(hunt.onComplete)}.`,
         ...(hunt.reveal !== 'all' ? [`Wrong hunt guess: ${list(hunt.onWrong)}.`] : []),
         ...(hunt.timeLimitMinutes ? [`Time limit ${fmtMinutes(hunt.timeLimitMinutes)}: ${list(hunt.onTimeout)}.`] : []),
         ...(hunt.blockUnlockUntilComplete ? ['The lock cannot be unlocked until the hunt is completed.'] : []),
+      ],
+    });
+  }
+  if (config.rules.surprise.enabled) {
+    const sz = zonesWithRole(config, 'surprise');
+    if (sz.length) {
+      out.push({
+        rule: 'surprise',
+        title: 'Surprise zones',
+        lines: [
+          `Entering ${sz.map((z) => `"${z.name}"`).join(', ')} triggers a surprise – a reward or a punishment. Some keep you inside for a while; leaving before you are released has consequences.`,
+          ...sz.map((z) => `${z.name}: ${z.surprise.visits === 'once' ? 'only the first visit counts' : `every visit counts (at most every ${fmtMinutes(z.surprise.cooldownMinutes)})`}${config.rules.surprise.showPossible ? ` – possible: ${z.surprise.outcomes.map((o) => o.label).join(' / ')}` : ''}.`),
+        ],
+      });
+    }
+  }
+  const mission = config.rules.mission;
+  if (mission.enabled) {
+    const names = missionTargets(config).map((z) => z.name).join(', ');
+    const hours = mission.random.activeHours;
+    out.push({
+      rule: 'mission',
+      title: 'Surprise missions',
+      lines: [
+        ...(mission.random.enabled
+          ? [`At random times (on average every ${fmtMinutes(mission.random.everyMinutes)}${hours.start === hours.end ? '' : `, between ${hours.start} and ${hours.end}`}) you are sent to one of these zones: ${names}.`]
+          : []),
+        ...(mission.keyholderCanSend ? [`The keyholder can send you to one of these zones at any time${mission.random.enabled ? '' : `: ${names}`}.`] : []),
+        `You have ${fmtMinutes(mission.leadMinutes)} to get there (by check-in or background location). In time: ${list(mission.onSuccess)}. Too late: ${list(mission.onFail)}.`,
+        mission.declinesPerDay ? `You may decline ${mission.declinesPerDay === 1 ? 'one mission' : `${mission.declinesPerDay} missions`} per day without penalty.` : 'Missions cannot be declined.',
       ],
     });
   }
@@ -282,7 +332,16 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
       windows.push(`Forbidden ${z.forbidden.windows.map(formatWindow).join(', ')}`);
       windowActive ||= !!activeWindowStart(z.forbidden.windows, now, config.timezone);
     }
-    return { id: z.id, name: z.name, lat: z.lat, lng: z.lng, radiusM: z.radiusM, kinds, windows, windowActive, reachabilityNote: reachNote(z.reachabilityAck) };
+    const surprise = kinds.includes('surprise')
+      ? {
+          status: surpriseStatus(z, state),
+          visits: state.surprise.zones[z.id]?.visits ?? 0,
+          last: state.surprise.zones[z.id]?.lastOutcome,
+          once: z.surprise.visits === 'once',
+          ...(role === 'keyholder' || config.rules.surprise.showPossible ? { possible: z.surprise.outcomes.map((o) => o.label) } : {}),
+        }
+      : undefined;
+    return { id: z.id, name: z.name, lat: z.lat, lng: z.lng, radiusM: z.radiusM, kinds, windows, windowActive, reachabilityNote: reachNote(z.reachabilityAck), ...(surprise ? { surprise } : {}) };
   });
 
   const view: SessionView = {
@@ -369,11 +428,12 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
   const h = config.rules.hunt;
   if (h.enabled) {
     const active = state.hunt.status === 'active';
-    const cp = h.order === 'sequence' ? h.checkpoints[state.hunt.index] : undefined;
+    const route = huntRoute(config, state);
+    const cp = h.order === 'sequence' ? route[state.hunt.index] : undefined;
     const visible = visibleCheckpoints(config, state);
     const visibleIds = new Set(visible.map((v) => v.cp.id));
-    const hiddenDifficult = h.checkpoints.some((c) => c.reachabilityAck && !visibleIds.has(c.id));
-    const open = h.checkpoints.filter((c) => !state.hunt.found.includes(c.id));
+    const hiddenDifficult = route.some((c) => c.reachabilityAck && !visibleIds.has(c.id));
+    const open = route.filter((c) => !state.hunt.found.includes(c.id));
     view.hunt = {
       status: state.hunt.status,
       actions: allowedHuntActions(config, state, role, isSelfLock),
@@ -381,7 +441,8 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
       scheduledStartAt: huntScheduledStart(config, state)?.toISOString(),
       pausedAt: state.hunt.pausedAt,
       index: state.hunt.index,
-      total: h.checkpoints.length,
+      total: huntTotal(config, state),
+      randomRoute: h.random.enabled ? { drawn: !!state.hunt.route, min: h.random.min, max: h.random.max, pool: h.checkpoints.length } : undefined,
       reveal: h.reveal,
       order: h.order,
       hint: active && h.order === 'sequence' ? cp?.hint : undefined,
@@ -392,6 +453,34 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
       guessesAllowed: h.reveal !== 'all' && active,
       terrainNote: hiddenDifficult ? 'One or more checkpoints are in difficult terrain – confirmed as intentional by the keyholder.' : undefined,
       deadline: huntDeadlineOf(config, state)?.toISOString(),
+    };
+  }
+
+  if (config.rules.surprise.enabled) {
+    const holds = config.zones.flatMap((z) => {
+      const a = state.surprise.zones[z.id]?.active;
+      if (!a) return [];
+      const label = z.surprise.outcomes.find((o) => o.id === a.outcomeId)?.label ?? 'Surprise';
+      return [{ zoneId: z.id, zoneName: z.name, label, mode: a.mode, since: a.since, until: a.until, canRelease: role === 'keyholder' && !isSelfLock }];
+    });
+    if (holds.length) view.surpriseHolds = holds;
+  }
+
+  const m = config.rules.mission;
+  if (m.enabled) {
+    const a = state.mission.active;
+    const zone = a ? config.zones.find((z) => z.id === a.zoneId) : undefined;
+    const lastZone = state.mission.last ? config.zones.find((z) => z.id === state.mission.last!.zoneId) : undefined;
+    view.mission = {
+      active: a && zone ? { zoneId: zone.id, zoneName: zone.name, issuedAt: a.issuedAt, dueAt: a.dueAt, by: a.by, target: { lat: zone.lat, lng: zone.lng, radiusM: zone.radiusM } } : undefined,
+      actions: allowedMissionActions(config, state, role, now, isSelfLock),
+      declinesLeft: missionDeclinesLeft(config, state, now),
+      leadMinutes: m.leadMinutes,
+      targets: role === 'keyholder' ? missionTargets(config).map((z) => ({ id: z.id, name: z.name })) : undefined,
+      random: m.random.enabled,
+      activeHours: m.random.activeHours.start === m.random.activeHours.end ? 'all day' : `${m.random.activeHours.start}–${m.random.activeHours.end}`,
+      last: state.mission.last ? { zoneName: lastZone?.name ?? 'a removed zone', outcome: state.mission.last.outcome, at: state.mission.last.at } : undefined,
+      stats: { succeeded: state.mission.succeeded, failed: state.mission.failed, declined: state.mission.declined },
     };
   }
 
@@ -429,7 +518,7 @@ export function computeMetadata(config: LockationConfig, state: LockationState, 
   const reasons: string[] = [];
   const h = config.rules.hunt;
   if (h.enabled && h.blockUnlockUntilComplete && ['not_started', 'active', 'paused'].includes(state.hunt.status)) {
-    reasons.push(`Scavenger hunt not completed (${state.hunt.index}/${h.checkpoints.length} checkpoints).`);
+    reasons.push(`Scavenger hunt not completed (${state.hunt.index}/${huntTotal(config, state)} checkpoints).`);
   }
   const r = config.rules.required;
   const first = r.enabled ? earliestDeadline(state) : undefined;
@@ -439,8 +528,16 @@ export function computeMetadata(config: LockationConfig, state: LockationState, 
 
   const live = config.tracking.enabled && config.tracking.checkins === 'auto';
   let description = 'Prove your location';
+  const holdZone = config.rules.surprise.enabled ? config.zones.find((z) => state.surprise.zones[z.id]?.active) : undefined;
+  const hold = holdZone ? state.surprise.zones[holdZone.id]!.active : undefined;
+  const activeMission = config.rules.mission.enabled ? state.mission.active : undefined;
+  const missionZone = activeMission ? config.zones.find((z) => z.id === activeMission.zoneId) : undefined;
   if (live && !state.tracking.deviceUser) {
     description = 'Set up live tracking!';
+  } else if (holdZone && hold) {
+    description = hold.mode === 'stay' ? `Stay in "${holdZone.name}" until ${formatLocalTime(new Date(hold.until), config.timezone)}` : `Wait in "${holdZone.name}" for the keyholder`;
+  } else if (activeMission && missionZone) {
+    description = `Mission: be at "${missionZone.name}" by ${formatLocalTime(new Date(activeMission.dueAt), config.timezone)}`;
   } else if (deadline) {
     const due = formatLocalTime(deadline, config.timezone);
     description = overdue ? (live ? 'Required location overdue!' : 'Check-in overdue!') : live ? `Be in a required zone by ${due}` : `Next check-in due ${due}`;
@@ -453,12 +550,12 @@ export function computeMetadata(config: LockationConfig, state: LockationState, 
   } else if (h.enabled && state.hunt.status === 'paused') {
     description = 'Scavenger hunt paused';
   } else if (h.enabled && state.hunt.status === 'active') {
-    description = `Scavenger hunt: checkpoint ${state.hunt.index + 1}/${h.checkpoints.length}`;
+    description = `Scavenger hunt: checkpoint ${state.hunt.index + 1}/${huntTotal(config, state)}`;
   }
   return {
     reasonsPreventingUnlocking: reasons,
     homeActions: [
-      { slug: 'checkin', title: live ? 'GPS live tracking' : 'GPS check-in', description, icon: 'map-marker-alt', ...(overdue || (live && !state.tracking.deviceUser) ? { badge: '!' } : {}) },
+      { slug: 'checkin', title: live ? 'GPS live tracking' : 'GPS check-in', description, icon: 'map-marker-alt', ...(overdue || (live && !state.tracking.deviceUser) || missionZone || holdZone ? { badge: '!' } : {}) },
     ],
   };
 }

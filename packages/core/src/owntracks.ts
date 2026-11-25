@@ -3,7 +3,7 @@
  * Formats: https://owntracks.org/booklet/tech/json/ and https://owntracks.org/booklet/tech/http/
  */
 import type { LockationConfig } from './config.js';
-import { type TrackedInput, visibleCheckpoints } from './engine.js';
+import { huntRoute, type TrackedInput, visibleCheckpoints } from './engine.js';
 import type { LockationState } from './state.js';
 
 /** FNV-1a 32 bit hash. */
@@ -122,7 +122,7 @@ const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : u
  * Convert an OwnTracks message to a tracked observation.
  * Returns undefined for message types we ignore (waypoint, card, lwt, status, …).
  */
-export function parseOwnTracks(body: unknown, config: LockationConfig): TrackedInput | undefined {
+export function parseOwnTracks(body: unknown, config: LockationConfig, state?: LockationState): TrackedInput | undefined {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
   const m = body as OwnTracksMessage;
   const lat = num(m.lat);
@@ -142,7 +142,7 @@ export function parseOwnTracks(body: unknown, config: LockationConfig): TrackedI
     const zone = desc ? config.zones.find((z) => z.name === desc) : undefined;
     let checkpointId: string | undefined;
     if (!zone && desc?.startsWith(CHECKPOINT_PREFIX)) {
-      const cps = config.rules.hunt.checkpoints;
+      const cps = state ? huntRoute(config, state) : config.rules.hunt.checkpoints;
       checkpointId = cps.find((c, i) => checkpointWaypointName(i, c.name) === desc)?.id;
     }
     return { fix, transition: { event, zoneId: zone?.id, checkpointId, at: Math.round(tst * 1000) } };

@@ -67,6 +67,8 @@ export const LockationStateSchema = z.object({
       /** Sequence mode: index of the current checkpoint. Any-order mode: equals `found.length`. */
       index: z.number().int().default(0),
       found: z.array(z.string()).default([]),
+      /** Random route (checkpoint ids in hunt order), drawn when a randomized hunt starts. */
+      route: z.array(z.string()).optional(),
       /** not_started → active ⇄ paused → completed | failed (timeout, wearer abort) | aborted (keyholder). */
       status: z.enum(['not_started', 'active', 'paused', 'completed', 'failed', 'aborted']).default('active'),
       startedAt: iso.optional(),
@@ -75,6 +77,37 @@ export const LockationStateSchema = z.object({
       pausedMs: z.number().default(0),
       lastWrongAt: iso.optional(),
       lastDistanceBand: z.string().optional(),
+    })
+    .default({}),
+  /** F25 – surprise missions. */
+  mission: z
+    .object({
+      active: z
+        .object({ id: z.string(), zoneId: z.string(), issuedAt: iso, dueAt: iso, by: z.enum(['random', 'keyholder']), warned: z.boolean().default(false) })
+        .optional(),
+      /** When the next random mission comes (within the active hours). */
+      nextRandomAt: iso.optional(),
+      declineDay: z.string().default(''),
+      declinesToday: z.number().default(0),
+      succeeded: z.number().default(0),
+      failed: z.number().default(0),
+      declined: z.number().default(0),
+      last: z.object({ zoneId: z.string(), outcome: z.enum(['success', 'failed', 'declined', 'cancelled']), at: iso }).optional(),
+    })
+    .default({}),
+  /** F26 – surprise zones: visits, last outcome and a running hold (stay / keyholder release). */
+  surprise: z
+    .object({
+      zones: z
+        .record(
+          z.object({
+            visits: z.number().default(0),
+            lastAt: iso.optional(),
+            lastOutcome: z.string().optional(),
+            active: z.object({ outcomeId: z.string(), since: iso, until: iso, mode: z.enum(['stay', 'keyholder']) }).optional(),
+          }),
+        )
+        .default({}),
     })
     .default({}),
   /** Last run of the enter / leave actions per zone (cooldown). */

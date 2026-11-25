@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-11-25
+
+- **Surprise zones (F26):** zone role `surprise` – visible zones whose outcome is drawn by weight on entering (reward,
+  punishment, or a hold: stay for a while / until the keyholder releases, at the latest after `holdMinutes`); once or every
+  visit; early leave consequences; map marks new / visited / used / holding; `/api/surprise` release.
+- **Surprise missions (F25):** `rules.mission` – random (every n min ±50 %, within active hours) or sent by the keyholder:
+  reach a non-forbidden zone within `leadMinutes`; `onSuccess` / `onFail`, reminder, penalty-free declines per day,
+  keyholder cancel. `state.mission`, `/api/mission`, keyholder notification switch `mission`, Missions tab, mission card.
+- **Random hunt route:** `rules.hunt.random {enabled, min, max}` – at the start (or first evaluation of a running hunt) N ∈ [min, max]
+  checkpoints are drawn from the pool in random order (`state.hunt.route`); everything (counts, hints, map, OwnTracks sync,
+  order sequence/any) uses the route. Validation: min ≤ max ≤ pool size. Makes hunts possible on self-locks.
+- **ntfy errors explained:** status, ntfy error text and a hint; the token is trimmed.
+
 Condensed history of the specification and the implemented behaviour, newest first. Feature IDs refer to
 [03-features.md](03-features.md).
 

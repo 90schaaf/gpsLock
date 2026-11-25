@@ -3,7 +3,9 @@ import { fmtMinutes, ZoneSchema, type ForbiddenTimings, type Zone, type ZoneRole
 
 export type RoleChoice = ZoneRole | 'neutral';
 
-const ORDER: ZoneRole[] = ['required', 'reward', 'forbidden'];
+const ORDER: ZoneRole[] = ['required', 'reward', 'forbidden', 'surprise'];
+/** Roles that exclude every other role. */
+const EXCLUSIVE: ZoneRole[] = ['forbidden', 'surprise'];
 
 /**
  * Toggle one role chip. Allowed results: required and/or reward, OR forbidden, OR neutral (no role).
@@ -13,8 +15,8 @@ const ORDER: ZoneRole[] = ['required', 'reward', 'forbidden'];
  */
 export function toggleRole(roles: readonly ZoneRole[], choice: RoleChoice): ZoneRole[] {
   if (choice === 'neutral') return [];
-  if (choice === 'forbidden') return roles.includes('forbidden') ? [] : ['forbidden'];
-  const set = new Set<ZoneRole>(roles.filter((r) => r !== 'forbidden'));
+  if (EXCLUSIVE.includes(choice)) return roles.includes(choice) ? [] : [choice];
+  const set = new Set<ZoneRole>(roles.filter((r) => !EXCLUSIVE.includes(r)));
   if (set.has(choice)) set.delete(choice);
   else set.add(choice);
   return ORDER.filter((r) => set.has(r));
@@ -22,7 +24,7 @@ export function toggleRole(roles: readonly ZoneRole[], choice: RoleChoice): Zone
 
 export function isValidRoleSet(roles: readonly ZoneRole[]): boolean {
   if (new Set(roles).size !== roles.length) return false;
-  return !(roles.includes('forbidden') && roles.length > 1);
+  return !(roles.some((r) => EXCLUSIVE.includes(r)) && roles.length > 1);
 }
 
 /** Default per-zone settings block of a role (schema defaults). */

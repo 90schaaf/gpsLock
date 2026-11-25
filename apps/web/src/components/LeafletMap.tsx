@@ -126,6 +126,7 @@ export const ZONE_COLORS = {
   required: '#2ecc71',
   forbidden: '#e74c3c',
   reward: '#f1c40f',
+  surprise: '#ff5fb8',
   neutral: '#3498db',
   hunt: '#9b59b6',
   me: '#7c5cff',

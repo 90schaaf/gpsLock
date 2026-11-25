@@ -1,5 +1,6 @@
 import { isValidTimezone, MIN_RADIUS_M, utcToZonedWallTime, zonedWallTimeToUtc } from '@lockation/core';
 import { ConsequenceEditor, NumberField } from '../editors.js';
+import { useState } from 'preact/hooks';
 import { checked, PlacesInfo, ReachNote, Section, setAck, val, type TabProps } from '../shared.js';
 
 /** datetime-local value (wall time in the lock timezone) for a stored UTC instant. */
@@ -12,7 +13,7 @@ function startAtValue(local: string, tz: string): string | undefined {
   return local && isValidTimezone(tz) ? zonedWallTimeToUtc(local, tz)?.toISOString() : undefined;
 }
 
-export function HuntTab({ config, edit, commands, reach, selected, setSelected }: TabProps) {
+export function HuntTab({ config, edit, commands, reach, selected, setSelected, demo }: TabProps) {
   const R = config.rules;
   return (
     <Section title="Scavenger hunt" enabled={R.hunt.enabled} onToggle={(v) => edit((d) => { d.rules.hunt.enabled = v; })}
@@ -44,6 +45,33 @@ export function HuntTab({ config, edit, commands, reach, selected, setSelected }
         ))}
       </ol>
       {R.hunt.checkpoints.length === 0 && <p class="muted small">Tap the map to add checkpoints in order.</p>}
+      <div class="card stack" data-testid="hunt-random" style={{ padding: '10px 12px' }}>
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={R.hunt.random.enabled}
+            onChange={(e) => edit((d) => {
+              d.rules.hunt.random.enabled = checked(e);
+              if (checked(e)) {
+                const n = d.rules.hunt.checkpoints.length;
+                d.rules.hunt.random.max = Math.max(1, Math.min(d.rules.hunt.random.max, n || 1));
+                d.rules.hunt.random.min = Math.min(d.rules.hunt.random.min, d.rules.hunt.random.max);
+              }
+            })}
+          />
+          <span>
+            <strong>Random route</strong> – the checkpoints above are only <em>possible</em> checkpoints; when the hunt starts,
+            Lockation draws some of them in random order. Nobody knows the route in advance – great for self-locks.
+          </span>
+        </label>
+        {R.hunt.random.enabled && (
+          <div class="grid2">
+            <NumberField path="rules.hunt.random.min" label="At least" suffix="checkpoints" min={1} max={R.hunt.checkpoints.length || 1} value={R.hunt.random.min} onChange={(v) => edit((d) => { d.rules.hunt.random.min = v ?? 1; })} />
+            <NumberField path="rules.hunt.random.max" label="At most" suffix="checkpoints" min={1} max={R.hunt.checkpoints.length || 1} value={R.hunt.random.max} hint={`Drawn from ${R.hunt.checkpoints.length} possible checkpoints.`} onChange={(v) => edit((d) => { d.rules.hunt.random.max = v ?? 1; })} />
+          </div>
+        )}
+        {R.hunt.random.enabled && demo && <RedrawButton demo={demo} />}
+      </div>
       <div class="grid2">
         <label class="field">
           Reveal to wearer
@@ -128,5 +156,36 @@ export function HuntTab({ config, edit, commands, reach, selected, setSelected }
         The keyholder can always start the hunt early and end it (without consequences). A pause stops the time limit; checkpoints don't count while paused.
       </p>
     </Section>
+  );
+}
+
+/** Demo only: restart the hunt with a newly drawn random route (in a real lock the drawn route is fixed). */
+function RedrawButton({ demo }: { demo: NonNullable<TabProps['demo']> }) {
+  const [msg, setMsg] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  return (
+    <div class="stack" data-testid="hunt-redraw">
+      <div class="row">
+        <button
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const r = await demo.redrawHuntRoute();
+              setMsg(r.drawn ? `New route (${r.names.length}): ${r.names.join(' → ')}` : 'Hunt reset – the route is drawn when the hunt starts.');
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          🎲 Draw a new route (demo)
+        </button>
+      </div>
+      <span class="small muted">
+        Restarts the demo hunt with a new random route, using the <strong>saved</strong> settings (save first after changes). In a
+        real lock the route is drawn once and stays fixed.
+      </span>
+      {msg && <span class="small" data-testid="hunt-redraw-result">{msg}</span>}
+    </div>
   );
 }

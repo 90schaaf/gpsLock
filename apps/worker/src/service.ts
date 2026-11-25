@@ -9,6 +9,8 @@ import {
   type CheckinRecord,
   type Fix,
   type HuntAction,
+  type MissionAction,
+  type SurpriseAction,
   KNOWN_COMMANDS,
   loadState,
   type LockationConfig,
@@ -150,6 +152,16 @@ export class LockationService {
   async huntAction(mainToken: string, action: HuntAction): Promise<SessionView> {
     const r = await this.resolve(mainToken);
     return this.app.huntAction(r, r.role, action);
+  }
+
+  async surpriseAction(mainToken: string, action: SurpriseAction): Promise<SessionView> {
+    const r = await this.resolve(mainToken);
+    return this.app.surpriseAction(r, r.role, action);
+  }
+
+  async missionAction(mainToken: string, action: MissionAction): Promise<SessionView> {
+    const r = await this.resolve(mainToken);
+    return this.app.missionAction(r, r.role, action);
   }
 
   // ---------- notifications (ntfy) ----------
@@ -323,7 +335,7 @@ export class LockationService {
     if (!s.config.tracking.enabled) return [];
 
     const messages = Array.isArray(body) ? body : [body];
-    const inputs = messages.map((m) => parseOwnTracks(m, s.config)).filter((x): x is TrackedInput => !!x);
+    const inputs = messages.map((m) => parseOwnTracks(m, s.config, s.state)).filter((x): x is TrackedInput => !!x);
     const response: unknown[] = [];
     await this.app.tracked(s, inputs, {
       beforeSave: (state: LockationState) => {

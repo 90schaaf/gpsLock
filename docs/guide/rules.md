@@ -82,6 +82,9 @@ Time amounts are multiplied by the number of steps. Movements flagged as implaus
 
 ## Scavenger hunt
 
+- **Random route**: the checkpoints are only *possible* checkpoints. When the hunt starts, Lockation draws between *at least*
+  and *at most* of them (e.g. 2–4) in random order. Nobody knows the route in advance – not even the author of a self-lock.
+  Only drawn checkpoints are shown, synced to OwnTracks and counted.
 - **Order**: *in order* (default) – only the current checkpoint counts; or *any order* – every unfound checkpoint counts and the
   hunt is completed when all are found.
 - Being inside a checkpoint at any check-in or background update completes it (*each checkpoint*). After the last one the hunt
@@ -104,6 +107,39 @@ Time amounts are multiplied by the number of steps. Movements flagged as implaus
 - **Ending early**: the keyholder can always end the hunt – without consequences. If allowed, the wearer can **give up** – the
   hunt counts as failed and *wearer gives up* runs (e.g. add 1 day). Unlocking is no longer blocked by the hunt afterwards.
 - The other side is notified when someone starts, pauses, resumes or ends the hunt.
+
+## Surprise missions
+
+"🎯 Be at the café by 14:30!" – the wearer has to reach a zone in time.
+
+- **Targets:** the zones you tick in the 🎯 **Missions** tab (default: all). **Forbidden zones are never mission targets.**
+  Random missions skip the zone the wearer is in and zones closer than the *minimum distance*.
+- **Random missions:** on average every *n* minutes (±50 %, so nobody can predict them), only between the *from / until* times
+  (lock time zone). They work on self-locks too.
+- **Sent by the keyholder:** pick a zone and the minutes on the main page; the keyholder can also cancel a running mission.
+- **Arrival** counts by check-in or background location inside the zone before the deadline → *arrived in time*.
+  Otherwise *too late* applies (with background tracking, a location taken in time still counts if it arrives up to 5 minutes later).
+- **Safety:** the wearer can decline a mission ("can't right now") without penalty – by default once per day. The keyholder is told.
+- The wearer gets a push notification for each mission and a reminder shortly before the end.
+
+## Surprise zones
+
+Mark a zone as **🎁 Surprise** in the Zones tab. The wearer sees it on the map – but not what happens inside.
+
+- **Possible outcomes** (🎁 Surprise tab, up to 10 per zone): each has a text shown when it happens ("Treasure!",
+  "Trap – stay 20 minutes"), a **weight** (higher = more likely) and consequences *when entering*. On entering, one outcome
+  is drawn – it can reward or punish.
+- **Hold the wearer inside** (optional per outcome):
+  - *Stay inside for a while* – released after the set time, *when released* applies;
+  - *Until the keyholder releases* – e.g. after a task or a verification picture; at the latest after the set time
+    (so nobody gets stuck, e.g. on self-locks). The keyholder releases with **🔓 Release now** on the main page.
+  - Leaving before being released applies *leaving before being released*. Leaving is noticed by the next location
+    (background update or check-in).
+- **Visits**: *only the first visit counts*, or *every visit draws again* (at most every n minutes).
+- **On the map**: 🎁 not visited yet · 🎁✓ dashed: visited, can surprise again · ✓ grey: used up · ⏳ highlighted: holding
+  the wearer right now.
+- Optional: *show the wearer the possible outcomes* (not which one comes). Change notices during a lock only say
+  "… surprise changed" – the contents stay a surprise.
 
 ## Zone actions (enter / leave)
 

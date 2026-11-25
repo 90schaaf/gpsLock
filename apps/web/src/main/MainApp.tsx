@@ -6,6 +6,8 @@ import { GeoError, geolocationGranted, getFix, watchFix } from '../lib/geolocati
 import { formatCountdown, useNow } from '../lib/time-ui.js';
 import { isEmbedded } from '../lib/hash.js';
 import type { MockBackend } from '../lib/mock-backend.js';
+import { MissionCard } from './MissionCard.js';
+import { SurpriseHoldCard, surpriseCircle } from './SurpriseCard.js';
 import { NotificationsCard } from './NotificationsCard.js';
 import { TrackingCard } from './TrackingCard.js';
 
@@ -128,6 +130,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
   const circles = useMemo<MapCircle[]>(() => {
     if (!view) return [];
     const out: MapCircle[] = view.zones.map((z) => {
+      if (z.surprise) return surpriseCircle(z);
       const kind = z.kinds.includes('forbidden') ? 'forbidden' : z.kinds.includes('required') ? 'required' : z.kinds.includes('reward') ? 'reward' : 'neutral';
       return { id: z.id, lat: z.lat, lng: z.lng, radiusM: z.radiusM, color: ZONE_COLORS[kind], label: `${z.name}${z.kinds.length ? ` (${z.kinds.join(', ')})` : ''}` };
     });
@@ -147,6 +150,11 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
         });
       }
     } else if (view.hunt?.target) out.push({ id: 'hunt', ...view.hunt.target, color: ZONE_COLORS.hunt, label: 'Next checkpoint', dashed: true });
+    const ma = view.mission?.active;
+    if (ma) {
+      const zc = out.find((c) => c.id === ma.zoneId);
+      if (zc) Object.assign(zc, { selected: true, permanentLabel: true, label: `🎯 ${ma.zoneName}` });
+    }
     return out;
   }, [view]);
 
@@ -324,13 +332,20 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
           </div>
         )}
 
+        {view.surpriseHolds?.map((h) => <SurpriseHoldCard key={h.zoneId} hold={h} view={view} backend={backend} onView={setView} onError={(message) => setError({ message })} />)}
+
+        {view.mission && <MissionCard view={view} backend={backend} mock={mock} onView={setView} onError={(message) => setError({ message })} />}
+
         {view.hunt && (
           <div class="card" data-testid="hunt-card">
             <h2>🧭 Scavenger hunt <span class={`badge ${view.hunt.status === 'completed' ? 'ok' : view.hunt.status === 'failed' ? 'bad' : view.hunt.status === 'paused' || view.hunt.status === 'not_started' ? 'warn' : ''}`}>{HUNT_STATUS[view.hunt.status]}</span></h2>
             <HuntControls view={view} backend={backend} onView={setView} onError={(message) => setError({ message })} />
             <div class="progress" aria-label="hunt progress"><span style={{ width: `${(view.hunt.index / Math.max(1, view.hunt.total)) * 100}%` }} /></div>
             <p class="small muted">
-              {view.hunt.index} of {view.hunt.total} checkpoints found · {view.hunt.order === 'any' ? 'any order' : 'in order'}
+              {view.hunt.randomRoute && !view.hunt.randomRoute.drawn
+                ? `Random route: ${view.hunt.randomRoute.min === view.hunt.randomRoute.max ? view.hunt.randomRoute.min : `${view.hunt.randomRoute.min}–${view.hunt.randomRoute.max}`} checkpoints will be drawn when the hunt starts`
+                : `${view.hunt.index} of ${view.hunt.total} checkpoints found${view.hunt.randomRoute ? ' (random route)' : ''}`}{' '}
+              · {view.hunt.order === 'any' ? 'any order' : 'in order'}
               {view.hunt.deadline ? ` · ends ${fmtTime(view.hunt.deadline, view.timezone)}` : ''}
             </p>
             {huntActive && (

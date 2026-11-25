@@ -11,6 +11,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { LeafletMap, ZONE_COLORS, type MapCircle } from '../components/LeafletMap.js';
 import { ApiError, type Backend, type CommandInfo } from '../lib/backend.js';
+import { MockBackend } from '../lib/mock-backend.js';
 import { ConfigBridge } from '../lib/config-bridge.js';
 import { isEmbedded } from '../lib/hash.js';
 import { ackStillValid, createReachabilityChecker, needsConfirmation, unconfirmedPlaces } from '../lib/reachability.js';
@@ -20,6 +21,8 @@ import { useReachability, type PlaceRef, type ReachCheck } from './useReachabili
 import { AntiCheatTab } from './tabs/AntiCheatTab.js';
 import { FileTab } from './tabs/FileTab.js';
 import { ForbiddenTab } from './tabs/ForbiddenTab.js';
+import { MissionsTab } from './tabs/MissionsTab.js';
+import { SurpriseTab } from './tabs/SurpriseTab.js';
 import { HuntTab } from './tabs/HuntTab.js';
 import { NotificationsTab } from './tabs/NotificationsTab.js';
 import { PrivacyTab } from './tabs/PrivacyTab.js';
@@ -41,6 +44,8 @@ const TAB_COMPONENTS: Record<Tab, (p: TabProps) => preact.JSX.Element> = {
   reward: RewardTab,
   travel: TravelTab,
   hunt: HuntTab,
+  surprise: SurpriseTab,
+  mission: MissionsTab,
   tracking: TrackingTab,
   notify: NotificationsTab,
   anticheat: AntiCheatTab,
@@ -195,7 +200,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
     } else {
       const id = newId('z');
       edit((d) => {
-        d.zones.push({ id, name: (name ?? `Zone ${d.zones.length + 1}`).slice(0, 60), lat: p.lat, lng: p.lng, radiusM: 150, roles: [], required: { intervalCheckins: true, stayWindows: [], onMissed: [], onSuccess: [], onOutsideDuringWindow: [] }, forbidden: { windows: [], onEnter: [] }, reward: { onEnter: [] }, actions: { onEnter: [], onLeave: [], minStayMinutes: 0, cooldownMinutes: 0 } });
+        d.zones.push({ id, name: (name ?? `Zone ${d.zones.length + 1}`).slice(0, 60), lat: p.lat, lng: p.lng, radiusM: 150, roles: [], required: { intervalCheckins: true, stayWindows: [], onMissed: [], onSuccess: [], onOutsideDuringWindow: [] }, forbidden: { windows: [], onEnter: [] }, reward: { onEnter: [] }, surprise: { visits: 'once', cooldownMinutes: 60, outcomes: [] }, actions: { onEnter: [], onLeave: [], minStayMinutes: 0, cooldownMinutes: 0 } });
       });
       setSelected(id);
       if (tab !== 'zones') setTab('zones');
@@ -225,7 +230,8 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
 
   const mapUsable = tab === 'zones' || tab === 'hunt';
   const TabContent = TAB_COMPONENTS[tab];
-  const tabProps: TabProps = { config, edit, editZone, commands, reach, selected, setSelected, setTab, running };
+  const demoActions = backend instanceof MockBackend ? { redrawHuntRoute: () => (backend as MockBackend).redrawHuntRoute() } : undefined;
+  const tabProps: TabProps = { config, edit, editZone, commands, reach, selected, setSelected, setTab, running, demo: demoActions };
 
   return (
     <IssuesContext.Provider value={issues}>
