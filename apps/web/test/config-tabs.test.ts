@@ -202,3 +202,39 @@ describe('surprise zones', () => {
     expect(z('used').color).not.toBe(z('new').color);
   });
 });
+
+describe('toys in the demo (F27)', () => {
+  it('connect, test, confirm and emergency stop – nothing is sent unless the wearer switches it on', async () => {
+    const { MockBackend } = await import('../src/lib/mock-backend.js');
+    const m = new Map<string, string>();
+    const b = new MockBackend({ getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) });
+    const v0 = await b.session();
+    expect(v0.toys).toMatchObject({ connected: false, emergencyStops: 0, onEmergencyStop: 'add 2h' });
+    expect(v0.rules.find((r) => r.rule === 'toy')).toBeDefined();
+    const toys = [{ id: 'vibe', name: 'Bullet', type: 'vibrator', bodyPart: 'genitals', maxIntensity: [60], maxSeconds: 120 }];
+    await expect(b.toyConnect({ webhookId: 'DEMOHOOK', toys, disclaimerVersion: 0 })).rejects.toThrow(/safety notes/);
+    const v1 = await b.toyConnect({ webhookId: 'DEMOHOOK', toys, disclaimerVersion: 1 });
+    expect(v1.toys).toMatchObject({ connected: true, verified: false });
+    expect(JSON.stringify(v1)).not.toContain('DEMOHOOK');
+    const fetchSpy: string[] = [];
+    const orig = globalThis.fetch;
+    globalThis.fetch = (async (u: string) => {
+      fetchSpy.push(String(u));
+      return new Response('OK');
+    }) as typeof fetch;
+    try {
+      await b.toyTest();
+      expect(fetchSpy).toEqual([]); // demo: not sent by default
+      expect((await b.toyConfirm()).toys!.verified).toBe(true);
+      b.toyReal = true;
+      await b.toyTest();
+      expect(fetchSpy[0]).toContain('https://webhook.xtoys.app/DEMOHOOK?action=lockation');
+      const v2 = await b.toyEmergencyStop();
+      expect(v2.toys).toMatchObject({ connected: false, emergencyStops: 1 });
+      expect(fetchSpy.at(-1)).toContain('cmd=stopAll');
+      expect(b.demoLog().some((l) => /Emergency stop/.test(l.description))).toBe(true);
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
+});

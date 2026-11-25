@@ -26,7 +26,7 @@ export interface ZoneView {
 }
 
 export interface RuleSummary {
-  rule: 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'mission' | 'surprise' | 'tracking' | 'zoneActions';
+  rule: 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'mission' | 'surprise' | 'toy' | 'tracking' | 'zoneActions';
   title: string;
   lines: string[];
 }
@@ -94,6 +94,16 @@ export interface SessionView {
     deadline?: string;
   };
   travel?: { totalKm: number; pendingKm: number; stepKm: number; kmToday: number; dailyCapKm: number };
+  /** F27 – toy control: connection status and the wearer's toys / limits (never the Webhook ID). */
+  toys?: {
+    connected: boolean;
+    verified: boolean;
+    connectedAt?: string;
+    toys: { id: string; name: string; type: string; bodyPart: string; maxIntensity: number[]; maxSeconds: number }[];
+    emergencyStops: number;
+    /** What the emergency stop costs (described). */
+    onEmergencyStop: string;
+  };
   /** F26 – surprise zones that currently hold the wearer. */
   surpriseHolds?: { zoneId: string; zoneName: string; label: string; mode: 'stay' | 'keyholder'; since: string; until: string; canRelease: boolean }[];
   /** F25 – surprise missions. */
@@ -238,6 +248,16 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
         ...(hunt.reveal !== 'all' ? [`Wrong hunt guess: ${list(hunt.onWrong)}.`] : []),
         ...(hunt.timeLimitMinutes ? [`Time limit ${fmtMinutes(hunt.timeLimitMinutes)}: ${list(hunt.onTimeout)}.`] : []),
         ...(hunt.blockUnlockUntilComplete ? ['The lock cannot be unlocked until the hunt is completed.'] : []),
+      ],
+    });
+  }
+  if (config.rules.toy.enabled) {
+    out.push({
+      rule: 'toy',
+      title: 'Toy control',
+      lines: [
+        'When you connect your toys (XToys), the rules can control them – look for 🎮 in the consequences. Your limits always apply.',
+        `Emergency stop (disconnect the toys): ${list(config.rules.toy.onEmergencyStop)}.`,
       ],
     });
   }
@@ -453,6 +473,18 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
       guessesAllowed: h.reveal !== 'all' && active,
       terrainNote: hiddenDifficult ? 'One or more checkpoints are in difficult terrain – confirmed as intentional by the keyholder.' : undefined,
       deadline: huntDeadlineOf(config, state)?.toISOString(),
+    };
+  }
+
+  if (config.rules.toy.enabled) {
+    const T = state.toy;
+    view.toys = {
+      connected: !!T.connectedAt && T.toys.length > 0,
+      verified: !!T.verifiedAt,
+      connectedAt: T.connectedAt,
+      toys: T.toys.map((t) => ({ id: t.id, name: t.name, type: t.type, bodyPart: t.bodyPart, maxIntensity: [...t.maxIntensity], maxSeconds: t.maxSeconds })),
+      emergencyStops: T.emergencyStops,
+      onEmergencyStop: list(config.rules.toy.onEmergencyStop),
     };
   }
 

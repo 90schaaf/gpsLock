@@ -3,7 +3,6 @@
  * before a lock. Talks to XToys directly from the browser; nothing is stored on the Lockation server.
  */
 import {
-  BODY_PARTS,
   buildXToysScript,
   defaultToy,
   MAX_TOYS,
@@ -16,16 +15,17 @@ import {
   toyCommand,
   ToySetupSchema,
   toySlots,
-  xtoysWebhookUrl,
   xtoysWebsocketUrl,
   type Toy,
   type ToyCommandInput,
   type ToySetup,
   type ToyShape,
-  type ToyType,
-  type ToyWebhookBody,
 } from '@lockation/core';
 import { useEffect, useState } from 'preact/hooks';
+import { sendRaw, sendToXToys } from '../lib/xtoys.js';
+import { ToyEditor } from './ToyEditor.js';
+
+export { sendRaw, sendToXToys };
 
 const KEY_SETUP = 'lockation-toys-setup';
 const KEY_ID = 'lockation-toys-webhook';
@@ -70,48 +70,6 @@ function download(name: string, text: string) {
 const newToyId = (setup: ToySetup) => {
   for (let i = 1; ; i++) if (!setup.toys.some((t) => t.id === `toy${i}`)) return `toy${i}`;
 };
-
-/**
- * Send one command. GET with query parameters is a "simple" request (no CORS preflight); if the browser still blocks
- * reading the answer, the request is repeated without reading it (`no-cors`) – it reaches XToys, but unconfirmed.
- */
-export async function sendToXToys(webhookId: string, body: ToyWebhookBody, fetchImpl: typeof fetch = fetch): Promise<'ok' | 'unconfirmed'> {
-  const r = await sendRaw(webhookId, body, 'GET', fetchImpl);
-  if (r.outcome === 'error') throw new Error(r.detail);
-  return r.outcome;
-}
-
-export interface SendResult {
-  outcome: 'ok' | 'unconfirmed' | 'error';
-  /** What was sent (URL, and the JSON body for POST). */
-  request: string;
-  /** HTTP status and XToys' answer, or why it could not be read. */
-  detail: string;
-}
-
-/** Send any webhook message (debugging): GET with query parameters or POST with a JSON body. */
-export async function sendRaw(webhookId: string, params: Record<string, string>, method: 'GET' | 'POST', fetchImpl: typeof fetch = fetch): Promise<SendResult> {
-  const base = xtoysWebhookUrl(webhookId);
-  const url = method === 'GET' ? `${base}?${new URLSearchParams(params).toString()}` : base;
-  const init: RequestInit = method === 'GET' ? { method } : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params) };
-  const request = method === 'GET' ? `GET ${url}` : `POST ${url}\n${JSON.stringify(params)}`;
-  try {
-    const res = await fetchImpl(url, { ...init, mode: 'cors' });
-    const text = await res.text().catch(() => '');
-    const detail = `HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ''}`;
-    if (!res.ok) return { outcome: 'error', request, detail: `${detail}${res.status === 404 ? ' – check the Webhook ID' : ''}` };
-    return { outcome: 'ok', request, detail };
-  } catch (e) {
-    if (!(e instanceof TypeError)) return { outcome: 'error', request, detail: e instanceof Error ? e.message : String(e) };
-    // CORS: the browser hides the answer. Send again without reading it – it still reaches XToys.
-    try {
-      await fetchImpl(url, { ...init, mode: 'no-cors', ...(method === 'POST' ? { headers: { 'Content-Type': 'text/plain' } } : {}) });
-      return { outcome: 'unconfirmed', request, detail: 'sent, but the browser may not read XToys’ answer (CORS)' };
-    } catch (e2) {
-      return { outcome: 'error', request, detail: `network error: ${e2 instanceof Error ? e2.message : String(e2)}` };
-    }
-  }
-}
 
 interface LogLine {
   at: string;
@@ -314,57 +272,6 @@ export function formatConnected(setup: ToySetup, raw: string): string {
       return `${got.length ? '✅' : '⚠'} ${t.name}: ${got.length ? got.map((g) => g.name).join(', ') : 'no toy connected to this slot'}`;
     })
     .join('\n');
-}
-
-function ToyEditor({ toy, slot, onChange, onRemove }: { toy: Toy; slot: string; onChange: (fn: (t: Toy) => void) => void; onRemove: () => void }) {
-  const chans = TOY_TYPES[toy.type].channels;
-  return (
-    <div class="card stack" style={{ padding: '10px 12px' }} data-testid="toy-item">
-      <div class="row">
-        <input class="grow" value={toy.name} maxLength={40} aria-label="toy name" onInput={(e) => onChange((t) => { t.name = (e.target as HTMLInputElement).value; })} />
-        <button class="link danger" aria-label="remove toy" onClick={onRemove}>✕</button>
-      </div>
-      <div class="grid2">
-        <label class="field">
-          Type
-          <select
-            value={toy.type}
-            onChange={(e) =>
-              onChange((t) => {
-                const type = (e.target as HTMLSelectElement).value as ToyType;
-                const d = defaultToy(type, t.id, t.name);
-                t.type = type;
-                t.maxIntensity = d.maxIntensity;
-              })
-            }
-          >
-            {TOY_TYPE_IDS.map((id) => (
-              <option key={id} value={id}>{TOY_TYPES[id].label}</option>
-            ))}
-          </select>
-        </label>
-        <label class="field">
-          Body part
-          <select value={toy.bodyPart} onChange={(e) => onChange((t) => { t.bodyPart = (e.target as HTMLSelectElement).value as Toy['bodyPart']; })}>
-            {BODY_PARTS.map((b) => (
-              <option key={b} value={b}>{b}</option>
-            ))}
-          </select>
-        </label>
-        {chans.map((c, i) => (
-          <label class="field" key={c}>
-            Max intensity{chans.length > 1 ? ` – channel ${c}` : ''}: {toy.maxIntensity[i]} %
-            <input type="range" min={0} max={100} step={5} value={toy.maxIntensity[i]} onInput={(e) => onChange((t) => { t.maxIntensity[i] = Number((e.target as HTMLInputElement).value); })} />
-          </label>
-        ))}
-        <label class="field">
-          Max duration of one action (seconds)
-          <input type="number" min={1} max={3600} value={toy.maxSeconds} onInput={(e) => onChange((t) => { t.maxSeconds = Math.max(1, Math.min(3600, Number((e.target as HTMLInputElement).value) || 1)); })} />
-        </label>
-      </div>
-      <span class="small muted">XToys slot: {slot}</span>
-    </div>
-  );
 }
 
 function ToyTester({ toy, disabled, onSend }: { toy: Toy; disabled: boolean; onSend: (input: ToyCommandInput, label: string) => void }) {

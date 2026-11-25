@@ -111,7 +111,7 @@ describe('F13 demo backend', () => {
     const home = cfg.zones[0]!;
     const v = await b.session();
     expect(v.role).toBe('wearer');
-    expect(v.rules.map((r) => r.rule)).toEqual(['required', 'forbidden', 'reward', 'travel', 'hunt', 'surprise', 'tracking']);
+    expect(v.rules.map((r) => r.rule)).toEqual(['required', 'forbidden', 'reward', 'travel', 'hunt', 'toy', 'surprise', 'tracking']);
     const r = await b.checkin({ lat: home.lat, lng: home.lng, accuracy: 5, timestamp: now.getTime() }, 'general');
     expect(r.record.outcome).toBe('accepted');
     expect(r.record.zones).toContain('Home');
@@ -265,8 +265,8 @@ describe('zone roles (config page helpers)', () => {
     expect(f.required.stayWindows).toEqual([]);
     expect(f.matchMode).toBe('strict');
     expect(home.roles).toEqual(['required']); // input untouched
-    const casino = cfg.zones.find((z) => z.id === 'casino')!; // forbidden without own settings
-    expect(droppedRolesWithSettings(casino, [])).toEqual([]);
+    const casino = cfg.zones.find((z) => z.id === 'casino')!; // forbidden with its own extra punishment (a toy pulse)
+    expect(droppedRolesWithSettings(casino, [])).toEqual(['forbidden']);
     expect(applyRoles({ ...casino, roles: [], matchMode: 'lenient' }, ['forbidden']).matchMode).toBe('lenient'); // explicit mode kept
   });
 

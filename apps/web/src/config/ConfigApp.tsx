@@ -23,6 +23,7 @@ import { FileTab } from './tabs/FileTab.js';
 import { ForbiddenTab } from './tabs/ForbiddenTab.js';
 import { MissionsTab } from './tabs/MissionsTab.js';
 import { SurpriseTab } from './tabs/SurpriseTab.js';
+import { ToysTab } from './tabs/ToysTab.js';
 import { HuntTab } from './tabs/HuntTab.js';
 import { NotificationsTab } from './tabs/NotificationsTab.js';
 import { PrivacyTab } from './tabs/PrivacyTab.js';
@@ -46,6 +47,7 @@ const TAB_COMPONENTS: Record<Tab, (p: TabProps) => preact.JSX.Element> = {
   hunt: HuntTab,
   surprise: SurpriseTab,
   mission: MissionsTab,
+  toy: ToysTab,
   tracking: TrackingTab,
   notify: NotificationsTab,
   anticheat: AntiCheatTab,

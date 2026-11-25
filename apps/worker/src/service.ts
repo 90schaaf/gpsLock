@@ -10,6 +10,7 @@ import {
   type Fix,
   type HuntAction,
   type MissionAction,
+  xtoysWebhookUrl,
   type SurpriseAction,
   KNOWN_COMMANDS,
   loadState,
@@ -32,6 +33,7 @@ import {
 } from '@lockation/core';
 import { applyAll } from './apply.js';
 import { sessionIdOf, type ChasterClient, type ChasterSession } from './chaster.js';
+import type { FetchLike } from './chaster.js';
 import { deliverNotices, type Ntfy, NtfyError } from './notify.js';
 import type { Store } from './store.js';
 import { HttpError } from './types.js';
@@ -44,6 +46,8 @@ export interface ServiceDeps {
   ntfy?: Ntfy;
   /** Check-in page URL (notification click target). */
   appUrl?: string;
+  /** F27 – sends toy commands to XToys (tests inject a recorder). */
+  toyFetch?: FetchLike;
   now?: () => Date;
   rng?: () => number;
   newId?: () => string;
@@ -66,7 +70,9 @@ export class LockationService {
   private now: () => Date;
   readonly app: LockationApp<WorkerSession>;
 
+  private toyFetch: FetchLike;
   constructor(deps: ServiceDeps) {
+    this.toyFetch = deps.toyFetch ?? ((i, init) => fetch(i, init));
     this.client = deps.client;
     this.store = deps.store;
     this.ntfy = deps.ntfy;
@@ -76,6 +82,7 @@ export class LockationService {
     const newId = deps.newId ?? (() => crypto.randomUUID());
     const client = this.client;
     const store = this.store;
+    const toyFetch = this.toyFetch;
     this.app = new LockationApp<WorkerSession>({
       now,
       newId,
@@ -99,6 +106,14 @@ export class LockationService {
       redactHistory: (s) => store.redactHistory(s.sessionId),
       deliver: async (s, notices) => {
         await deliverNotices({ ntfy: this.ntfy, store, sessionId: s.sessionId, config: s.config, isSelfLock: s.isSelfLock, notices, now: now(), click: this.appUrl });
+      },
+      toys: {
+        getWebhookId: (s) => store.toyWebhook(s.sessionId),
+        setWebhookId: (s, id) => store.setToyWebhook(s.sessionId, id, now()),
+        send: async (_s, webhookId, body) => {
+          const res = await toyFetch(`${xtoysWebhookUrl(webhookId)}?${new URLSearchParams(body).toString()}`, { method: 'GET' });
+          if (!res.ok) throw new Error(`XToys answered ${res.status}`);
+        },
       },
       notificationStatus: async (s, audience) => ({ available: !!this.ntfy, subscribed: !!(this.ntfy && (await store.topic(s.sessionId, audience))) }),
     });
@@ -289,7 +304,31 @@ export class LockationService {
   }
 
   async onSessionDeleted(sessionId: string) {
+    // F27: stop the toys before the Webhook ID is forgotten.
+    const webhookId = await this.store.toyWebhook(sessionId).catch(() => undefined);
+    if (webhookId) await this.toyFetch(`${xtoysWebhookUrl(webhookId)}?action=lockation&cmd=stopAll`, { method: 'GET' }).catch(() => undefined);
     await this.store.purgeSession(sessionId);
+  }
+
+  // ---------- toys (F27) ----------
+  async toyConnect(mainToken: string, input: { webhookId: string; toys: unknown; disclaimerVersion: number }): Promise<SessionView> {
+    const r = await this.resolve(mainToken);
+    return this.app.toyConnect(r, r.role, input);
+  }
+
+  async toyTest(mainToken: string): Promise<SessionView> {
+    const r = await this.resolve(mainToken);
+    return this.app.toyTest(r, r.role);
+  }
+
+  async toyConfirm(mainToken: string): Promise<SessionView> {
+    const r = await this.resolve(mainToken);
+    return this.app.toyConfirm(r, r.role);
+  }
+
+  async toyEmergencyStop(mainToken: string): Promise<SessionView> {
+    const r = await this.resolve(mainToken);
+    return this.app.toyEmergencyStop(r, r.role);
   }
 
   // ---------- background tracking (OwnTracks) ----------

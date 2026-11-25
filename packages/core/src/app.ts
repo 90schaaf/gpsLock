@@ -35,6 +35,8 @@ import {
 } from './engine.js';
 import { initialState, type LockationState } from './state.js';
 import { buildLogEntry, buildSessionView, type Role, type SessionView } from './view.js';
+import { describeConsequence } from './consequences.js';
+import { resolveToyConsequence, TOY_DISCLAIMER_VERSION, toyCommand, toyComment, type ToyConsequence, ToySetupSchema, type ToyWebhookBody, type Toy } from './toys.js';
 
 /** An error with an HTTP-like status, mapped to the transport by the caller (worker: HTTP response, demo: ApiError). */
 export class AppError extends Error {
@@ -78,6 +80,14 @@ export interface AppPorts<S extends LockSession = LockSession> {
   redactHistory(s: S): Promise<void>;
   /** Deliver notices (filtering, dedupe, rate limits are the adapter's job). Must never throw. */
   deliver(s: S, notices: Notice[]): Promise<void>;
+  /** F27 – toy control. Without it, toy consequences are skipped (and logged). */
+  toys?: {
+    /** The wearer's XToys Webhook ID – stored by the adapter only, never in the state. */
+    getWebhookId(s: S): Promise<string | undefined>;
+    setWebhookId(s: S, webhookId: string | null): Promise<void>;
+    /** Send one command to the XToys webhook. Throws on failure. */
+    send(s: S, webhookId: string, body: ToyWebhookBody): Promise<void>;
+  };
   notificationStatus(s: S, audience: Role): Promise<{ available: boolean; subscribed: boolean }>;
   /** A tick had nothing to do (worker: refresh the due index without writing to Chaster). */
   idle?(s: S): Promise<void>;
@@ -102,11 +112,64 @@ export class LockationApp<S extends LockSession = LockSession> {
     return v;
   }
 
+  /**
+   * Apply consequences: toy actions go to the wearer's toys (XToys), everything else to the lock (Chaster).
+   * Returns the per-consequence results and extra log lines (toy actions, skipped ones, a cheeky comment).
+   */
+  private async apply(s: S, state: LockationState, list: PlannedConsequence[]): Promise<{ applied: { ok: boolean; error?: string }[]; lines: string[] }> {
+    const applied: { ok: boolean; error?: string }[] = new Array(list.length);
+    const lines: string[] = [];
+    const lock = list.map((p, i) => [p, i] as const).filter(([p]) => p.consequence.type !== 'toy');
+    const toy = list.map((p, i) => [p, i] as const).filter(([p]) => p.consequence.type === 'toy');
+    if (lock.length) {
+      const r = await this.ports.applyConsequences(s, lock.map(([p]) => p));
+      lock.forEach(([, i], j) => (applied[i] = r[j] ?? { ok: false }));
+    }
+    if (!toy.length) return { applied, lines };
+    const enabled = s.config.rules.toy.enabled;
+    const webhookId = enabled && state.toy.connectedAt && state.toy.toys.length ? await this.ports.toys?.getWebhookId(s) : undefined;
+    let sent = false;
+    for (const [p, i] of toy) {
+      const c = p.consequence as ToyConsequence;
+      const what = describeConsequence(c);
+      const skip = (why: string) => {
+        applied[i] = { ok: false, error: `skipped – ${why}` };
+        lines.push(`🎮 Skipped (${why}): ${what}.`);
+      };
+      if (!enabled) {
+        skip('toy control is off');
+        continue;
+      }
+      if (!webhookId || !this.ports.toys) {
+        skip('no toys connected');
+        continue;
+      }
+      const targets = resolveToyConsequence(state.toy.toys, c);
+      if (!targets.length) {
+        skip('no matching toy connected');
+        continue;
+      }
+      const errors: string[] = [];
+      for (const t of targets) {
+        try {
+          await this.ports.toys.send(s, webhookId, t.body);
+        } catch (e) {
+          errors.push(`${t.toy.name}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      applied[i] = errors.length ? { ok: false, error: errors.join('; ') } : { ok: true };
+      if (errors.length < targets.length) sent = true;
+      lines.push(`${what} → ${targets.map((t) => t.toy.name).join(', ')}${errors.length ? ` (failed: ${errors.join('; ')})` : ''}.`);
+    }
+    if (sent) lines.push(`😈 ${toyComment(toy[0]![0].idempotencyKey)}`);
+    return { applied, lines };
+  }
+
   /** Apply, log, persist, record and notify the result of one evaluation. */
   async finish(s: S, result: EvalResult & { record?: CheckinRecord }, kind: 'checkin' | 'tick', opts: { history?: boolean } = {}) {
-    const applied = result.consequences.length ? await this.ports.applyConsequences(s, result.consequences) : [];
+    const { applied, lines } = result.consequences.length ? await this.apply(s, result.state, result.consequences) : { applied: [], lines: [] };
     if (result.record) result.record.consequences = result.record.consequences.map((x, i) => ({ ...x, ok: applied[i]?.ok, error: applied[i]?.error }));
-    const entry = buildLogEntry(kind, result.events, result.consequences, result.record);
+    const entry = buildLogEntry(kind, [...result.events, ...lines], result.consequences, result.record);
     if (entry) await this.ports.log(s, entry).catch(() => undefined);
     await this.ports.saveState(s, result.state);
     if (result.record && opts.history !== false) await this.ports.appendHistory(s, result.record);
@@ -200,6 +263,96 @@ export class LockationApp<S extends LockSession = LockSession> {
     return this.view(s, role);
   }
 
+  // ---------- F27 toys ----------
+
+  private requireToys(s: S, role: Role) {
+    if (role !== 'wearer') throw new AppError(403, 'not_wearer', 'Only the wearer can connect their toys.');
+    this.requireLocked(s);
+    if (!s.config.rules.toy.enabled) throw new AppError(409, 'toys_disabled', 'Toy control is not enabled for this lock.');
+    if (!this.ports.toys) throw new AppError(503, 'toys_unavailable', 'Toy control is not available on this server.');
+    return this.ports.toys;
+  }
+
+  private async requireConnected(s: S, role: Role) {
+    const ports = this.requireToys(s, role);
+    const webhookId = s.state.toy.connectedAt ? await ports.getWebhookId(s) : undefined;
+    if (!webhookId) throw new AppError(409, 'toys_not_connected', 'No toys are connected.');
+    return { ports, webhookId };
+  }
+
+  /** Wearer connects their toys: accepted toy disclaimer, Webhook ID (kept by the adapter) and the toy list. */
+  async toyConnect(s: S, role: Role, input: { webhookId: string; toys: unknown; disclaimerVersion: number }): Promise<SessionView> {
+    const ports = this.requireToys(s, role);
+    if (input.disclaimerVersion !== TOY_DISCLAIMER_VERSION) throw new AppError(400, 'toy_disclaimer', 'Please accept the current toy safety notes first.');
+    const webhookId = String(input.webhookId ?? '').trim();
+    if (!/^[A-Za-z0-9_-]{4,64}$/.test(webhookId)) throw new AppError(400, 'invalid_webhook', 'That does not look like an XToys Webhook ID.');
+    const setup = ToySetupSchema.safeParse({ version: 1, toys: input.toys });
+    if (!setup.success || !setup.data.toys.length) {
+      throw new AppError(400, 'invalid_toys', setup.success ? 'Add at least one toy.' : `Toy list: ${setup.error.issues[0]?.message ?? 'invalid'}`);
+    }
+    const now = this.ports.now();
+    await ports.setWebhookId(s, webhookId);
+    const toys = setup.data.toys;
+    await this.ports.saveState(s, { ...s.state, toy: { ...s.state.toy, connectedAt: now.toISOString(), verifiedAt: undefined, disclaimerVersion: input.disclaimerVersion, toys } });
+    await this.ports.log(s, { title: 'Lockation toys', description: `🎮 Toys connected: ${toyList(toys)}.`, icon: 'gamepad' }).catch(() => undefined);
+    await this.ports.deliver(s, [{ audience: 'keyholder', kind: 'toys', title: 'Lockation: toys connected', message: `The wearer connected: ${toyList(toys)}.`, priority: 'default', key: `toys:connected:${now.toISOString()}` }]);
+    return this.view(s, role);
+  }
+
+  /** Setup check: a short pulse on every connected toy. */
+  async toyTest(s: S, role: Role): Promise<SessionView> {
+    const { ports, webhookId } = await this.requireConnected(s, role);
+    const setup = { version: 1 as const, toys: s.state.toy.toys };
+    const errors: string[] = [];
+    for (const t of setup.toys) {
+      try {
+        await ports.send(s, webhookId, toyCommand(setup, t.id, { cmd: 'play', shape: 'pulse', intensity: Math.min(30, ...t.maxIntensity), seconds: 2 }));
+      } catch (e) {
+        errors.push(`${t.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    if (errors.length) throw new AppError(502, 'toy_send_failed', `XToys did not accept the test: ${errors.join('; ')}`);
+    return this.view(s, role);
+  }
+
+  /** The wearer confirms that the toys reacted to the test. */
+  async toyConfirm(s: S, role: Role): Promise<SessionView> {
+    await this.requireConnected(s, role);
+    const now = this.ports.now();
+    await this.ports.saveState(s, { ...s.state, toy: { ...s.state.toy, verifiedAt: now.toISOString() } });
+    await this.ports.log(s, { title: 'Lockation toys', description: '🎮 The wearer confirmed that the toys react.', icon: 'gamepad' }).catch(() => undefined);
+    await this.ports.deliver(s, [{ audience: 'keyholder', kind: 'toys', title: 'Lockation: toys confirmed', message: 'The wearer confirmed that the toys react.', priority: 'default', key: `toys:verified:${now.toISOString()}` }]);
+    return this.view(s, role);
+  }
+
+  /** Emergency stop: always possible – stop all toys, forget the Webhook ID, apply the keyholder's punishment. */
+  async toyEmergencyStop(s: S, role: Role): Promise<SessionView> {
+    if (role !== 'wearer') throw new AppError(403, 'not_wearer', 'Only the wearer can use the emergency stop.');
+    const ports = this.ports.toys;
+    const webhookId = ports ? await ports.getWebhookId(s) : undefined;
+    if (!webhookId && !s.state.toy.connectedAt) throw new AppError(409, 'toys_not_connected', 'No toys are connected.');
+    if (ports && webhookId) {
+      await ports.send(s, webhookId, { action: 'lockation', cmd: 'stopAll' }).catch(() => undefined);
+      await ports.setWebhookId(s, null);
+    }
+    const now = this.ports.now();
+    const punishment = s.config.rules.toy.onEmergencyStop.filter((c) => c.type !== 'toy');
+    const consequences: PlannedConsequence[] = punishment.map((c, i) => ({ consequence: c, source: 'toy.onEmergencyStop', idempotencyKey: `${s.sessionId}:toy-estop:${now.toISOString()}:${i}` }));
+    const state: LockationState = { ...s.state, toy: { ...s.state.toy, connectedAt: undefined, verifiedAt: undefined, toys: [], emergencyStops: s.state.toy.emergencyStops + 1 } };
+    const what = punishment.length ? punishment.map(describeConsequence).join(', ') : 'nothing';
+    await this.finish(
+      s,
+      {
+        state,
+        consequences,
+        events: ['🛑 Emergency stop: the wearer stopped and disconnected the toys.'],
+        notices: [{ audience: 'keyholder', kind: 'toys', title: 'Lockation: toy emergency stop', message: `The wearer used the emergency stop and disconnected the toys. Consequences: ${what}.`, priority: 'high', key: `toys:estop:${now.toISOString()}` }],
+      },
+      'tick',
+    );
+    return this.view(s, role);
+  }
+
   // ---------- background tracking ----------
 
   /** Record a new OwnTracks pairing (credentials are created by the adapter). */
@@ -239,12 +392,14 @@ export class LockationApp<S extends LockSession = LockSession> {
     for (const input of inputs) {
       const result = evaluateTracked(config, state, input, this.ctx(s));
       state = result.state;
+      let lines: string[] = [];
       if (result.consequences.length) {
-        const applied = await this.ports.applyConsequences(s, result.consequences);
-        result.record.consequences = result.record.consequences.map((x, i) => ({ ...x, ok: applied[i]?.ok, error: applied[i]?.error }));
+        const r = await this.apply(s, state, result.consequences);
+        lines = r.lines;
+        result.record.consequences = result.record.consequences.map((x, i) => ({ ...x, ok: r.applied[i]?.ok, error: r.applied[i]?.error }));
       }
       if (result.consequences.length || result.notices.some((n) => n.audience === 'wearer')) {
-        const entry = buildLogEntry('checkin', result.events, result.consequences, result.record);
+        const entry = buildLogEntry('checkin', [...result.events, ...lines], result.consequences, result.record);
         if (entry) await this.ports.log(s, entry).catch(() => undefined);
       }
       if (result.notable) await this.ports.appendHistory(s, result.record);
@@ -299,3 +454,5 @@ export class LockationApp<S extends LockSession = LockSession> {
 
 /** Roles that may use a zone (re-exported for adapters that need it). */
 export type { ZoneRole };
+
+const toyList = (toys: Toy[]) => toys.map((t) => `${t.name} (${t.bodyPart})`).join(', ');

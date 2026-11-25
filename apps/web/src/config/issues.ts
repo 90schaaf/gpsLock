@@ -6,14 +6,14 @@ import type { ConfigIssue, LockationConfig } from '@lockation/core';
 import { createContext } from 'preact';
 import { useContext } from 'preact/hooks';
 
-export type Tab = 'zones' | 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'surprise' | 'mission' | 'tracking' | 'notify' | 'anticheat' | 'privacy' | 'file';
+export type Tab = 'zones' | 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'surprise' | 'mission' | 'toy' | 'tracking' | 'notify' | 'anticheat' | 'privacy' | 'file';
 
 export function issueTab(path: string): Tab {
   const p = path.split('.');
   if (p[0] === 'zones' && p.length > 2 && (p[2] === 'required' || p[2] === 'forbidden' || p[2] === 'reward' || p[2] === 'surprise')) return p[2];
   if (p[0] === 'rules') {
     const r = p[1];
-    if (r === 'required' || r === 'forbidden' || r === 'reward' || r === 'travel' || r === 'hunt' || r === 'mission' || r === 'surprise') return r;
+    if (r === 'required' || r === 'forbidden' || r === 'reward' || r === 'travel' || r === 'hunt' || r === 'mission' || r === 'surprise' || r === 'toy') return r;
   }
   if (p[0] === 'tracking') return 'tracking';
   if (p[0] === 'notifications') return 'notify';
@@ -53,6 +53,8 @@ const FIELD: Record<string, string> = {
   checkpoints: 'Checkpoints',
   mission: 'Surprise missions',
   surprise: 'Surprise',
+  toy: 'Toys',
+  onEmergencyStop: 'Emergency stop',
   outcomes: 'Outcomes',
   holdMinutes: 'Hold time',
   label: 'Text',

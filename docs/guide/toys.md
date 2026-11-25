@@ -1,8 +1,7 @@
 # Toys (XToys) – test page
 
-::: warning Preview
-Toy control during a lock is **not available yet** (it is being built – see the roadmap). The toy test page already
-works: set up your toys and try them with the Lockation XToys script.
+::: tip Status
+Toy actions as consequences work in locks. Effects that run *while* you are inside a zone are not available yet.
 :::
 
 Lockation controls toys through [XToys](https://xtoys.app) and its **private webhook**. XToys talks to the toys
@@ -45,3 +44,29 @@ Every timed action is a pattern that ends by itself after its duration – a toy
 got lost.
 
 **Export toy setup** saves your toys and limits as a file, so you can load them again later.
+
+## In a lock
+
+**Keyholder** – in the configuration, enable **🎮 Toys** and set what the **emergency stop** costs (required, e.g.
++2 hours). Then add **🎮 Toy** consequences wherever you like (forbidden zones, missed check-ins, surprise zones,
+missions, …):
+
+- **Target**: a body part or all toys, optionally a toy type and a channel;
+- **Action**: play a pattern (constant, pulse, wave, ramp) with intensity and duration, **change the intensity** (to a
+  value, or by e.g. +10 % – stronger at every penalty), ⚡ **shock** (e-stim) or **stop**.
+
+**Wearer** – on the main page, card **🎮 Toys**: accept the safety notes, enter your Webhook ID and your toys (the
+setup from the toy test page in the same browser is filled in), **Connect toys**. Then **▶ Test pulse** and **✓ My
+toys reacted**. Toy actions are sent even before you confirm.
+
+- Your **limits** are fixed while connected. To change them you have to disconnect – which is an emergency stop.
+- **🛑 Emergency stop** – always possible: stops all toys, forgets your Webhook ID and applies the keyholder's
+  punishment. You can connect again afterwards.
+- No toys connected → toy actions are skipped and logged.
+- Every toy action appears in the lock's history with full details – and a cheeky comment.
+- The keyholder is notified when you connect, confirm or use the emergency stop – not for every single toy action.
+- Your Webhook ID is stored on the Lockation server only while connected and is never shown to anyone (not even the
+  keyholder). It is deleted on disconnect and when the lock ends; the toys get a final stop.
+
+**Demo** – the demo has toy control enabled (the casino pulses your toys). Toy actions are only shown in the log, unless
+you tick *really send the demo rules' toy actions to my toys* on the 🎮 Toys card.

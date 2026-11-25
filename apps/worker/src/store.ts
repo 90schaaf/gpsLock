@@ -116,9 +116,20 @@ export class Store {
     else await this.run('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)', key, value);
   }
 
+  // ---------- toys (F27) ----------
+  async toyWebhook(sessionId: string): Promise<string | undefined> {
+    const row = await this.first<{ webhook_id: string }>('SELECT webhook_id FROM toys WHERE session_id = ?', sessionId);
+    return row?.webhook_id ?? undefined;
+  }
+
+  async setToyWebhook(sessionId: string, webhookId: string | null, now: Date): Promise<void> {
+    if (webhookId === null) await this.run('DELETE FROM toys WHERE session_id = ?', sessionId);
+    else await this.run('INSERT OR REPLACE INTO toys (session_id, webhook_id, created_at) VALUES (?, ?, ?)', sessionId, webhookId, now.toISOString());
+  }
+
   // ---------- session end ----------
   async purgeSession(sessionId: string): Promise<void> {
-    for (const t of ['history', 'devices', 'topics', 'due', 'sent']) {
+    for (const t of ['history', 'devices', 'topics', 'due', 'sent', 'toys']) {
       await this.run(`DELETE FROM ${t} WHERE session_id = ?`, sessionId);
     }
   }

@@ -7,6 +7,7 @@
  * Format reference: `examples/xtoys/local webhook.json` (official XToys export).
  */
 import { z } from 'zod';
+import type { Consequence } from './consequences.js';
 
 export const TOY_TYPES = {
   vibrator: { label: 'Vibrator (1 motor)', xtoys: 'part-vibrator', channels: ['main'], shock: false },
@@ -286,3 +287,51 @@ export const TOY_DISCLAIMER: readonly string[] = [
   'Lockation cannot confirm that a toy reacted. XToys must be running with your toys connected. XToys is a third-party service.',
   'Only adults, only with consent. Stop immediately if anything hurts or feels wrong – your health comes before any rule.',
 ];
+
+// ---------- toy consequences (F27 step 2) ----------
+
+export type ToyConsequence = Extract<Consequence, { type: 'toy' }>;
+
+/** The webhook commands for one toy consequence: one per matching connected toy, clamped to its limits. */
+export function resolveToyConsequence(toys: Toy[], c: ToyConsequence): { toy: Toy; body: ToyWebhookBody }[] {
+  const setup: ToySetup = { version: 1, toys };
+  const out: { toy: Toy; body: ToyWebhookBody }[] = [];
+  for (const toy of toys) {
+    if (c.target.bodyPart !== 'all' && toy.bodyPart !== c.target.bodyPart) continue;
+    if (c.target.toyType && toy.type !== c.target.toyType) continue;
+    const chans = TOY_TYPES[toy.type].channels as readonly string[];
+    if (c.target.channel && chans.length > 1 && !chans.includes(c.target.channel)) continue;
+    if (c.action === 'shock' && !TOY_TYPES[toy.type].shock) continue;
+    const channel = c.target.channel && chans.length > 1 ? c.target.channel : undefined;
+    const input: ToyCommandInput =
+      c.action === 'play'
+        ? { cmd: 'play', shape: c.shape ?? 'pulse', intensity: c.intensity ?? 50, seconds: c.seconds ?? 30, channel }
+        : c.action === 'intensity'
+          ? c.delta !== undefined
+            ? { cmd: 'intensity', delta: c.delta, channel }
+            : { cmd: 'intensity', intensity: c.intensity ?? 50, channel }
+          : c.action === 'shock'
+            ? { cmd: 'shock', intensity: c.intensity ?? 30, seconds: c.seconds ?? 1, channel }
+            : { cmd: 'stop', channel };
+    out.push({ toy, body: toyCommand(setup, toy.id, input) });
+  }
+  return out;
+}
+
+/** A cheeky line for the lock log (picked from the idempotency key, so retries show the same one). */
+export const TOY_COMMENTS: readonly string[] = [
+  'Buzz buzz – the rules say hello.',
+  'Feel that? That is the map talking.',
+  'A little reminder of who is in charge.',
+  'Somebody has been a little too adventurous …',
+  'That should keep you focused.',
+  'Good things come to those who obey – this is not one of them.',
+  'Location noted. Pleasure – or punishment – delivered.',
+  'Every step counts. So does every buzz.',
+];
+
+export function toyComment(key: string): string {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return TOY_COMMENTS[h % TOY_COMMENTS.length]!;
+}

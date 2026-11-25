@@ -2,6 +2,11 @@
 
 ## 2026-11-25
 
+- **Toys in a lock (F27, step 2):** `rules.toy {enabled, onEmergencyStop}`, consequence type `toy` (play / intensity / shock /
+  stop; target body part, toy type, channel), app port `toys` (Webhook ID in D1 `toys`, migration 0002), endpoints
+  `/api/toy/connect|test|confirm|emergency-stop`, toy card on the main page, 🎮 Toys tab, demo (shown only unless real
+  sending is switched on), lock-log details with a cheeky comment, skipped actions logged, stop on session end.
+  High-priority keyholder notices bypass the per-kind rate limit.
 - **Toy test page (F27, step 1):** `toys.html` – toy list (type, body part, limits), generated Lockation XToys script, tests
   per toy / channel (patterns, intensity, ±10 %, shock, stop), test all, stop all, "which toys does XToys see" (WebSocket
   `getToys`), toy setup export / import; Webhook ID stays in the browser. Core: `packages/core/src/toys.ts`.

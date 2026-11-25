@@ -7,6 +7,7 @@ import { formatCountdown, useNow } from '../lib/time-ui.js';
 import { isEmbedded } from '../lib/hash.js';
 import type { MockBackend } from '../lib/mock-backend.js';
 import { MissionCard } from './MissionCard.js';
+import { ToyCard } from './ToyCard.js';
 import { SurpriseHoldCard, surpriseCircle } from './SurpriseCard.js';
 import { NotificationsCard } from './NotificationsCard.js';
 import { TrackingCard } from './TrackingCard.js';
@@ -392,6 +393,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
         )}
 
         <TrackingCard view={view} backend={backend} onView={setView} onError={(message) => setError({ message })} />
+        {view.toys && <ToyCard view={view} backend={backend} mock={mock} onView={setView} onError={(message) => setError({ message })} />}
         <NotificationsCard view={view} backend={backend} onView={setView} onError={(message) => setError({ message })} />
 
         {view.freezeUntil && <div class="notice">❄️ Frozen by Lockation until {fmtTime(view.freezeUntil, view.timezone)}.</div>}

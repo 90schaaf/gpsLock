@@ -1,5 +1,6 @@
 /** F7 – consequences that rules can trigger. */
 import { z } from 'zod';
+import { BODY_PARTS, TOY_SHAPES, TOY_TYPE_IDS, TOY_TYPES, type ToyType } from './toys.js';
 
 export const MAX_TIME_SECONDS = 31_536_000; // one year
 
@@ -24,6 +25,21 @@ const BaseConsequenceSchema = z.discriminatedUnion('type', [
     durationMinutes: z.number().int().min(1).max(1440).optional(),
   }),
   z.object({ type: z.literal('verification_picture') }),
+  /** F27 – toy action via XToys, sent to every connected toy that matches `target` (clamped to the wearer's limits). */
+  z.object({
+    type: z.literal('toy'),
+    action: z.enum(['play', 'intensity', 'shock', 'stop']),
+    target: z.object({
+      bodyPart: z.enum([...BODY_PARTS, 'all'] as [string, ...string[]]),
+      toyType: z.enum(TOY_TYPE_IDS as [ToyType, ...ToyType[]]).optional(),
+      channel: z.string().max(20).optional(),
+    }),
+    shape: z.enum(TOY_SHAPES).optional(),
+    intensity: z.number().int().min(0).max(100).optional(),
+    /** Relative intensity change (action `intensity`), e.g. +10 / −20. */
+    delta: z.number().int().min(-100).max(100).optional(),
+    seconds: z.number().int().min(1).max(3600).optional(),
+  }),
   z.object({
     type: z.literal('command'),
     commandId: z.string().regex(/^[a-z0-9-]+\.[a-z0-9-_.]+$/, 'commandId must look like "<extension>.<command>"'),
@@ -106,5 +122,12 @@ export function describeConsequence(c: Consequence): string {
       return 'verification picture';
     case 'command':
       return c.label ?? `run ${c.commandId}`;
+    case 'toy': {
+      const who = `${c.target.toyType ? TOY_TYPES[c.target.toyType].label.toLowerCase() : 'toys'}${c.target.bodyPart === 'all' ? '' : ` – ${c.target.bodyPart}`}${c.target.channel ? ` ${c.target.channel}` : ''}`;
+      if (c.action === 'play') return `🎮 ${c.shape ?? 'pulse'} ${c.intensity ?? 50} % for ${formatDuration(c.seconds ?? 30)} (${who})`;
+      if (c.action === 'intensity') return `🎮 intensity ${c.delta !== undefined ? `${c.delta >= 0 ? '+' : ''}${c.delta} %` : `${c.intensity ?? 50} %`} (${who})`;
+      if (c.action === 'shock') return `🎮 shock ${c.intensity ?? 30} % (${who})`;
+      return `🎮 stop (${who})`;
+    }
   }
 }

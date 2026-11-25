@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildXToysScript, defaultToy, ToyCommandError, toyCommand, ToySetupSchema, toySlots, type ToySetup, type ToyWebhookBody } from '../src/index.js';
+import { buildXToysScript, ConsequenceSchema, defaultToy, describeConsequence, parseConfig, resolveToyConsequence, TOY_COMMENTS, ToyCommandError, toyCommand, toyComment, ToySetupSchema, toySlots, type ToyConsequence, type ToySetup, type ToyWebhookBody } from '../src/index.js';
 
 const setup: ToySetup = ToySetupSchema.parse({
   toys: [
@@ -177,5 +177,46 @@ describe('cloud webhook block', () => {
     x.run('lockation', toyCommand(setup, 'duo', { cmd: 'play', shape: 'constant', intensity: 60, seconds: 5, channel: 'A' }));
     // "intensity" without delta: t_delta arrives as "trigger-delta" → absolute level is used
     expect(x.run('lockation', toyCommand(setup, 'duo', { cmd: 'intensity', intensity: 30, channel: 'A' }))[0].percentVolume).toBe('30');
+  });
+});
+
+describe('toy consequences (step 2)', () => {
+  const toys = setup.toys;
+  const c = (x: Record<string, unknown>) => ({ type: 'toy' as const, action: 'play' as const, target: { bodyPart: 'all' }, ...x }) as ToyConsequence;
+
+  it('targets toys by body part, type and channel, clamped to each toy', () => {
+    expect(resolveToyConsequence(toys, c({ target: { bodyPart: 'all' }, intensity: 90, seconds: 20 })).map((r) => [r.toy.id, r.body.level])).toEqual([
+      ['stim', '30'],
+      ['vibe', '90'],
+      ['duo', '80'],
+      ['vibe2', '90'],
+    ]);
+    expect(resolveToyConsequence(toys, c({ target: { bodyPart: 'anal' } })).map((r) => r.toy.id)).toEqual(['duo']);
+    expect(resolveToyConsequence(toys, c({ target: { bodyPart: 'all', toyType: 'vibrator' } })).map((r) => r.toy.id)).toEqual(['vibe', 'vibe2']);
+    const chB = resolveToyConsequence(toys, c({ target: { bodyPart: 'all', channel: 'B' } }));
+    expect(chB.map((r) => [r.toy.id, r.body.ch])).toEqual([
+      ['stim', '2'],
+      ['vibe', 'all'],
+      ['duo', '2'],
+      ['vibe2', 'all'],
+    ]);
+    expect(resolveToyConsequence(toys, c({ action: 'shock', intensity: 50 })).map((r) => r.toy.id)).toEqual(['stim']);
+    expect(resolveToyConsequence(toys, c({ action: 'intensity', delta: 10, target: { bodyPart: 'genitals', toyType: 'estim' } }))[0]!.body).toMatchObject({ cmd: 'intensity', delta: '10' });
+    expect(resolveToyConsequence([], c({}))).toEqual([]);
+  });
+
+  it('describes toy actions and picks a stable cheeky comment', () => {
+    expect(describeConsequence(c({ shape: 'wave', intensity: 60, seconds: 90, target: { bodyPart: 'genitals' } }))).toBe('🎮 wave 60 % for 1m (toys – genitals)');
+    expect(describeConsequence(c({ action: 'intensity', delta: -20, target: { bodyPart: 'all', toyType: 'estim', channel: 'A' } }))).toBe('🎮 intensity -20 % (e-stim (2 channels) A)');
+    expect(describeConsequence(c({ action: 'stop' }))).toBe('🎮 stop (toys)');
+    expect(toyComment('s1:abc:0')).toBe(toyComment('s1:abc:0'));
+    expect(TOY_COMMENTS).toContain(toyComment('anything'));
+  });
+
+  it('validation: toy control needs a (non-toy) emergency-stop punishment', () => {
+    expect(parseConfig({ version: 2, rules: { toy: { enabled: true } } }).ok).toBe(false);
+    expect(parseConfig({ version: 2, rules: { toy: { enabled: true, onEmergencyStop: [c({})] } } }).ok).toBe(false);
+    expect(parseConfig({ version: 2, rules: { toy: { enabled: true, onEmergencyStop: [{ type: 'add_time', seconds: 7200 }] } } }).ok).toBe(true);
+    expect(ConsequenceSchema.safeParse(c({ shape: 'zigzag' })).success).toBe(false);
   });
 });

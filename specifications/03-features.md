@@ -234,7 +234,8 @@ keyholder, holdMinutes, onReleased, onEarlyLeave}`.
 
 ### F27 – Toy control via XToys (planned)
 
-> Status: **specified, not implemented** (decided 2026-11-25). Open points at the end of this section.
+> Status: step 1 (toy test page, script) and **step 2 (toys in a lock, consequence type, emergency stop) implemented**;
+> step 3 ("while inside") open. Liveness check on hold.
 
 Lockation's rules control the wearer's toys through an **XToys private webhook**
 ([guide](https://guide.xtoys.app/tools/webhook.html)). Toy actions are a new consequence type; during a lock nobody
@@ -312,8 +313,10 @@ manual.
   usable everywhere consequences are (zone actions, forbidden escalation, required missed / success, reward, surprise
   outcomes, missions, hunt, travel, tracking). Example: every forbidden-zone penalty `intensity +10` on the genitals toy –
   the punishment gets stronger the longer the wearer stays. Applied by the worker like ntfy delivery: sent to every
-  matching connected toy, clamped to its limits, at most one action per toy per 10 s (later ones are merged), logged in
-  the history ("🎮 pulse 60 % for 30 s – genitals"). No matching toy connected → skipped (logged).
+  matching connected toy, clamped to its limits, in order, logged in the lock history with **full details and a cheeky
+  comment** ("🎮 pulse 60 % for 30s (toys – genitals) → Bullet." + "😈 …"). No (matching) toy connected or toy control
+  off → skipped and logged. Toy actions are sent even if the wearer has not confirmed the setup check (warning shown).
+  Keyholder pushes only for connected / confirmed / emergency stop (high priority – never rate-limited).
 - **"While inside" mode** per zone (`toy.whileInside {action, target, intensity, pattern}`): starts when the wearer enters the
   zone, stops when they leave. Also usable as "while **outside** the required zones". Implemented as a **dead-man's
   switch**: each start carries a limited `seconds` (≤ the toy's maximum) and is refreshed on every location / tick while

@@ -153,6 +153,10 @@ All `/api/*` endpoints: `POST`, JSON, CORS restricted. Errors: `{error: {code, m
 | `/api/notify/stop` | `{mainToken}` | `SessionView` |
 | `/api/notice/ack` | `{mainToken}` (wearer) | `SessionView` (clears `rulesChanged`) |
 | `/api/hunt` | `{mainToken, action: "start" \| "pause" \| "resume" \| "abort"}` | `SessionView`; 403 `hunt_action_not_allowed` |
+| `/api/toy/connect` | `{mainToken, webhookId, toys, disclaimerVersion}` (wearer) | `SessionView`; 400 `toy_disclaimer` / `invalid_webhook` / `invalid_toys`, 409 `toys_disabled` |
+| `/api/toy/test` | `{mainToken}` (wearer) | `SessionView`; 502 `toy_send_failed` |
+| `/api/toy/confirm` | `{mainToken}` (wearer) | `SessionView` |
+| `/api/toy/emergency-stop` | `{mainToken}` (wearer) | `SessionView` (stop all, ID deleted, `onEmergencyStop` applied) |
 | `/api/surprise` | `{mainToken, action: {type: "release", zoneId}}` (keyholder) | `SessionView`; 403 `surprise_action_not_allowed` |
 | `/api/mission` | `{mainToken, action: {type: "send", zoneId, minutes?} \| {type: "decline"} \| {type: "cancel"}}` | `SessionView`; 403 `mission_action_not_allowed` |
 | `/track/owntracks` | OwnTracks message, Basic auth with device credentials | `[]`, `setWaypoints` and/or `setConfiguration` commands; 401 on wrong credentials |

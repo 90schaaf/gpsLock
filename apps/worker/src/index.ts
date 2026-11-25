@@ -24,6 +24,7 @@ const bodies = {
   capabilities: z.object({ mainToken: z.string().optional(), configToken: z.string().optional() }),
   tracking: z.object({ mainToken: z.string().min(1) }),
   hunt: z.object({ mainToken: z.string().min(1), action: z.enum(['start', 'pause', 'resume', 'abort']) }),
+  toyConnect: z.object({ mainToken: z.string().min(1), webhookId: z.string().min(1).max(100), toys: z.array(z.unknown()).max(8), disclaimerVersion: z.number().int() }),
   surprise: z.object({ mainToken: z.string().min(1), action: z.object({ type: z.literal('release'), zoneId: z.string().min(1).max(100) }) }),
   mission: z.object({
     mainToken: z.string().min(1),
@@ -39,6 +40,8 @@ export interface Overrides {
   fetch?: FetchLike;
   /** Separate fetch for ntfy (tests). Defaults to `fetch`. */
   ntfyFetch?: FetchLike;
+  /** Separate fetch for XToys (tests). Defaults to `fetch`. */
+  toyFetch?: FetchLike;
   now?: () => Date;
   rng?: () => number;
   newId?: () => string;
@@ -48,7 +51,7 @@ export function createService(env: Env, o: Overrides = {}) {
   const client = new ChasterClient(env.CHASTER_TOKEN, env.CHASTER_API_BASE ?? 'https://api.chaster.app', o.fetch);
   const store = new Store(env.DB);
   const ntfy = Ntfy.from(env, o.ntfyFetch ?? o.fetch ?? ((i, init) => fetch(i, init)));
-  const service = new LockationService({ client, store, ntfy, appUrl: env.APP_URL, now: o.now, rng: o.rng, newId: o.newId });
+  const service = new LockationService({ client, store, ntfy, appUrl: env.APP_URL, now: o.now, rng: o.rng, newId: o.newId, toyFetch: o.toyFetch ?? o.fetch });
   return { client, store, service };
 }
 
@@ -163,6 +166,22 @@ export async function handleRequest(req: Request, env: Env, o: Overrides = {}): 
       case '/api/hunt': {
         const b = await parseBody(req, bodies.hunt);
         return json(await service.huntAction(b.mainToken, b.action), 200, cors);
+      }
+      case '/api/toy/connect': {
+        const b = await parseBody(req, bodies.toyConnect);
+        return json(await service.toyConnect(b.mainToken, b), 200, cors);
+      }
+      case '/api/toy/test': {
+        const b = await parseBody(req, bodies.session);
+        return json(await service.toyTest(b.mainToken), 200, cors);
+      }
+      case '/api/toy/confirm': {
+        const b = await parseBody(req, bodies.session);
+        return json(await service.toyConfirm(b.mainToken), 200, cors);
+      }
+      case '/api/toy/emergency-stop': {
+        const b = await parseBody(req, bodies.session);
+        return json(await service.toyEmergencyStop(b.mainToken), 200, cors);
       }
       case '/api/surprise': {
         const b = await parseBody(req, bodies.surprise);

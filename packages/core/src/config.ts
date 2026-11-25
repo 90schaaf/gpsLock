@@ -312,6 +312,15 @@ export const MissionRuleSchema = z
   })
   .default({});
 
+/** F27 – toy control via XToys: toy consequences need it enabled; the wearer's emergency stop is punished. */
+export const ToyRuleSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    /** Applied when the wearer disconnects the toys (emergency stop). Required when toy control is enabled. */
+    onEmergencyStop: ConsequenceListSchema,
+  })
+  .default({});
+
 /** F26 – surprise zones (per-zone outcomes live in `zone.surprise`). */
 export const SurpriseRuleSchema = z
   .object({
@@ -332,6 +341,7 @@ export const KeyholderNotifySchema = z
     hunt: z.boolean().default(true),
     mission: z.boolean().default(true),
     surprise: z.boolean().default(true),
+    toys: z.boolean().default(true),
     reward: z.boolean().default(false),
     verification: z.boolean().default(true),
   })
@@ -353,6 +363,7 @@ export const LockationConfigSchema = z
         hunt: HuntRuleSchema,
         mission: MissionRuleSchema,
         surprise: SurpriseRuleSchema,
+        toy: ToyRuleSchema,
       })
       .default({}),
     tracking: TrackingSchema,
@@ -431,6 +442,10 @@ export const LockationConfigSchema = z
       issue(['antiCheat', 'liveVerificationEveryHours'], 'random verification pictures need "live tracking only"');
     }
     if (R.hunt.enabled && R.hunt.checkpoints.length === 0) issue(['rules', 'hunt', 'checkpoints'], 'add at least one checkpoint');
+    if (R.toy.enabled) {
+      if (!R.toy.onEmergencyStop.length) issue(['rules', 'toy', 'onEmergencyStop'], 'set a consequence for the emergency stop (e.g. add 2 hours)');
+      if (R.toy.onEmergencyStop.some((c) => c.type === 'toy')) issue(['rules', 'toy', 'onEmergencyStop'], 'the emergency stop cannot trigger toy actions');
+    }
     const M = R.mission;
     if (M.enabled) {
       M.zoneIds.forEach((id, i) => {
