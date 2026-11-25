@@ -140,3 +140,26 @@ describe('hunt tab: random route', () => {
     expect([2, 3]).toContain(v.hunt?.total);
   });
 });
+
+describe('demo: draw a new random route', () => {
+  it('resets the hunt progress and draws a route within the range', async () => {
+    const { MockBackend, demoConfig } = await import('../src/lib/mock-backend.js');
+    const m = new Map<string, string>();
+    const b = new MockBackend({ getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) });
+    const cfg = demoConfig();
+    const base = cfg.rules.hunt.checkpoints[0]!;
+    const cps = [0, 1, 2, 3].map((i) => ({ ...base, id: `r${i}`, name: `R${i}`, lat: base.lat + i * 0.003 }));
+    await b.configSave({ ...cfg, disclaimer: { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' }, rules: { ...cfg.rules, hunt: { ...cfg.rules.hunt, checkpoints: cps, random: { enabled: true, min: 2, max: 3 } } } });
+    await b.session();
+    for (let i = 0; i < 5; i++) {
+      const r = await b.redrawHuntRoute();
+      expect(r.drawn).toBe(true);
+      expect(r.names.length).toBeGreaterThanOrEqual(2);
+      expect(r.names.length).toBeLessThanOrEqual(3);
+      expect(new Set(r.names).size).toBe(r.names.length);
+      const v = await b.session();
+      expect(v.hunt).toMatchObject({ index: 0, status: 'active', total: r.names.length });
+    }
+    expect(b.demoLog().some((l) => /new random route/.test(l.description))).toBe(true);
+  });
+});

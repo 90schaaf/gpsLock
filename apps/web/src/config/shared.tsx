@@ -37,6 +37,8 @@ export interface TabProps {
   setTab: (t: Tab) => void;
   /** A lock is running for this configuration. */
   running: boolean;
+  /** Demo-only actions (undefined outside the demo). */
+  demo?: { redrawHuntRoute(): Promise<{ drawn: boolean; names: string[] }> };
 }
 
 export const newId = (prefix: string) => `${prefix}${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;

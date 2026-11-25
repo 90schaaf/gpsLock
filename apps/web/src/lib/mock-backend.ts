@@ -5,6 +5,7 @@ import {
   type CheckinRecord,
   type Fix,
   type HuntAction,
+  huntRoute,
   initialState,
   KNOWN_COMMANDS,
   loadState,
@@ -332,6 +333,37 @@ export class MockBackend implements Backend {
     const { results } = await this.app.tracked(d, [{ fix, manual: true }], { ignoreSpeed: opts.ignoreSpeed });
     const record: CheckinRecord = results[0]!.record;
     return { record, view: await this.app.view(d, d.store.role) };
+  }
+
+  /**
+   * Demo only: restart the hunt with a newly drawn random route (uses the saved configuration). In a real lock the route
+   * is fixed once drawn – re-drawing until an easy route comes up would be cheating.
+   */
+  async redrawHuntRoute(): Promise<{ drawn: boolean; names: string[] }> {
+    const store = this.load();
+    const config = parseConfigOrDefault(store.config);
+    const now = this.now();
+    const state = store.state ? loadState(store.state, config, now, now) : initialState(config, now);
+    const auto = config.rules.hunt.start === 'auto';
+    state.hunt = {
+      ...state.hunt,
+      route: undefined,
+      index: 0,
+      found: [],
+      lastDistanceBand: undefined,
+      lastWrongAt: undefined,
+      pausedAt: undefined,
+      pausedMs: 0,
+      status: auto ? 'active' : 'not_started',
+      startedAt: auto ? now.toISOString() : undefined,
+    };
+    store.state = state;
+    this.save(store);
+    const d = await this.session_(); // the simulated cron tick draws the route of a running hunt
+    const names = huntRoute(d.config, d.state).map((c) => c.name);
+    this.log(d.store, 'Lockation (demo)', names.length ? `Hunt restarted with a new random route: ${names.join(' → ')}.` : 'Hunt reset – the route is drawn when the hunt starts.');
+    this.save(d.store);
+    return { drawn: names.length > 0, names };
   }
 
   demoLog() {

@@ -22,6 +22,10 @@ location there (like OwnTracks, including the manual-send setup confirmation; th
 demo bar button *🖱 Map click* switches between "send location" and "only set position" (then the click only sets the
 position for the next check-in or *Demo: send as background update*).
 
+**Random hunt route:** in the demo configuration (Hunt tab, *Random route* enabled) **🎲 Draw a new route (demo)** restarts the
+demo hunt with a newly drawn route (from the saved settings) and shows it. Real locks have no such button – the route is
+drawn once and stays fixed.
+
 ## Against the real Chaster API
 
 1. `cp apps/worker/.dev.vars.example apps/worker/.dev.vars` and fill in your developer token and webhook credentials.

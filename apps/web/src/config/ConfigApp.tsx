@@ -11,6 +11,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { LeafletMap, ZONE_COLORS, type MapCircle } from '../components/LeafletMap.js';
 import { ApiError, type Backend, type CommandInfo } from '../lib/backend.js';
+import { MockBackend } from '../lib/mock-backend.js';
 import { ConfigBridge } from '../lib/config-bridge.js';
 import { isEmbedded } from '../lib/hash.js';
 import { ackStillValid, createReachabilityChecker, needsConfirmation, unconfirmedPlaces } from '../lib/reachability.js';
@@ -225,7 +226,8 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
 
   const mapUsable = tab === 'zones' || tab === 'hunt';
   const TabContent = TAB_COMPONENTS[tab];
-  const tabProps: TabProps = { config, edit, editZone, commands, reach, selected, setSelected, setTab, running };
+  const demoActions = backend instanceof MockBackend ? { redrawHuntRoute: () => (backend as MockBackend).redrawHuntRoute() } : undefined;
+  const tabProps: TabProps = { config, edit, editZone, commands, reach, selected, setSelected, setTab, running, demo: demoActions };
 
   return (
     <IssuesContext.Provider value={issues}>
