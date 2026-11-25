@@ -111,7 +111,7 @@ describe('F13 demo backend', () => {
     const home = cfg.zones[0]!;
     const v = await b.session();
     expect(v.role).toBe('wearer');
-    expect(v.rules.map((r) => r.rule)).toEqual(['required', 'forbidden', 'reward', 'travel', 'hunt', 'tracking']);
+    expect(v.rules.map((r) => r.rule)).toEqual(['required', 'forbidden', 'reward', 'travel', 'hunt', 'surprise', 'tracking']);
     const r = await b.checkin({ lat: home.lat, lng: home.lng, accuracy: 5, timestamp: now.getTime() }, 'general');
     expect(r.record.outcome).toBe('accepted');
     expect(r.record.zones).toContain('Home');
@@ -485,7 +485,7 @@ describe('UI smoke tests (jsdom)', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     render(h(ConfigApp, { backend: b, bridge, reachCheck }), el);
     await vi.advanceTimersByTimeAsync(200);
-    expect(el.querySelectorAll('[data-testid="zone-item"]')).toHaveLength(4);
+    expect(el.querySelectorAll('[data-testid="zone-item"]')).toHaveLength(5);
     await vi.advanceTimersByTimeAsync(1500);
     expect(el.querySelector('[data-testid="reach-flag"]')?.textContent).toMatch(/in a lake/);
     expect(el.querySelector('[data-testid="reach-blocker"]')).not.toBeNull();

@@ -181,3 +181,24 @@ describe('surprise missions in the demo', () => {
     expect(d.mission).toMatchObject({ active: undefined, declinesLeft: 0, stats: { declined: 1 } });
   });
 });
+
+describe('surprise zones', () => {
+  it('role chips: surprise excludes the other roles', async () => {
+    const { toggleRole, isValidRoleSet } = await import('../src/config/helpers.js');
+    expect(toggleRole(['required', 'reward'], 'surprise')).toEqual(['surprise']);
+    expect(toggleRole(['surprise'], 'reward')).toEqual(['reward']);
+    expect(toggleRole(['surprise'], 'surprise')).toEqual([]);
+    expect(isValidRoleSet(['surprise', 'reward'])).toBe(false);
+  });
+
+  it('map marks new, visited, used and holding surprise zones differently', async () => {
+    const { surpriseCircle } = await import('../src/main/SurpriseCard.js');
+    const z = (status: 'new' | 'visited' | 'used' | 'holding') => surpriseCircle({ id: 'g', name: 'Park', lat: 0, lng: 0, radiusM: 50, kinds: ['surprise'], windows: [], windowActive: false, surprise: { status, visits: status === 'new' ? 0 : 1, once: status === 'used' } });
+    expect(z('new')).toMatchObject({ label: '🎁 Park' });
+    expect(z('new').dashed).toBeFalsy();
+    expect(z('visited')).toMatchObject({ label: '🎁✓ Park', dashed: true });
+    expect(z('used')).toMatchObject({ label: '✓ Park', dashed: true });
+    expect(z('holding')).toMatchObject({ label: '⏳ Park', selected: true });
+    expect(z('used').color).not.toBe(z('new').color);
+  });
+});

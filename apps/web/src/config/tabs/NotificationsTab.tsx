@@ -8,6 +8,7 @@ const KEYHOLDER_SWITCHES: { id: KeyholderNotifyKind; label: string; help: string
   { id: 'requiredMissed', label: 'Required check-in missed', help: 'A required check-in deadline passed.' },
   { id: 'requiredDone', label: 'Required check-in done', help: 'Every successful required check-in.' },
   { id: 'hunt', label: 'Scavenger hunt', help: 'Checkpoint found, hunt completed or failed.' },
+  { id: 'surprise', label: 'Surprise zones', help: 'The wearer entered a surprise zone, was released or left too early.' },
   { id: 'mission', label: 'Surprise missions', help: 'Random mission sent, accomplished, failed or declined.' },
   { id: 'reward', label: 'Reward earned', help: 'The wearer earned a reward in a reward zone.' },
   { id: 'verification', label: 'Verification picture', help: 'A verification picture was requested.' },

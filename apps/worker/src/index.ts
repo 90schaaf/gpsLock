@@ -24,6 +24,7 @@ const bodies = {
   capabilities: z.object({ mainToken: z.string().optional(), configToken: z.string().optional() }),
   tracking: z.object({ mainToken: z.string().min(1) }),
   hunt: z.object({ mainToken: z.string().min(1), action: z.enum(['start', 'pause', 'resume', 'abort']) }),
+  surprise: z.object({ mainToken: z.string().min(1), action: z.object({ type: z.literal('release'), zoneId: z.string().min(1).max(100) }) }),
   mission: z.object({
     mainToken: z.string().min(1),
     action: z.discriminatedUnion('type', [
@@ -162,6 +163,10 @@ export async function handleRequest(req: Request, env: Env, o: Overrides = {}): 
       case '/api/hunt': {
         const b = await parseBody(req, bodies.hunt);
         return json(await service.huntAction(b.mainToken, b.action), 200, cors);
+      }
+      case '/api/surprise': {
+        const b = await parseBody(req, bodies.surprise);
+        return json(await service.surpriseAction(b.mainToken, b.action), 200, cors);
       }
       case '/api/mission': {
         const b = await parseBody(req, bodies.mission);

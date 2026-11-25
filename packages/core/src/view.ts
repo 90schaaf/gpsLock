@@ -1,7 +1,7 @@
 /** View models sent to the browser, Chaster metadata (F12) and privacy helpers (F9). */
 import { activeRoles, forbiddenTimings, type LockationConfig, owntracksMonitoring, type ZoneRole, zonesWithRole, missionTargets } from './config.js';
 import { describeConsequence, describeWhen, type Consequence } from './consequences.js';
-import { allowedHuntActions, allowedMissionActions, missionDeclinesLeft, type MissionActionType, type CheckinRecord, type HuntAction, huntDeadlineOf, huntRoute, huntScheduledStart, huntTotal, type PlannedConsequence, visibleCheckpoints } from './engine.js';
+import { surpriseStatus, allowedHuntActions, allowedMissionActions, missionDeclinesLeft, type MissionActionType, type CheckinRecord, type HuntAction, huntDeadlineOf, huntRoute, huntScheduledStart, huntTotal, type PlannedConsequence, visibleCheckpoints } from './engine.js';
 import { earliestDeadline, effectivePrivacy, type LockationState, nextHeartbeatFrom, requiredSlots } from './state.js';
 import { activeWindowStart, formatLocalTime, formatWindow, MINUTE } from './time.js';
 
@@ -21,10 +21,12 @@ export interface ZoneView {
   windowActive: boolean;
   /** F17 – the keyholder confirmed this place is intentionally hard to reach. */
   reachabilityNote?: string;
+  /** F26 – surprise zone: map status, visits, what happened last and (if shown) the possible outcomes. */
+  surprise?: { status: 'new' | 'visited' | 'used' | 'holding'; visits: number; last?: string; possible?: string[]; once: boolean };
 }
 
 export interface RuleSummary {
-  rule: 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'mission' | 'tracking' | 'zoneActions';
+  rule: 'required' | 'forbidden' | 'reward' | 'travel' | 'hunt' | 'mission' | 'surprise' | 'tracking' | 'zoneActions';
   title: string;
   lines: string[];
 }
@@ -92,6 +94,8 @@ export interface SessionView {
     deadline?: string;
   };
   travel?: { totalKm: number; pendingKm: number; stepKm: number; kmToday: number; dailyCapKm: number };
+  /** F26 – surprise zones that currently hold the wearer. */
+  surpriseHolds?: { zoneId: string; zoneName: string; label: string; mode: 'stay' | 'keyholder'; since: string; until: string; canRelease: boolean }[];
   /** F25 – surprise missions. */
   mission?: {
     active?: { zoneId: string; zoneName: string; issuedAt: string; dueAt: string; by: 'random' | 'keyholder'; target: { lat: number; lng: number; radiusM: number } };
@@ -237,6 +241,19 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
       ],
     });
   }
+  if (config.rules.surprise.enabled) {
+    const sz = zonesWithRole(config, 'surprise');
+    if (sz.length) {
+      out.push({
+        rule: 'surprise',
+        title: 'Surprise zones',
+        lines: [
+          `Entering ${sz.map((z) => `"${z.name}"`).join(', ')} triggers a surprise – a reward or a punishment. Some keep you inside for a while; leaving before you are released has consequences.`,
+          ...sz.map((z) => `${z.name}: ${z.surprise.visits === 'once' ? 'only the first visit counts' : `every visit counts (at most every ${fmtMinutes(z.surprise.cooldownMinutes)})`}${config.rules.surprise.showPossible ? ` – possible: ${z.surprise.outcomes.map((o) => o.label).join(' / ')}` : ''}.`),
+        ],
+      });
+    }
+  }
   const mission = config.rules.mission;
   if (mission.enabled) {
     const names = missionTargets(config).map((z) => z.name).join(', ');
@@ -315,7 +332,16 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
       windows.push(`Forbidden ${z.forbidden.windows.map(formatWindow).join(', ')}`);
       windowActive ||= !!activeWindowStart(z.forbidden.windows, now, config.timezone);
     }
-    return { id: z.id, name: z.name, lat: z.lat, lng: z.lng, radiusM: z.radiusM, kinds, windows, windowActive, reachabilityNote: reachNote(z.reachabilityAck) };
+    const surprise = kinds.includes('surprise')
+      ? {
+          status: surpriseStatus(z, state),
+          visits: state.surprise.zones[z.id]?.visits ?? 0,
+          last: state.surprise.zones[z.id]?.lastOutcome,
+          once: z.surprise.visits === 'once',
+          ...(role === 'keyholder' || config.rules.surprise.showPossible ? { possible: z.surprise.outcomes.map((o) => o.label) } : {}),
+        }
+      : undefined;
+    return { id: z.id, name: z.name, lat: z.lat, lng: z.lng, radiusM: z.radiusM, kinds, windows, windowActive, reachabilityNote: reachNote(z.reachabilityAck), ...(surprise ? { surprise } : {}) };
   });
 
   const view: SessionView = {
@@ -430,6 +456,16 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
     };
   }
 
+  if (config.rules.surprise.enabled) {
+    const holds = config.zones.flatMap((z) => {
+      const a = state.surprise.zones[z.id]?.active;
+      if (!a) return [];
+      const label = z.surprise.outcomes.find((o) => o.id === a.outcomeId)?.label ?? 'Surprise';
+      return [{ zoneId: z.id, zoneName: z.name, label, mode: a.mode, since: a.since, until: a.until, canRelease: role === 'keyholder' && !isSelfLock }];
+    });
+    if (holds.length) view.surpriseHolds = holds;
+  }
+
   const m = config.rules.mission;
   if (m.enabled) {
     const a = state.mission.active;
@@ -492,10 +528,14 @@ export function computeMetadata(config: LockationConfig, state: LockationState, 
 
   const live = config.tracking.enabled && config.tracking.checkins === 'auto';
   let description = 'Prove your location';
+  const holdZone = config.rules.surprise.enabled ? config.zones.find((z) => state.surprise.zones[z.id]?.active) : undefined;
+  const hold = holdZone ? state.surprise.zones[holdZone.id]!.active : undefined;
   const activeMission = config.rules.mission.enabled ? state.mission.active : undefined;
   const missionZone = activeMission ? config.zones.find((z) => z.id === activeMission.zoneId) : undefined;
   if (live && !state.tracking.deviceUser) {
     description = 'Set up live tracking!';
+  } else if (holdZone && hold) {
+    description = hold.mode === 'stay' ? `Stay in "${holdZone.name}" until ${formatLocalTime(new Date(hold.until), config.timezone)}` : `Wait in "${holdZone.name}" for the keyholder`;
   } else if (activeMission && missionZone) {
     description = `Mission: be at "${missionZone.name}" by ${formatLocalTime(new Date(activeMission.dueAt), config.timezone)}`;
   } else if (deadline) {
@@ -515,7 +555,7 @@ export function computeMetadata(config: LockationConfig, state: LockationState, 
   return {
     reasonsPreventingUnlocking: reasons,
     homeActions: [
-      { slug: 'checkin', title: live ? 'GPS live tracking' : 'GPS check-in', description, icon: 'map-marker-alt', ...(overdue || (live && !state.tracking.deviceUser) || missionZone ? { badge: '!' } : {}) },
+      { slug: 'checkin', title: live ? 'GPS live tracking' : 'GPS check-in', description, icon: 'map-marker-alt', ...(overdue || (live && !state.tracking.deviceUser) || missionZone || holdZone ? { badge: '!' } : {}) },
     ],
   };
 }

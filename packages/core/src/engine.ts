@@ -4,6 +4,7 @@
  */
 import {
   type Checkpoint,
+  type SurpriseOutcome,
   forbiddenTimings,
   type KeyholderNotifyKind,
   type LockationConfig,
@@ -12,7 +13,7 @@ import {
   type Zone,
   zonesWithRole,
 } from './config.js';
-import { appliesAt, type Consequence, describeConsequence, scaleConsequence } from './consequences.js';
+import { appliesAt, type Consequence, describeConsequence, formatDuration, scaleConsequence } from './consequences.js';
 import { distanceBand, haversineM, isInside, roundCoord } from './geo.js';
 import {
   cloneState,
@@ -125,6 +126,7 @@ const PENALTY_SOURCES = new Set([
   'hunt.onTimeout',
   'hunt.onAbort',
   'mission.onFail',
+  'surprise.onEarlyLeave',
   'antiCheat.implausible',
 ]);
 
@@ -418,6 +420,7 @@ function runRules(config: LockationConfig, state: LockationState, fix: Fix | und
   const left = updatePresence(config, state, fix, inside, at, o.forced);
   const entered = Object.keys(state.presence).filter((id) => !presentBefore.has(id));
   evalZoneActions(config, state, entered, left, rctx, plan);
+  evalSurprise(config, state, entered, left, rctx, plan);
 
   evalHunt(config, state, fix, rctx, plan, o.source === 'manual' ? o.purpose : 'general', o.forcedCheckpoint);
   evalRequired(config, state, inside, rctx, plan, o.source);
@@ -1008,6 +1011,9 @@ export function evaluateTick(config: LockationConfig, prevState: LockationState,
     }
   }
 
+  // F26 surprise zones: release holds that are over
+  tickSurprise(config, state, now, plan);
+
   // F25 surprise missions: end overdue ones, remind, start random ones
   tickMission(config, state, ctx, plan);
 
@@ -1078,6 +1084,7 @@ export function nextDueAt(config: LockationConfig, state: LockationState, now: D
   if (h.enabled && state.hunt.status === 'active') push(huntDeadlineOf(config, state)?.getTime());
   if (h.enabled && state.hunt.status === 'not_started' && h.start === 'scheduled') push(huntScheduledStart(config, state)?.getTime());
   if (state.nextLiveVerification) push(Date.parse(state.nextLiveVerification));
+  if (config.rules.surprise.enabled) for (const st of Object.values(state.surprise.zones)) if (st.active) push(Date.parse(st.active.until));
   const m = config.rules.mission;
   if (m.enabled) {
     const a = state.mission.active;
@@ -1392,5 +1399,117 @@ export function startRandomMissionNow(config: LockationConfig, prevState: Lockat
   if (!candidates.length) throw new MissionActionError('No mission zone is far enough away right now.');
   const plan = new Planner(ctx);
   startMission(config, state, candidates[Math.floor((ctx.rng ?? Math.random)() * candidates.length)]!, 'random', m.leadMinutes, ctx.now, plan);
+  return { state, consequences: plan.list, events: plan.events, notices: plan.finish() };
+}
+
+// ---------- F26 surprise zones ----------
+
+export type SurpriseAction = { type: 'release'; zoneId: string };
+export class SurpriseActionError extends Error {}
+
+function drawOutcome(outcomes: SurpriseOutcome[], rng: () => number): SurpriseOutcome | undefined {
+  const total = outcomes.reduce((a, o) => a + o.weight, 0);
+  let r = rng() * total;
+  for (const o of outcomes) {
+    r -= o.weight;
+    if (r < 0) return o;
+  }
+  return outcomes[outcomes.length - 1];
+}
+
+const outcomeOf = (z: Zone, id: string) => z.surprise.outcomes.find((o) => o.id === id);
+
+function releaseSurprise(z: Zone, o: SurpriseOutcome | undefined, st: LockationState['surprise']['zones'][string], by: 'time' | 'keyholder', plan: Planner) {
+  const a = st.active!;
+  st.active = undefined;
+  const cons = o?.onReleased ?? [];
+  plan.addStable('surprise.onReleased', cons, `surprise:${z.id}:${a.since}:released`);
+  plan.event(`Released from the surprise zone "${z.name}"${by === 'keyholder' ? ' by the keyholder' : ''}${cons.length ? `: ${list(cons)}` : ''}.`);
+  plan.notify({ audience: 'wearer', title: '🎁 Released', message: `You may leave "${z.name}" now${cons.length ? ` – ${list(cons)}` : ''}.`, priority: 'high', key: `surprise:${z.id}:${a.since}:released` });
+  if (by === 'time') plan.notify({ audience: 'keyholder', kind: 'surprise', title: 'Lockation: surprise zone', message: `The wearer stayed in "${z.name}" long enough and was released.`, key: `surprise:${z.id}:${a.since}:released` });
+}
+
+/** Entering draws an outcome (respecting once / repeat + cooldown); leaving during a hold is an early leave. */
+function evalSurprise(config: LockationConfig, state: LockationState, entered: string[], left: LeftZone[], ctx: EvalContext, plan: Planner) {
+  if (!config.rules.surprise.enabled) return;
+  const now = ctx.now;
+  for (const l of left) {
+    const st = state.surprise.zones[l.id];
+    const a = st?.active;
+    const z = config.zones.find((x) => x.id === l.id);
+    if (!a || !z) continue;
+    const o = outcomeOf(z, a.outcomeId);
+    if (l.end >= Date.parse(a.until)) {
+      releaseSurprise(z, o, st, 'time', plan);
+      continue;
+    }
+    st.active = undefined;
+    const cons = o?.onEarlyLeave ?? [];
+    plan.addStable('surprise.onEarlyLeave', cons, `surprise:${z.id}:${a.since}:early`);
+    plan.event(`Left the surprise zone "${z.name}" too early${cons.length ? `: ${list(cons)}` : ''}.`);
+    plan.notify({ audience: 'wearer', title: '🎁 Left too early', message: `You left "${z.name}" before you were released${cons.length ? `: ${list(cons)}` : ''}.`, priority: 'high', key: `surprise:${z.id}:${a.since}:early` });
+    plan.notify({ audience: 'keyholder', kind: 'surprise', title: 'Lockation: surprise zone left early', message: `The wearer left "${z.name}" before being released.`, key: `surprise:${z.id}:${a.since}:early` });
+  }
+  for (const id of entered) {
+    const z = config.zones.find((x) => x.id === id);
+    if (!z?.roles.includes('surprise') || !z.surprise.outcomes.length) continue;
+    const st = (state.surprise.zones[id] ??= { visits: 0 });
+    if (st.active) continue;
+    if (z.surprise.visits === 'once' && st.visits > 0) continue;
+    if (z.surprise.visits === 'repeat' && msSince(st.lastAt, now) < z.surprise.cooldownMinutes * MINUTE) continue;
+    const o = drawOutcome(z.surprise.outcomes, ctx.rng ?? Math.random)!;
+    const atIso = now.toISOString();
+    st.visits += 1;
+    st.lastAt = atIso;
+    st.lastOutcome = o.label;
+    plan.addStable('surprise.onEnter', o.onEnter, `surprise:${id}:${atIso}:enter`);
+    let hold = '';
+    if (o.hold !== 'none' && o.holdMinutes) {
+      const until = new Date(now.getTime() + o.holdMinutes * MINUTE);
+      st.active = { outcomeId: o.id, since: atIso, until: until.toISOString(), mode: o.hold };
+      const t = formatLocalTime(until, config.timezone);
+      hold =
+        o.hold === 'stay'
+          ? ` Stay inside for ${formatDuration(o.holdMinutes * 60)} (until ${t}) to be released.`
+          : ` Stay inside until the keyholder releases you (at the latest ${t}).`;
+      if (o.onEarlyLeave.length) hold += ` Leaving early: ${list(o.onEarlyLeave)}.`;
+    }
+    plan.event(`Surprise zone "${z.name}": ${o.label}${o.onEnter.length ? ` – ${list(o.onEnter)}` : ''}.`);
+    plan.notify({ audience: 'wearer', title: `🎁 Surprise: ${o.label}`, message: `"${z.name}"${o.onEnter.length ? `: ${list(o.onEnter)}.` : '.'}${hold}`, priority: 'high', key: `surprise:${id}:${atIso}:enter`, zoneId: id });
+    plan.notify({ audience: 'keyholder', kind: 'surprise', title: 'Lockation: surprise zone', message: `The wearer entered "${z.name}": ${o.label}${o.onEnter.length ? ` (${list(o.onEnter)})` : ''}.`, key: `surprise:${id}:${atIso}:enter` });
+  }
+}
+
+/** Holds end at their time while the wearer is still inside (leaving is detected by the next location). */
+function tickSurprise(config: LockationConfig, state: LockationState, now: Date, plan: Planner) {
+  for (const [id, st] of Object.entries(state.surprise.zones)) {
+    if (!st.active) continue;
+    const z = config.zones.find((x) => x.id === id);
+    if (!config.rules.surprise.enabled || !z?.roles.includes('surprise')) {
+      st.active = undefined;
+      continue;
+    }
+    if (now.getTime() >= Date.parse(st.active.until)) releaseSurprise(z, outcomeOf(z, st.active.outcomeId), st, 'time', plan);
+  }
+}
+
+/** Status of a surprise zone for the map: never visited, visited (repeatable), used up (once), or holding the wearer. */
+export function surpriseStatus(z: Zone, state: LockationState): 'new' | 'visited' | 'used' | 'holding' {
+  const st = state.surprise.zones[z.id];
+  if (st?.active) return 'holding';
+  if (!st?.visits) return 'new';
+  return z.surprise.visits === 'once' ? 'used' : 'visited';
+}
+
+/** Keyholder releases the wearer from a surprise zone hold early. */
+export function applySurpriseAction(config: LockationConfig, prevState: LockationState, action: SurpriseAction, actor: Actor, ctx: EvalContext, selfLock = false): EvalResult {
+  if (actor !== 'keyholder' || selfLock) throw new SurpriseActionError('Only the keyholder can release the wearer from a surprise zone.');
+  const z = config.zones.find((x) => x.id === action.zoneId);
+  if (!z || !prevState.surprise.zones[z.id]?.active) throw new SurpriseActionError('The wearer is not held in this zone.');
+  const state = cloneState(prevState);
+  const plan = new Planner(ctx);
+  const st = state.surprise.zones[z.id]!;
+  releaseSurprise(z, outcomeOf(z, st.active!.outcomeId), st, 'keyholder', plan);
+  trackFreeze(state, plan.list, ctx.now);
   return { state, consequences: plan.list, events: plan.events, notices: plan.finish() };
 }

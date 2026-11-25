@@ -2,6 +2,9 @@
 
 ## 2026-11-25
 
+- **Surprise zones (F26):** zone role `surprise` – visible zones whose outcome is drawn by weight on entering (reward,
+  punishment, or a hold: stay for a while / until the keyholder releases, at the latest after `holdMinutes`); once or every
+  visit; early leave consequences; map marks new / visited / used / holding; `/api/surprise` release.
 - **Surprise missions (F25):** `rules.mission` – random (every n min ±50 %, within active hours) or sent by the keyholder:
   reach a non-forbidden zone within `leadMinutes`; `onSuccess` / `onFail`, reminder, penalty-free declines per day,
   keyholder cancel. `state.mission`, `/api/mission`, keyholder notification switch `mission`, Missions tab, mission card.

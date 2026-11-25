@@ -11,6 +11,8 @@ import {
   MissionActionError,
   missionDeclinesLeft,
   startRandomMissionNow,
+  applySurpriseAction,
+  SurpriseActionError,
   buildSessionView,
   diffConfig,
   evaluateCheckin,
@@ -658,5 +660,100 @@ describe('surprise missions (F25)', () => {
       const res = startRandomMissionNow(c, initialState(c, T0), mctx(T0, () => i / 20));
       expect(res.state.mission.active!.zoneId).not.toBe('bar');
     }
+  });
+});
+
+describe('surprise zones (F26)', () => {
+  const treasure = { id: 'o1', label: 'Treasure!', weight: 1, onEnter: [{ type: 'remove_time', seconds: 1800 }] };
+  const trap = { id: 'o2', label: 'Trap – stay 20 min', weight: 3, hold: 'stay', holdMinutes: 20, onReleased: [{ type: 'remove_time', seconds: 600 }], onEarlyLeave: [{ type: 'add_time', seconds: 3600 }] };
+  const waitKh = { id: 'o3', label: 'Wait for me', weight: 1, hold: 'keyholder', holdMinutes: 60, onEarlyLeave: [{ type: 'add_time', seconds: 7200 }] };
+  const scfg = (outcomes: unknown[], surprise: Record<string, unknown> = {}, rule: Record<string, unknown> = {}) =>
+    cfg({ version: 2, zones: [zone('home', 'Home', HOME), zone('gym', 'Mystery park', GYM, { roles: ['surprise'], surprise: { outcomes, ...surprise } })], rules: { surprise: { enabled: true, ...rule } }, tracking });
+  const run = (c: LockationConfig, rng: number) => {
+    const r = new Run(c);
+    r.track = (input, now) => {
+      const res = evaluateTracked(r.config, r.state, input, { now, sessionId: 's1', evalId: `t${++r.n}`, rng: () => rng });
+      r.state = res.state;
+      return res;
+    };
+    return r;
+  };
+
+  it('validation: exclusive role, at least one outcome, hold needs a time', () => {
+    const base = { version: 2, timezone: 'Europe/Zurich', rules: { surprise: { enabled: true } } };
+    expect(parseConfig({ ...base, zones: [zone('g', 'G', GYM, { roles: ['surprise'], surprise: { outcomes: [treasure] } })] }).ok).toBe(true);
+    expect(parseConfig({ ...base, zones: [zone('g', 'G', GYM, { roles: ['surprise', 'reward'], surprise: { outcomes: [treasure] } })] }).ok).toBe(false);
+    expect(parseConfig({ ...base, zones: [zone('g', 'G', GYM, { roles: ['surprise'] })] }).ok).toBe(false);
+    expect(parseConfig({ ...base, zones: [zone('g', 'G', GYM, { roles: ['surprise'], surprise: { outcomes: [{ ...trap, holdMinutes: undefined }] } })] }).ok).toBe(false);
+    expect(parseConfig({ ...base, zones: [zone('g', 'G', GYM)] }).ok).toBe(false); // rule on, no surprise zone
+  });
+
+  it('once: the first visit draws an outcome by weight; later visits do nothing; map status "used"', () => {
+    const c = scfg([treasure, trap]);
+    const r = run(c, 0.1); // 0.1 × weight 4 = 0.4 < 1 → treasure
+    r.at(HOME, minutes(T0, 1));
+    const enter = r.at(GYM, minutes(T0, 5));
+    expect(types(enter)).toEqual(['remove_time']);
+    expect(wearer(enter.notices)[0]!.title).toBe('🎁 Surprise: Treasure!');
+    expect(kh(enter.notices).map((n) => n.kind)).toContain('surprise');
+    r.at(HOME, minutes(T0, 10));
+    expect(types(r.at(GYM, minutes(T0, 15)))).toEqual([]);
+    const v = buildSessionView({ role: 'wearer', isSelfLock: false, config: c, state: r.state, history: [], now: minutes(T0, 16) });
+    expect(v.zones.find((z) => z.id === 'gym')!.surprise).toEqual({ status: 'used', visits: 1, last: 'Treasure!', once: true });
+    expect(JSON.stringify(v.rules)).not.toMatch(/Treasure/);
+  });
+
+  it('repeat with cooldown draws again on a later visit', () => {
+    const r = run(scfg([treasure], { visits: 'repeat', cooldownMinutes: 30 }), 0.5);
+    r.at(HOME, minutes(T0, 1));
+    expect(types(r.at(GYM, minutes(T0, 5)))).toEqual(['remove_time']);
+    r.at(HOME, minutes(T0, 10));
+    expect(types(r.at(GYM, minutes(T0, 20)))).toEqual([]); // cooldown
+    r.at(HOME, minutes(T0, 25));
+    expect(types(r.at(GYM, minutes(T0, 40)))).toEqual(['remove_time']);
+    expect(r.state.surprise.zones.gym!.visits).toBe(2);
+  });
+
+  it('stay: leaving early is punished; staying through releases with the reward', () => {
+    const c = scfg([trap], { visits: 'repeat', cooldownMinutes: 0 });
+    const r = run(c, 0.5);
+    r.at(HOME, minutes(T0, 1));
+    r.at(GYM, minutes(T0, 5));
+    expect(r.state.surprise.zones.gym!.active).toMatchObject({ mode: 'stay', until: minutes(T0, 25).toISOString() });
+    expect(nextDueAt(c, r.state, minutes(T0, 6))!.toISOString()).toBe(minutes(T0, 25).toISOString());
+    const early = r.at(HOME, minutes(T0, 10));
+    expect(types(early)).toEqual(['add_time']);
+    expect(kh(early.notices).map((n) => n.kind)).toEqual(expect.arrayContaining(['surprise', 'penalty']));
+    r.at(GYM, minutes(T0, 30));
+    r.at(GYM, minutes(T0, 45));
+    const done = r.tick(minutes(T0, 50));
+    expect(types(done)).toEqual(['remove_time']);
+    expect(wearer(done.notices)[0]!.title).toBe('🎁 Released');
+    expect(r.state.surprise.zones.gym!.active).toBeUndefined();
+  });
+
+  it('keyholder hold: only the keyholder releases early; the wearer view shows the hold', () => {
+    const c = scfg([waitKh]);
+    const r = run(c, 0.5);
+    r.at(HOME, minutes(T0, 1));
+    r.at(GYM, minutes(T0, 5));
+    const v = buildSessionView({ role: 'keyholder', isSelfLock: false, config: c, state: r.state, history: [], now: minutes(T0, 6) });
+    expect(v.surpriseHolds).toEqual([expect.objectContaining({ zoneId: 'gym', label: 'Wait for me', mode: 'keyholder', canRelease: true })]);
+    const ctx = { now: minutes(T0, 10), sessionId: 's1', evalId: 'rel' };
+    expect(() => applySurpriseAction(c, r.state, { type: 'release', zoneId: 'gym' }, 'wearer', ctx)).toThrow(SurpriseActionError);
+    const rel = applySurpriseAction(c, r.state, { type: 'release', zoneId: 'gym' }, 'keyholder', ctx);
+    expect(rel.state.surprise.zones.gym!.active).toBeUndefined();
+    expect(wearer(rel.notices)[0]!.title).toBe('🎁 Released');
+  });
+
+  it('possible outcomes only when shown; change notices keep the surprise', () => {
+    const hiddenC = scfg([treasure, trap]);
+    const shownC = scfg([treasure, trap], {}, { showPossible: true });
+    const s = initialState(hiddenC, T0);
+    const w = (c: LockationConfig) => buildSessionView({ role: 'wearer', isSelfLock: false, config: c, state: s, history: [], now: T0 }).zones.find((z) => z.id === 'gym')!.surprise!;
+    expect(w(hiddenC).possible).toBeUndefined();
+    expect(w(shownC).possible).toEqual(['Treasure!', 'Trap – stay 20 min']);
+    const d = diffConfig(hiddenC, scfg([treasure]));
+    expect(d).toEqual(['"Mystery park" surprise changed.']);
   });
 });

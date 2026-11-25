@@ -6,6 +6,7 @@ import {
   type Fix,
   type HuntAction,
   type MissionAction,
+  type SurpriseAction,
   huntRoute,
   initialState,
   KNOWN_COMMANDS,
@@ -67,6 +68,22 @@ export function demoConfig(center = { lat: 47.3769, lng: 8.5417 }): LockationCon
         forbidden: { windows: [{ start: '20:00', end: '02:00' }], onEnter: [{ type: 'pillory', durationMinutes: 30, reason: 'Visited the bar' }] },
       },
       { id: 'casino', name: 'Casino', ...off(-0.004, 0.009), radiusM: 100, roles: ['forbidden'], matchMode: 'strict' },
+      {
+        id: 'park',
+        name: 'Mystery park',
+        ...off(0.007, -0.006),
+        radiusM: 120,
+        roles: ['surprise'],
+        surprise: {
+          visits: 'repeat',
+          cooldownMinutes: 30,
+          outcomes: [
+            { id: 'treasure', label: 'Treasure!', weight: 2, onEnter: [{ type: 'remove_time', seconds: 1800 }] },
+            { id: 'trap', label: 'Trap – stay 10 minutes', weight: 2, hold: 'stay', holdMinutes: 10, onReleased: [{ type: 'remove_time', seconds: 600 }], onEarlyLeave: [{ type: 'add_time', seconds: 3600 }] },
+            { id: 'bad', label: 'Bad luck!', weight: 1, onEnter: [{ type: 'add_time', seconds: 1800 }] },
+          ],
+        },
+      },
     ],
     rules: {
       required: {
@@ -83,6 +100,7 @@ export function demoConfig(center = { lat: 47.3769, lng: 8.5417 }): LockationCon
         onEnter: [{ type: 'add_time', seconds: 3600 }, { type: 'freeze', durationMinutes: 60, when: { nth: 3 } }],
       },
       reward: { enabled: true, maxPerDay: 1, onEnter: [{ type: 'remove_time', seconds: 1800 }] },
+      surprise: { enabled: true },
       travel: { enabled: true, stepKm: 1, onStep: [{ type: 'remove_time', seconds: 300 }] },
       hunt: {
         enabled: true,
@@ -309,6 +327,13 @@ export class MockBackend implements Backend {
     return this.run(async () => {
       const d = await this.session_();
       return this.app.huntAction(d, d.store.role, action);
+    });
+  }
+
+  async surpriseAction(action: SurpriseAction) {
+    return this.run(async () => {
+      const d = await this.session_();
+      return this.app.surpriseAction(d, d.store.role, action);
     });
   }
 

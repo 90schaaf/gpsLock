@@ -192,6 +192,25 @@ view; with `all` the full list is sent. 5. Timeout once, extended by pauses. 6. 
 timezone, pause permissions, keyholder force-start and penalty-free end, wearer abort with `onAbort`. 7. Unlock blocker set
 while open, cleared afterwards. 8. Waypoints per reveal mode, re-push after a find.
 
+### F26 – Surprise zones
+
+Zone role `surprise` (exclusive, like `forbidden`), rule `rules.surprise {enabled, showPossible}`, per zone
+`surprise {visits: once | repeat, cooldownMinutes, outcomes[≤10]}`; outcome `{id, label, weight, onEnter, hold: none | stay |
+keyholder, holdMinutes, onReleased, onEarlyLeave}`.
+
+- Entering (presence starts) draws one outcome by weight (injected RNG) unless `once` and visited, or `repeat` within the
+  cooldown, or a hold is running. `onEnter` applies; with a hold, `state.surprise.zones[id].active {outcomeId, since, until, mode}`.
+- Hold ends: `until` reached while still present (tick) → `onReleased`; leave detected before `until` → `onEarlyLeave`
+  (penalty source); keyholder `/api/surprise {action: {type: "release", zoneId}}` → `onReleased`. `holdMinutes` is required for
+  both hold modes (keyholder: latest release). `nextDueAt` includes `until`.
+- View: `ZoneView.surprise {status: new | visited | used | holding, visits, last, once, possible?}` (`possible` for the
+  keyholder, for the wearer only with `showPossible`); `surpriseHolds[]`; rule summary never lists outcomes unless shown.
+  Lock-page action: "Stay in … until …" with badge. Keyholder notification switch `surprise`.
+- Map: new 🎁 pink · visited 🎁✓ pink dashed · used ✓ grey dashed · holding ⏳ highlighted.
+- `diffConfig`: only `"<zone>" surprise changed.` – never the outcomes.
+- AC: once-zones draw exactly once; weights respected; early leave and release are exclusive per hold; nobody is held
+  longer than `holdMinutes`.
+
 ### F25 – Surprise missions
 
 "Be at zone X by 14:30!" – `rules.mission`.
@@ -464,3 +483,4 @@ AC: 1. Zone-only record has no lat/lng. 2. Downgrade redacts. 3. Upgrade during 
 | F23 | Configuration changes during a lock | F23 (new ID) |
 | F24 | Settings import / export | F11 (new ID) |
 | F25 | Surprise missions | F25 (new) |
+| F26 | Surprise zones | F26 (new) |

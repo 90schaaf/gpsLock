@@ -122,6 +122,25 @@ Time amounts are multiplied by the number of steps. Movements flagged as implaus
 - **Safety:** the wearer can decline a mission ("can't right now") without penalty – by default once per day. The keyholder is told.
 - The wearer gets a push notification for each mission and a reminder shortly before the end.
 
+## Surprise zones
+
+Mark a zone as **🎁 Surprise** in the Zones tab. The wearer sees it on the map – but not what happens inside.
+
+- **Possible outcomes** (🎁 Surprise tab, up to 10 per zone): each has a text shown when it happens ("Treasure!",
+  "Trap – stay 20 minutes"), a **weight** (higher = more likely) and consequences *when entering*. On entering, one outcome
+  is drawn – it can reward or punish.
+- **Hold the wearer inside** (optional per outcome):
+  - *Stay inside for a while* – released after the set time, *when released* applies;
+  - *Until the keyholder releases* – e.g. after a task or a verification picture; at the latest after the set time
+    (so nobody gets stuck, e.g. on self-locks). The keyholder releases with **🔓 Release now** on the main page.
+  - Leaving before being released applies *leaving before being released*. Leaving is noticed by the next location
+    (background update or check-in).
+- **Visits**: *only the first visit counts*, or *every visit draws again* (at most every n minutes).
+- **On the map**: 🎁 not visited yet · 🎁✓ dashed: visited, can surprise again · ✓ grey: used up · ⏳ highlighted: holding
+  the wearer right now.
+- Optional: *show the wearer the possible outcomes* (not which one comes). Change notices during a lock only say
+  "… surprise changed" – the contents stay a surprise.
+
 ## Zone actions (enter / leave)
 
 Every zone – whatever its role, neutral too – can run consequences **when entering** and/or **when leaving** it

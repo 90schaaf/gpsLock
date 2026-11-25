@@ -14,6 +14,7 @@ export const TABS: { id: Tab; label: string }[] = [
   { id: 'reward', label: '🏆 Reward' },
   { id: 'travel', label: '🚶 Travel' },
   { id: 'hunt', label: '🧭 Hunt' },
+  { id: 'surprise', label: '🎁 Surprise' },
   { id: 'mission', label: '🎯 Missions' },
   { id: 'tracking', label: '📡 Tracking' },
   { id: 'notify', label: '🔔 Notifications' },
@@ -52,6 +53,7 @@ export function zoneColor(z: Zone): string {
   if (z.roles.includes('forbidden')) return ZONE_COLORS.forbidden;
   if (z.roles.includes('required')) return ZONE_COLORS.required;
   if (z.roles.includes('reward')) return ZONE_COLORS.reward;
+  if (z.roles.includes('surprise')) return ZONE_COLORS.surprise;
   return ZONE_COLORS.neutral;
 }
 

@@ -22,6 +22,7 @@ import { AntiCheatTab } from './tabs/AntiCheatTab.js';
 import { FileTab } from './tabs/FileTab.js';
 import { ForbiddenTab } from './tabs/ForbiddenTab.js';
 import { MissionsTab } from './tabs/MissionsTab.js';
+import { SurpriseTab } from './tabs/SurpriseTab.js';
 import { HuntTab } from './tabs/HuntTab.js';
 import { NotificationsTab } from './tabs/NotificationsTab.js';
 import { PrivacyTab } from './tabs/PrivacyTab.js';
@@ -43,6 +44,7 @@ const TAB_COMPONENTS: Record<Tab, (p: TabProps) => preact.JSX.Element> = {
   reward: RewardTab,
   travel: TravelTab,
   hunt: HuntTab,
+  surprise: SurpriseTab,
   mission: MissionsTab,
   tracking: TrackingTab,
   notify: NotificationsTab,
@@ -198,7 +200,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
     } else {
       const id = newId('z');
       edit((d) => {
-        d.zones.push({ id, name: (name ?? `Zone ${d.zones.length + 1}`).slice(0, 60), lat: p.lat, lng: p.lng, radiusM: 150, roles: [], required: { intervalCheckins: true, stayWindows: [], onMissed: [], onSuccess: [], onOutsideDuringWindow: [] }, forbidden: { windows: [], onEnter: [] }, reward: { onEnter: [] }, actions: { onEnter: [], onLeave: [], minStayMinutes: 0, cooldownMinutes: 0 } });
+        d.zones.push({ id, name: (name ?? `Zone ${d.zones.length + 1}`).slice(0, 60), lat: p.lat, lng: p.lng, radiusM: 150, roles: [], required: { intervalCheckins: true, stayWindows: [], onMissed: [], onSuccess: [], onOutsideDuringWindow: [] }, forbidden: { windows: [], onEnter: [] }, reward: { onEnter: [] }, surprise: { visits: 'once', cooldownMinutes: 60, outcomes: [] }, actions: { onEnter: [], onLeave: [], minStayMinutes: 0, cooldownMinutes: 0 } });
       });
       setSelected(id);
       if (tab !== 'zones') setTab('zones');

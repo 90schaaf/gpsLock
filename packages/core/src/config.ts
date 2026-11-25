@@ -37,7 +37,7 @@ export const WindowSchema = z.object({
 export type TimeWindow = z.infer<typeof WindowSchema>;
 
 export const MatchModeSchema = z.enum(['lenient', 'strict']);
-export const ZoneRoleSchema = z.enum(['required', 'reward', 'forbidden']);
+export const ZoneRoleSchema = z.enum(['required', 'reward', 'forbidden', 'surprise']);
 export type ZoneRole = z.infer<typeof ZoneRoleSchema>;
 
 /** F17 – the keyholder confirmed that a flagged place is intentionally hard to reach. */
@@ -85,6 +85,32 @@ const ZoneRewardSchema = z
   })
   .default({});
 
+/**
+ * F26 – one possible outcome of a surprise zone. On entering, one outcome is drawn (by weight). It may hold the wearer
+ * inside: `stay` = released after `holdMinutes`, `keyholder` = released by the keyholder (at the latest after `holdMinutes`).
+ */
+export const SurpriseOutcomeSchema = z.object({
+  id,
+  /** Shown to the wearer when it happens, e.g. "Treasure!" or "Trap – stay 20 minutes". */
+  label: z.string().min(1).max(80),
+  weight: z.number().int().min(1).max(100).default(1),
+  onEnter: ConsequenceListSchema,
+  hold: z.enum(['none', 'stay', 'keyholder']).default('none'),
+  holdMinutes: z.number().int().min(1).max(1440).optional(),
+  onReleased: ConsequenceListSchema,
+  onEarlyLeave: ConsequenceListSchema,
+});
+export type SurpriseOutcome = z.infer<typeof SurpriseOutcomeSchema>;
+
+const ZoneSurpriseSchema = z
+  .object({
+    /** `once`: only the first visit counts; `repeat`: every visit after the cooldown draws again. */
+    visits: z.enum(['once', 'repeat']).default('once'),
+    cooldownMinutes: minutes(10_080).default(60),
+    outcomes: z.array(SurpriseOutcomeSchema).max(10).default([]),
+  })
+  .default({});
+
 /** Actions when entering / leaving a zone – independent of the zone's role (neutral zones too). */
 const ZoneActionsSchema = z
   .object({
@@ -110,6 +136,7 @@ export const ZoneSchema = z.object({
   required: ZoneRequiredSchema,
   forbidden: ZoneForbiddenSchema,
   reward: ZoneRewardSchema,
+  surprise: ZoneSurpriseSchema,
   actions: ZoneActionsSchema,
   reachabilityAck: ReachabilityAckSchema.optional(),
 });
@@ -285,6 +312,15 @@ export const MissionRuleSchema = z
   })
   .default({});
 
+/** F26 – surprise zones (per-zone outcomes live in `zone.surprise`). */
+export const SurpriseRuleSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    /** Show the wearer the possible outcomes of each zone (not which one comes). */
+    showPossible: z.boolean().default(false),
+  })
+  .default({});
+
 /** Keyholder notification switches (ntfy). */
 export const KeyholderNotifySchema = z
   .object({
@@ -295,6 +331,7 @@ export const KeyholderNotifySchema = z
     requiredDone: z.boolean().default(false),
     hunt: z.boolean().default(true),
     mission: z.boolean().default(true),
+    surprise: z.boolean().default(true),
     reward: z.boolean().default(false),
     verification: z.boolean().default(true),
   })
@@ -315,6 +352,7 @@ export const LockationConfigSchema = z
         travel: TravelRuleSchema,
         hunt: HuntRuleSchema,
         mission: MissionRuleSchema,
+        surprise: SurpriseRuleSchema,
       })
       .default({}),
     tracking: TrackingSchema,
@@ -336,6 +374,13 @@ export const LockationConfigSchema = z
       ids.add(z.id);
       if (new Set(z.roles).size !== z.roles.length) issue(['zones', i, 'roles'], 'duplicate role');
       if (z.roles.includes('forbidden') && z.roles.length > 1) issue(['zones', i, 'roles'], 'a forbidden zone cannot have other roles');
+      if (z.roles.includes('surprise') && z.roles.length > 1) issue(['zones', i, 'roles'], 'a surprise zone cannot have other roles');
+      if (z.roles.includes('surprise') && cfg.rules.surprise.enabled) {
+        if (!z.surprise.outcomes.length) issue(['zones', i, 'surprise', 'outcomes'], `add at least one possible outcome to "${z.name}"`);
+        z.surprise.outcomes.forEach((o, j) => {
+          if (o.hold !== 'none' && !o.holdMinutes) issue(['zones', i, 'surprise', 'outcomes', j, 'holdMinutes'], o.hold === 'stay' ? 'how long must the wearer stay?' : 'set the latest release time (needed e.g. on self-locks)');
+        });
+      }
       const f = forbiddenTimings(cfg, z);
       const ownTimings = ['firstWarningAfterMinutes', 'firstPenaltyAfterMinutes', 'repeatEveryMinutes', 'repeatWarningAfterMinutes'].some((k) => z.forbidden[k as keyof typeof z.forbidden] !== undefined);
       // Inherited timings are validated once at rule level; only zones with own values report here.
@@ -359,6 +404,7 @@ export const LockationConfigSchema = z
     }
     if (R.forbidden.enabled && withRole('forbidden').length === 0) issue(['rules', 'forbidden', 'enabled'], 'mark at least one zone as forbidden');
     if (R.reward.enabled && withRole('reward').length === 0) issue(['rules', 'reward', 'enabled'], 'mark at least one zone as reward zone');
+    if (R.surprise.enabled && withRole('surprise').length === 0) issue(['rules', 'surprise', 'enabled'], 'mark at least one zone as surprise zone');
     if (R.forbidden.firstWarningAfterMinutes !== null && R.forbidden.firstWarningAfterMinutes >= R.forbidden.firstPenaltyAfterMinutes) {
       issue(['rules', 'forbidden', 'firstWarningAfterMinutes'], 'the first warning must come before the first penalty');
     }

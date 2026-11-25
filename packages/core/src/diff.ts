@@ -47,6 +47,8 @@ export function diffConfig(before: LockationConfig, after: LockationConfig): str
       if (!same(o.forbidden.onEnter, z.forbidden.onEnter)) out.push(`"${z.name}" extra punishment: ${cons(z.forbidden.onEnter)}.`);
     }
     if (z.roles.includes('reward') && !same(o.reward, z.reward)) out.push(`"${z.name}" reward settings changed.`);
+    // The content of a surprise stays a surprise – only say that it changed.
+    if (z.roles.includes('surprise') && !same(o.surprise, z.surprise)) out.push(`"${z.name}" surprise changed.`);
     if (!same(o.actions, z.actions)) {
       const a = z.actions;
       out.push(`"${z.name}" zone actions: entering ${cons(a.onEnter)}; leaving ${cons(a.onLeave)}${a.minStayMinutes ? ` (after ${fmtMinutes(a.minStayMinutes)})` : ''}.`);
@@ -56,7 +58,7 @@ export function diffConfig(before: LockationConfig, after: LockationConfig): str
 
   const R0 = before.rules;
   const R1 = after.rules;
-  for (const k of ['required', 'forbidden', 'reward', 'travel', 'hunt', 'mission'] as const) {
+  for (const k of ['required', 'forbidden', 'reward', 'travel', 'hunt', 'mission', 'surprise'] as const) {
     if (R0[k].enabled !== R1[k].enabled) out.push(`${label(k)} ${R1[k].enabled ? 'enabled' : 'disabled'}.`);
   }
   const rq0 = R0.required;
@@ -103,5 +105,5 @@ export function diffConfig(before: LockationConfig, after: LockationConfig): str
 }
 
 function label(k: string): string {
-  return { required: 'Required zones', forbidden: 'Forbidden zones', reward: 'Reward zones', travel: 'Travel goals', hunt: 'Scavenger hunt', mission: 'Surprise missions' }[k] ?? k;
+  return { required: 'Required zones', forbidden: 'Forbidden zones', reward: 'Reward zones', travel: 'Travel goals', hunt: 'Scavenger hunt', mission: 'Surprise missions', surprise: 'Surprise zones' }[k] ?? k;
 }

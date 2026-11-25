@@ -7,6 +7,7 @@ import { formatCountdown, useNow } from '../lib/time-ui.js';
 import { isEmbedded } from '../lib/hash.js';
 import type { MockBackend } from '../lib/mock-backend.js';
 import { MissionCard } from './MissionCard.js';
+import { SurpriseHoldCard, surpriseCircle } from './SurpriseCard.js';
 import { NotificationsCard } from './NotificationsCard.js';
 import { TrackingCard } from './TrackingCard.js';
 
@@ -129,6 +130,7 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
   const circles = useMemo<MapCircle[]>(() => {
     if (!view) return [];
     const out: MapCircle[] = view.zones.map((z) => {
+      if (z.surprise) return surpriseCircle(z);
       const kind = z.kinds.includes('forbidden') ? 'forbidden' : z.kinds.includes('required') ? 'required' : z.kinds.includes('reward') ? 'reward' : 'neutral';
       return { id: z.id, lat: z.lat, lng: z.lng, radiusM: z.radiusM, color: ZONE_COLORS[kind], label: `${z.name}${z.kinds.length ? ` (${z.kinds.join(', ')})` : ''}` };
     });
@@ -329,6 +331,8 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
             </ul>
           </div>
         )}
+
+        {view.surpriseHolds?.map((h) => <SurpriseHoldCard key={h.zoneId} hold={h} view={view} backend={backend} onView={setView} onError={(message) => setError({ message })} />)}
 
         {view.mission && <MissionCard view={view} backend={backend} mock={mock} onView={setView} onError={(message) => setError({ message })} />}
 

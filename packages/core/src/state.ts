@@ -95,6 +95,21 @@ export const LockationStateSchema = z.object({
       last: z.object({ zoneId: z.string(), outcome: z.enum(['success', 'failed', 'declined', 'cancelled']), at: iso }).optional(),
     })
     .default({}),
+  /** F26 – surprise zones: visits, last outcome and a running hold (stay / keyholder release). */
+  surprise: z
+    .object({
+      zones: z
+        .record(
+          z.object({
+            visits: z.number().default(0),
+            lastAt: iso.optional(),
+            lastOutcome: z.string().optional(),
+            active: z.object({ outcomeId: z.string(), since: iso, until: iso, mode: z.enum(['stay', 'keyholder']) }).optional(),
+          }),
+        )
+        .default({}),
+    })
+    .default({}),
   /** Last run of the enter / leave actions per zone (cooldown). */
   zoneActions: z.record(z.object({ lastEnter: iso.optional(), lastLeave: iso.optional() })).default({}),
   /** F14 – zones the wearer is currently in (since = first seen, lastSeen = latest observation inside). */

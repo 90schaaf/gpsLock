@@ -11,6 +11,9 @@ import {
   type Actor,
   applyHuntAction,
   applyMissionAction,
+  applySurpriseAction,
+  type SurpriseAction,
+  SurpriseActionError,
   type MissionAction,
   MissionActionError,
   startRandomMissionNow,
@@ -163,6 +166,20 @@ export class LockationApp<S extends LockSession = LockSession> {
       result = applyMissionAction(s.config, s.state, action, role as Actor, this.ctx(s), s.isSelfLock);
     } catch (e) {
       if (e instanceof MissionActionError) throw new AppError(403, 'mission_action_not_allowed', e.message);
+      throw e;
+    }
+    await this.finish(s, result, 'tick');
+    return this.view(s, role);
+  }
+
+  /** F26 – keyholder releases the wearer from a surprise zone hold. */
+  async surpriseAction(s: S, role: Role, action: SurpriseAction): Promise<SessionView> {
+    this.requireLocked(s);
+    let result: EvalResult;
+    try {
+      result = applySurpriseAction(s.config, s.state, action, role as Actor, this.ctx(s), s.isSelfLock);
+    } catch (e) {
+      if (e instanceof SurpriseActionError) throw new AppError(403, 'surprise_action_not_allowed', e.message);
       throw e;
     }
     await this.finish(s, result, 'tick');

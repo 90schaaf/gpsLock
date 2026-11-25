@@ -7,6 +7,7 @@ const ROLE_CHIPS: { id: RoleChoice; label: string }[] = [
   { id: 'required', label: '⏱ Required' },
   { id: 'reward', label: '🏆 Reward' },
   { id: 'forbidden', label: '⛔ Forbidden' },
+  { id: 'surprise', label: '🎁 Surprise' },
   { id: 'neutral', label: 'Neutral' },
 ];
 
