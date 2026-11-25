@@ -148,3 +148,5 @@ details.zone-details[open] > summary { margin-bottom: 8px; }
 .issue-card { border-color: var(--bad); }
 .tab-issues { margin-left: 4px; }
 .card.mission-active { border: 2px solid var(--warn); }
+.danger-big { background: #d64545; color: #fff; font-size: 1.2em; font-weight: 700; padding: 14px; border: 0; border-radius: 10px; width: 100%; }
+.danger-big:disabled { opacity: 0.5; }

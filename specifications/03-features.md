@@ -245,8 +245,15 @@ manual.
 
 - One XToys script, provided by Lockation and documented in the guide, receives every webhook call and **dispatches it to
   the right toy and channel** given in the request body. One webhook ID controls all toys of the wearer.
-- The wearer adds their toys to the script in XToys (XToys handles Bluetooth / the device APIs) and gives each one the
-  same toy id they enter in Lockation.
+- The script is **generated from the wearer's toy list** (`buildXToysScript`, format of the official export
+  `examples/xtoys/local webhook.json`): a `local-webhook` block (the private webhook, outbound enabled), one output slot per
+  toy (`part-vibrator`, `part-vibrator|part-vibrator`, `part-estim|part-estim`, key `<type>-a…h`), `setMaximum` per
+  channel as initial actions (the wearer limits, enforced again in XToys), a `lockation` webhook trigger whose ES5 code
+  dispatches `{cmd, slot, ch, shape, level, delta, seconds}` (`setVolume` / `setPattern` / `setShock2` with `actionChannel`
+  1 / 2 / all), a `getToys` trigger that reports the connected toys per slot (outbound), and final actions that stop
+  everything. The wearer connects each real toy to its slot in XToys.
+- Timed actions are **non-looping drawn patterns that end at 0**, so a toy stops by itself after `seconds` (dead-man's
+  switch on the toy side); the level is the slot's volume, so `intensity` changes apply to the running pattern.
 
 **Toys, types and channels**
 
@@ -255,7 +262,7 @@ manual.
 | `estim` – e-stim unit | `A`, `B` |
 | `vibrator` – single motor | `main` |
 | `dual_vibrator` – two motors | `A`, `B` |
-| `vibe_rotator` – vibration + rotation | `vibration`, `rotation` |
+| `vibe_rotator` – vibration + rotation | `vibration`, `rotation` – *XToys type name still to confirm; not offered yet* |
 
 - Each toy: id, name, **type**, **body part** (`genitals`, `anal`, `nipples`, `other`), up to 8 toys per lock.
 - **Wearer limits per toy, set once when connecting** and fixed while connected: maximum intensity (0–100 %, per channel
@@ -278,7 +285,7 @@ manual.
 
 **Toy test (wearer, before a lock and in the demo)**
 
-- A **separate page** (`toys.html`, linked from the guide, the main page and the demo) lets the wearer try everything
+- A **separate page** (`toys.html`, **implemented**, linked from the guide and the demo bar) lets the wearer try everything
   before a lock: enter the Webhook ID and the toys, then send any action to any toy / channel with an **intensity slider**
   and a duration, a "test all toys" button and a big **Stop all** button. The disclaimer is accepted there as well.
 - Nothing is stored on the server: the ID stays in the page (optionally remembered in this browser). The page sends
@@ -296,6 +303,7 @@ manual.
   - `ramp` – from the current level to `intensity` over `seconds`;
   - `intensity` – **change the level of what is running**: absolute (`intensity`) or relative (`delta`, e.g. +10 / −20),
     clamped to 0 … the toy's maximum;
+  - `shock` – e-stim only (`setShock2`, ≤ 10 s);
   - `stop`.
   `intensity` 0–100, `seconds` 1–3600. The payload never contains zone names, positions or rule texts.
 - **Consequence type `toy`** `{action, target: {bodyPart | "all", toyType?, channel?}, intensity?, delta?, seconds?, pattern?}` –

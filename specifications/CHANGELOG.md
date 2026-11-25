@@ -2,6 +2,9 @@
 
 ## 2026-11-25
 
+- **Toy test page (F27, step 1):** `toys.html` – toy list (type, body part, limits), generated Lockation XToys script, tests
+  per toy / channel (patterns, intensity, ±10 %, shock, stop), test all, stop all, "which toys does XToys see" (WebSocket
+  `getToys`), toy setup export / import; Webhook ID stays in the browser. Core: `packages/core/src/toys.ts`.
 - **Toy control via XToys (F27) specified** (not implemented): Lockation proxy script (one webhook, toy + channel in the
   body), toy types with channels (e-stim 2, vibrator 1, dual vibrator 2, vibrator + rotator 2) and body parts, per-toy
   limits, toy test page and demo panel, consequence type `toy` incl. intensity changes, "while inside" with dead-man's

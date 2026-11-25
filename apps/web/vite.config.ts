@@ -12,6 +12,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         config: resolve(__dirname, 'config.html'),
+        toys: resolve(__dirname, 'toys.html'),
       },
     },
   },
