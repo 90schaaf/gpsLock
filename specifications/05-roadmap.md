@@ -35,7 +35,7 @@ Feature IDs refer to [03-features.md](03-features.md); details of past changes a
 
 | Item | Notes |
 |---|---|
-| Toy control via XToys (F27) | 1. Lockation XToys proxy script + toy test page (`toys.html`, demo panel) – verify CORS, Android background, several toys / channels · 2. connection in a lock, consequence type `toy` incl. intensity changes, wearer limits, emergency stop · 3. "while inside" with dead-man's switch |
+| Toy control via XToys (F27) | 1. Lockation XToys proxy script + toy test page (`toys.html`, demo panel) (browser requests, Android background and several toys confirmed) · 2. connection in a lock, consequence type `toy` incl. intensity changes, wearer limits, emergency stop · 3. "while inside" with dead-man's switch |
 | Toy liveness check (F27, later) | WebSocket ping / pong with the XToys script, optional "toy required" rule – on hold |
 
 ## Open

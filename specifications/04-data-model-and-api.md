@@ -131,8 +131,7 @@ Missing or corrupt state is replaced by a fresh initial state.
   emergencyStops}` – the Webhook ID is **not** in the state.
 - D1 `toys`: `session_id` (PK), `webhook_id`, `created_at` – deleted on disconnect and on session end.
 - API: `/api/toy/connect {mainToken, webhookId, toys, disclaimerVersion}` (wearer), `/api/toy/test {mainToken}`,
-  `/api/toy/confirm {mainToken}`, `/api/toy/emergency-stop {mainToken}` (wearer; applies `onEmergencyStop`),
-  `/api/toy/try {webhookId, action}` (toy test page; stateless, rate-limited, only if XToys blocks browser requests).
+  `/api/toy/confirm {mainToken}`, `/api/toy/emergency-stop {mainToken}` (wearer; applies `onEmergencyStop`). The toy test page talks to XToys directly (no worker endpoint).
 
 ## Worker HTTP API
 

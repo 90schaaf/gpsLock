@@ -282,8 +282,7 @@ manual.
   before a lock: enter the Webhook ID and the toys, then send any action to any toy / channel with an **intensity slider**
   and a duration, a "test all toys" button and a big **Stop all** button. The disclaimer is accepted there as well.
 - Nothing is stored on the server: the ID stays in the page (optionally remembered in this browser). The page sends
-  directly to XToys if XToys allows browser requests (CORS); otherwise through a stateless, rate-limited worker endpoint
-  `/api/toy/try` that forwards the request and stores nothing.
+  **directly from the browser to XToys** (XToys accepts browser requests) – no worker endpoint is involved.
 - The toy setup (toys, types, body parts, limits) can be **exported** and later imported when connecting in a lock.
 - **Demo:** the same test panel; in addition the option *"Send the demo rules' toy actions to my toys"* (off by default) –
   otherwise demo toy actions are only shown ("🎮 would send pulse 60 % for 30 s – genitals").
@@ -346,11 +345,11 @@ and applies `onEmergencyStop`; reconnecting is possible. 6. During a lock nobody
 - To verify first: outbound messages reach a WebSocket client on a *private* webhook; the script can see which toys are
   connected; it keeps working on Android in the background.
 
-**Open points / to verify with the toy test**
+**Confirmed (by the project owner, 2026-11-25)**
 
-1. Does XToys allow browser requests to `webhook.xtoys.app` (CORS)? Decides whether `/api/toy/try` is needed.
-2. Does XToys keep receiving webhooks on Android with the app in the background and the screen off?
-3. Can the proxy script drive several toys and channels independently at the same time (incl. both e-stim channels)?
+1. XToys accepts webhook requests sent directly from a browser.
+2. The native Android app keeps receiving webhooks in the background and with the screen off.
+3. One proxy script can drive several toys and channels independently at the same time (incl. both e-stim channels).
 
 ### F7 – Consequences
 
