@@ -323,7 +323,7 @@ export class LockationService {
     if (!s.config.tracking.enabled) return [];
 
     const messages = Array.isArray(body) ? body : [body];
-    const inputs = messages.map((m) => parseOwnTracks(m, s.config)).filter((x): x is TrackedInput => !!x);
+    const inputs = messages.map((m) => parseOwnTracks(m, s.config, s.state)).filter((x): x is TrackedInput => !!x);
     const response: unknown[] = [];
     await this.app.tracked(s, inputs, {
       beforeSave: (state: LockationState) => {

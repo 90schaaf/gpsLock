@@ -168,6 +168,10 @@ Rule `rules.hunt`: `checkpoints[{id, name, lat, lng, radiusM, hint, matchMode?}]
   every unfound checkpoint counts. `onCheckpoint` per find, `onComplete` when all are found.
 - **Wrong guesses:** with `hint` / `distance` / `map` the wearer can submit a hunt guess; a guess outside the target applies
   `onWrong` (cooldown). With `all` there are no guesses. Background locations are never wrong guesses.
+- **Random route** (`random {enabled, min, max}`): the checkpoints are a pool; when the hunt starts (or at the first
+  evaluation of a running hunt) N ∈ [min, max] checkpoints are drawn in random order and stored as `state.hunt.route`.
+  Counts, hints, map, OwnTracks sync and the order rule use the route only. Validation: `min ≤ max ≤ pool size`.
+  AC: the route has min…max distinct checkpoints, is drawn once and kept; undrawn checkpoints never count.
 - **Start:** `auto` (with the lock), `wearer`, `keyholder` or `scheduled` (`startAt` = UTC instant, entered as date/time **in the
   lock's timezone**, or `startAfterMinutes` after the lock start; run by the cron). The keyholder can always force-start. On a
   self-lock the wearer may always start.

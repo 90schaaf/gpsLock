@@ -42,7 +42,8 @@ Each tab has an **enabled** switch and lists its zones; open a zone to override 
 - 🏆 **Reward** – cooldown, overall maximum per day, minimum stay, reward. Per zone: own cooldown, maximum per day, minimum stay and an extra reward.
 - 🚶 **Travel** – *step size* = km per reward; *max per check-in* = the most one check-in can add (stops a train ride from collecting many rewards); *daily cap* = km counted per day. The tab shows a worked example for your values; details in [Rules explained](./rules#travel-goals).
 - 🧭 **Hunt** – tap the map to place checkpoints **in order** and give each a hint. Choose *in order* or *any order* and the
-  reveal mode (default *hint + pin all on the map*, which has no wrong guesses).
+  reveal mode (default *hint + pin all on the map*, which has no wrong guesses). With **Random route** the checkpoints become
+  a pool: at the start, *at least … at most …* of them are drawn in random order – hunts become possible on self-locks.
 - 📡 **Tracking** – **How is the location collected?** *Manual check-ins only*, *manual check-ins + background tracking*
   (default with tracking; both count) or *background tracking only* (no check-in button). With [background tracking](./background-tracking): missing-signal time and consequences, optional
   **quiet hours** (no missing-signal penalties at night) and a **warning** before the penalty, **OwnTracks mode** (*Auto* /

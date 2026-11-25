@@ -67,6 +67,8 @@ export const LockationStateSchema = z.object({
       /** Sequence mode: index of the current checkpoint. Any-order mode: equals `found.length`. */
       index: z.number().int().default(0),
       found: z.array(z.string()).default([]),
+      /** Random route (checkpoint ids in hunt order), drawn when a randomized hunt starts. */
+      route: z.array(z.string()).optional(),
       /** not_started → active ⇄ paused → completed | failed (timeout, wearer abort) | aborted (keyholder). */
       status: z.enum(['not_started', 'active', 'paused', 'completed', 'failed', 'aborted']).default('active'),
       startedAt: iso.optional(),

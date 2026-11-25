@@ -205,6 +205,13 @@ const HuntRuleSchema = z
     /** `all` = hint + all checkpoints pinned on the map (wrong guesses are disabled). */
     reveal: z.enum(['all', 'hint', 'distance', 'map']).default('all'),
     order: z.enum(['sequence', 'any']).default('sequence'),
+    /**
+     * Random route: when the hunt starts, between `min` and `max` of the checkpoints (the pool) are drawn in random order.
+     * Nobody knows the route in advance – this makes hunts possible on self-locks.
+     */
+    random: z
+      .object({ enabled: z.boolean().default(false), min: z.number().int().min(1).max(MAX_PLACES).default(2), max: z.number().int().min(1).max(MAX_PLACES).default(4) })
+      .default({}),
     wrongCooldownMinutes: minutes(1440).default(10),
     timeLimitMinutes: z.number().int().min(10).max(525_600).optional(),
     blockUnlockUntilComplete: z.boolean().default(false),
@@ -345,6 +352,13 @@ export const LockationConfigSchema = z
       issue(['antiCheat', 'liveVerificationEveryHours'], 'random verification pictures need "live tracking only"');
     }
     if (R.hunt.enabled && R.hunt.checkpoints.length === 0) issue(['rules', 'hunt', 'checkpoints'], 'add at least one checkpoint');
+    const rnd = R.hunt.random;
+    if (rnd.enabled) {
+      if (rnd.min > rnd.max) issue(['rules', 'hunt', 'random', 'min'], 'the minimum cannot be larger than the maximum');
+      if (R.hunt.enabled && rnd.max > R.hunt.checkpoints.length) {
+        issue(['rules', 'hunt', 'random', 'max'], `add at least ${rnd.max} possible checkpoints (currently ${R.hunt.checkpoints.length}) or lower the maximum`);
+      }
+    }
     if (R.hunt.start === 'scheduled' && !R.hunt.startAt && R.hunt.startAfterMinutes === undefined) {
       issue(['rules', 'hunt', 'startAt'], 'set a start time or a delay after the lock start');
     }

@@ -1,7 +1,7 @@
 /** View models sent to the browser, Chaster metadata (F12) and privacy helpers (F9). */
 import { activeRoles, forbiddenTimings, type LockationConfig, owntracksMonitoring, type ZoneRole, zonesWithRole } from './config.js';
 import { describeConsequence, describeWhen, type Consequence } from './consequences.js';
-import { allowedHuntActions, type CheckinRecord, type HuntAction, huntDeadlineOf, huntScheduledStart, type PlannedConsequence, visibleCheckpoints } from './engine.js';
+import { allowedHuntActions, type CheckinRecord, type HuntAction, huntDeadlineOf, huntRoute, huntScheduledStart, huntTotal, type PlannedConsequence, visibleCheckpoints } from './engine.js';
 import { earliestDeadline, effectivePrivacy, type LockationState, nextHeartbeatFrom, requiredSlots } from './state.js';
 import { activeWindowStart, formatLocalTime, formatWindow, MINUTE } from './time.js';
 
@@ -79,6 +79,8 @@ export interface SessionView {
     hint?: string;
     distanceBand?: string;
     target?: { lat: number; lng: number; radiusM: number };
+    /** Random route: whether it is drawn yet, the range and the pool size (the wearer only learns the count after the draw). */
+    randomRoute?: { drawn: boolean; min: number; max: number; pool: number };
     /** Visible checkpoints with status (reveal `all`: every checkpoint; `map`: the current/open ones). */
     checkpoints: HuntCheckpointView[];
     /** Hints of the open checkpoints (any-order mode with hint/distance reveal). */
@@ -213,7 +215,7 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
       rule: 'hunt',
       title: 'Scavenger hunt',
       lines: [
-        `${hunt.checkpoints.length} checkpoints, ${hunt.order === 'any' ? 'in any order' : 'in a fixed order'}${hunt.reveal === 'all' ? ' – all shown on the map' : ''}.`,
+        `${hunt.random.enabled ? `Random route: ${hunt.random.min === hunt.random.max ? hunt.random.min : `${hunt.random.min}–${hunt.random.max}`} of ${hunt.checkpoints.length} possible checkpoints, drawn at the start` : `${hunt.checkpoints.length} checkpoints`}, ${hunt.order === 'any' ? 'in any order' : 'in a fixed order'}${hunt.reveal === 'all' ? ' – all shown on the map' : ''}.`,
         `Each checkpoint: ${list(hunt.onCheckpoint)}. Completed: ${list(hunt.onComplete)}.`,
         ...(hunt.reveal !== 'all' ? [`Wrong hunt guess: ${list(hunt.onWrong)}.`] : []),
         ...(hunt.timeLimitMinutes ? [`Time limit ${fmtMinutes(hunt.timeLimitMinutes)}: ${list(hunt.onTimeout)}.`] : []),
@@ -369,11 +371,12 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
   const h = config.rules.hunt;
   if (h.enabled) {
     const active = state.hunt.status === 'active';
-    const cp = h.order === 'sequence' ? h.checkpoints[state.hunt.index] : undefined;
+    const route = huntRoute(config, state);
+    const cp = h.order === 'sequence' ? route[state.hunt.index] : undefined;
     const visible = visibleCheckpoints(config, state);
     const visibleIds = new Set(visible.map((v) => v.cp.id));
-    const hiddenDifficult = h.checkpoints.some((c) => c.reachabilityAck && !visibleIds.has(c.id));
-    const open = h.checkpoints.filter((c) => !state.hunt.found.includes(c.id));
+    const hiddenDifficult = route.some((c) => c.reachabilityAck && !visibleIds.has(c.id));
+    const open = route.filter((c) => !state.hunt.found.includes(c.id));
     view.hunt = {
       status: state.hunt.status,
       actions: allowedHuntActions(config, state, role, isSelfLock),
@@ -381,7 +384,8 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
       scheduledStartAt: huntScheduledStart(config, state)?.toISOString(),
       pausedAt: state.hunt.pausedAt,
       index: state.hunt.index,
-      total: h.checkpoints.length,
+      total: huntTotal(config, state),
+      randomRoute: h.random.enabled ? { drawn: !!state.hunt.route, min: h.random.min, max: h.random.max, pool: h.checkpoints.length } : undefined,
       reveal: h.reveal,
       order: h.order,
       hint: active && h.order === 'sequence' ? cp?.hint : undefined,
@@ -429,7 +433,7 @@ export function computeMetadata(config: LockationConfig, state: LockationState, 
   const reasons: string[] = [];
   const h = config.rules.hunt;
   if (h.enabled && h.blockUnlockUntilComplete && ['not_started', 'active', 'paused'].includes(state.hunt.status)) {
-    reasons.push(`Scavenger hunt not completed (${state.hunt.index}/${h.checkpoints.length} checkpoints).`);
+    reasons.push(`Scavenger hunt not completed (${state.hunt.index}/${huntTotal(config, state)} checkpoints).`);
   }
   const r = config.rules.required;
   const first = r.enabled ? earliestDeadline(state) : undefined;
@@ -453,7 +457,7 @@ export function computeMetadata(config: LockationConfig, state: LockationState, 
   } else if (h.enabled && state.hunt.status === 'paused') {
     description = 'Scavenger hunt paused';
   } else if (h.enabled && state.hunt.status === 'active') {
-    description = `Scavenger hunt: checkpoint ${state.hunt.index + 1}/${h.checkpoints.length}`;
+    description = `Scavenger hunt: checkpoint ${state.hunt.index + 1}/${huntTotal(config, state)}`;
   }
   return {
     reasonsPreventingUnlocking: reasons,

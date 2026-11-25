@@ -255,6 +255,7 @@ export function evaluateCheckin(
   const plan = new Planner(ctx);
   const now = ctx.now;
   syncSlots(config, state, now);
+  ensureRoute(config, state, ctx.rng ?? Math.random);
   state.checkinCount += 1;
   state.lastAttemptAt = now.toISOString();
   const record = newRecord(config, state, ctx.evalId, now, fix, purpose, plan.events);
@@ -322,6 +323,7 @@ export function evaluateTracked(config: LockationConfig, prevState: LockationSta
   const plan = new Planner(ctx);
   const now = ctx.now;
   syncSlots(config, state, now);
+  ensureRoute(config, state, ctx.rng ?? Math.random);
   const fix = input.fix;
   const at = new Date(Math.min(fix?.timestamp ?? input.transition?.at ?? now.getTime(), now.getTime()));
 
@@ -483,13 +485,46 @@ function evalZoneActions(config: LockationConfig, state: LockationState, entered
 
 // ---------- F6 hunt ----------
 
+/**
+ * The checkpoints of this hunt in hunt order: the drawn random route, or all checkpoints. Before a random route is drawn
+ * the hunt has no checkpoints yet.
+ */
+export function huntRoute(config: LockationConfig, state: LockationState): Checkpoint[] {
+  const h = config.rules.hunt;
+  if (!h.random.enabled) return h.checkpoints;
+  if (!state.hunt.route) return [];
+  const byId = new Map(h.checkpoints.map((c) => [c.id, c]));
+  return state.hunt.route.map((id) => byId.get(id)).filter((c): c is Checkpoint => !!c);
+}
+
+/** Number of checkpoints the hunt will have (random route: drawn length, or the range before the draw). */
+export function huntTotal(config: LockationConfig, state: LockationState): number {
+  const h = config.rules.hunt;
+  return h.random.enabled && !state.hunt.route ? h.random.max : huntRoute(config, state).length;
+}
+
+/** Draw the random route once the hunt is running (uses the evaluation's random generator). */
+function ensureRoute(config: LockationConfig, state: LockationState, rng: () => number) {
+  const h = config.rules.hunt;
+  if (!h.enabled || !h.random.enabled || state.hunt.route || !['active', 'paused'].includes(state.hunt.status)) return;
+  const pool = [...h.checkpoints];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [pool[i], pool[j]] = [pool[j]!, pool[i]!];
+  }
+  const min = Math.min(h.random.min, pool.length);
+  const max = Math.min(Math.max(h.random.max, min), pool.length);
+  const n = min + Math.floor(rng() * (max - min + 1));
+  state.hunt.route = pool.slice(0, n).map((c) => c.id);
+}
+
 /** Checkpoints the wearer may see (and that may be synced to OwnTracks), with their status. */
 export function visibleCheckpoints(config: LockationConfig, state: LockationState): { cp: Checkpoint; index: number; status: 'found' | 'current' | 'open' | 'upcoming' }[] {
   const h = config.rules.hunt;
   if (!h.enabled) return [];
   if (state.hunt.status === 'not_started') return [];
   const found = new Set(state.hunt.found);
-  const all = h.checkpoints.map((cp, index) => {
+  const all = huntRoute(config, state).map((cp, index) => {
     let status: 'found' | 'current' | 'open' | 'upcoming';
     if (h.order === 'any') status = found.has(cp.id) ? 'found' : 'open';
     else status = index < state.hunt.index ? 'found' : index === state.hunt.index ? 'current' : 'upcoming';
@@ -505,7 +540,9 @@ function evalHunt(config: LockationConfig, state: LockationState, fix: Fix | und
   const hunt = config.rules.hunt;
   if (!hunt.enabled || state.hunt.status !== 'active') return;
   const isIn = (cp: Checkpoint) => cp.id === forcedCheckpoint || (!!fix && isInside(fix, cp, matchModeOf(config, cp)));
-  const total = hunt.checkpoints.length;
+  const route = huntRoute(config, state);
+  const total = route.length;
+  if (!total) return;
   const complete = () => {
     state.hunt.status = 'completed';
     plan.event(`Scavenger hunt completed – all ${total} checkpoints found!`);
@@ -519,7 +556,7 @@ function evalHunt(config: LockationConfig, state: LockationState, fix: Fix | und
 
   if (hunt.order === 'any') {
     const done = new Set(state.hunt.found);
-    const hits = hunt.checkpoints.filter((cp) => !done.has(cp.id) && isIn(cp));
+    const hits = route.filter((cp) => !done.has(cp.id) && isIn(cp));
     for (const cp of hits) {
       state.hunt.found.push(cp.id);
       found(cp, state.hunt.found.length);
@@ -532,7 +569,7 @@ function evalHunt(config: LockationConfig, state: LockationState, fix: Fix | und
       return;
     }
   } else {
-    const target = hunt.checkpoints[state.hunt.index];
+    const target = route[state.hunt.index];
     if (!target) return;
     if (isIn(target)) {
       state.hunt.index += 1;
@@ -546,7 +583,7 @@ function evalHunt(config: LockationConfig, state: LockationState, fix: Fix | und
 
   // Wrong guesses: only an explicit manual hunt guess, never with all targets visible.
   if (purpose !== 'hunt' || hunt.reveal === 'all' || !fix) return;
-  const open = hunt.order === 'any' ? hunt.checkpoints.filter((c) => !state.hunt.found.includes(c.id)) : [hunt.checkpoints[state.hunt.index]!];
+  const open = hunt.order === 'any' ? route.filter((c) => !state.hunt.found.includes(c.id)) : [route[state.hunt.index]!];
   const nearest = Math.min(...open.map((c) => haversineM(fix, c)));
   const band = distanceBand(nearest);
   state.hunt.lastDistanceBand = band;
@@ -862,6 +899,7 @@ export function evaluateTick(config: LockationConfig, prevState: LockationState,
   const plan = new Planner(ctx);
   const now = ctx.now;
   syncSlots(config, state, now);
+  ensureRoute(config, state, ctx.rng ?? Math.random);
 
   // F2 required: warnings before deadlines, then missed deadlines (per slot)
   const r = config.rules.required;
@@ -951,6 +989,7 @@ export function evaluateTick(config: LockationConfig, prevState: LockationState,
     const at = huntScheduledStart(config, state);
     if (at && now.getTime() >= at.getTime()) {
       startHunt(state, now);
+      ensureRoute(config, state, ctx.rng ?? Math.random);
       plan.event('Scavenger hunt started (scheduled).');
       plan.notify({ audience: 'wearer', title: 'Scavenger hunt started', message: 'Your scavenger hunt has started – open Lockation for the first checkpoint.', priority: 'high', key: 'hunt:started' });
       plan.notify({ audience: 'keyholder', kind: 'hunt', title: 'Lockation: hunt started', message: 'The scheduled scavenger hunt has started.', key: 'hunt:started' });
@@ -1102,6 +1141,7 @@ export function applyHuntAction(config: LockationConfig, prevState: LockationSta
   switch (action) {
     case 'start':
       startHunt(state, now);
+      ensureRoute(config, state, ctx.rng ?? Math.random);
       plan.event(`${who} started the scavenger hunt${actor === 'keyholder' && h.start !== 'keyholder' ? ' (forced)' : ''}.`);
       tell('Hunt started', `${who} started the scavenger hunt.`);
       break;

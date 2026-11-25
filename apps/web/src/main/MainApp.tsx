@@ -330,7 +330,10 @@ export function MainApp({ backend, mock }: { backend: Backend; mock?: MockBacken
             <HuntControls view={view} backend={backend} onView={setView} onError={(message) => setError({ message })} />
             <div class="progress" aria-label="hunt progress"><span style={{ width: `${(view.hunt.index / Math.max(1, view.hunt.total)) * 100}%` }} /></div>
             <p class="small muted">
-              {view.hunt.index} of {view.hunt.total} checkpoints found · {view.hunt.order === 'any' ? 'any order' : 'in order'}
+              {view.hunt.randomRoute && !view.hunt.randomRoute.drawn
+                ? `Random route: ${view.hunt.randomRoute.min === view.hunt.randomRoute.max ? view.hunt.randomRoute.min : `${view.hunt.randomRoute.min}–${view.hunt.randomRoute.max}`} checkpoints will be drawn when the hunt starts`
+                : `${view.hunt.index} of ${view.hunt.total} checkpoints found${view.hunt.randomRoute ? ' (random route)' : ''}`}{' '}
+              · {view.hunt.order === 'any' ? 'any order' : 'in order'}
               {view.hunt.deadline ? ` · ends ${fmtTime(view.hunt.deadline, view.timezone)}` : ''}
             </p>
             {huntActive && (

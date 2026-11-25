@@ -126,3 +126,17 @@ describe('hunt "Start at" uses the lock timezone', () => {
     unmount();
   });
 });
+
+describe('hunt tab: random route', () => {
+  it('a random hunt in the demo draws a route and shows its size', async () => {
+    const { MockBackend, demoConfig } = await import('../src/lib/mock-backend.js');
+    const m = new Map<string, string>();
+    const b = new MockBackend({ getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k) });
+    const cfg = demoConfig();
+    const cps = [0, 1, 2].map((i) => ({ ...cfg.rules.hunt.checkpoints[0]!, id: `r${i}`, name: `R${i}`, lat: cfg.rules.hunt.checkpoints[0]!.lat + i * 0.003 }));
+    await b.configSave({ ...cfg, disclaimer: { version: 1, acceptedAt: '2026-06-01T00:00:00.000Z' }, rules: { ...cfg.rules, hunt: { ...cfg.rules.hunt, checkpoints: cps, random: { enabled: true, min: 2, max: 3 } } } });
+    const v = await b.session();
+    expect(v.hunt?.randomRoute).toMatchObject({ drawn: true, min: 2, max: 3, pool: 3 });
+    expect([2, 3]).toContain(v.hunt?.total);
+  });
+});

@@ -82,6 +82,9 @@ Time amounts are multiplied by the number of steps. Movements flagged as implaus
 
 ## Scavenger hunt
 
+- **Random route**: the checkpoints are only *possible* checkpoints. When the hunt starts, Lockation draws between *at least*
+  and *at most* of them (e.g. 2–4) in random order. Nobody knows the route in advance – not even the author of a self-lock.
+  Only drawn checkpoints are shown, synced to OwnTracks and counted.
 - **Order**: *in order* (default) – only the current checkpoint counts; or *any order* – every unfound checkpoint counts and the
   hunt is completed when all are found.
 - Being inside a checkpoint at any check-in or background update completes it (*each checkpoint*). After the last one the hunt

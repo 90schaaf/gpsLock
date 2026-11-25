@@ -515,3 +515,57 @@ describe('lock-timezone wall time conversion (scheduled hunt start)', () => {
     expect(zonedWallTimeToUtc('nonsense', 'UTC')).toBeUndefined();
   });
 });
+
+describe('hunt: random route', () => {
+  const pool = ['a', 'b', 'c', 'd', 'e'].map((id, i) => ({ id, name: `P${id}`, ...north(HOME, 300 * (i + 1)), radiusM: 50, hint: id }));
+  const config = (random: Record<string, unknown>, hunt: Record<string, unknown> = {}) =>
+    cfg({ version: 2, rules: { hunt: { enabled: true, reveal: 'hint', checkpoints: pool, random: { enabled: true, ...random }, onCheckpoint: [{ type: 'remove_time', seconds: 60 }], ...hunt } } });
+  const seq = (values: number[]) => {
+    let i = 0;
+    return () => values[i++ % values.length]!;
+  };
+
+  it('validates the range against the pool', () => {
+    expect(parseConfig({ version: 2, rules: { hunt: { enabled: true, checkpoints: pool, random: { enabled: true, min: 3, max: 2 } } } }).ok).toBe(false);
+    expect(parseConfig({ version: 2, rules: { hunt: { enabled: true, checkpoints: pool, random: { enabled: true, min: 2, max: 6 } } } }).ok).toBe(false);
+    expect(parseConfig({ version: 2, rules: { hunt: { enabled: true, checkpoints: pool, random: { enabled: true, min: 2, max: 5 } } } }).ok).toBe(true);
+  });
+
+  it('draws min–max checkpoints in random order at the first evaluation and keeps the route', () => {
+    const c = config({ min: 2, max: 4 });
+    const s = initialState(c, T0);
+    expect(s.hunt.route).toBeUndefined();
+    const v0 = buildSessionView({ role: 'wearer', isSelfLock: true, config: c, state: s, history: [], now: T0 });
+    expect(v0.hunt).toMatchObject({ total: 4, randomRoute: { drawn: false, min: 2, max: 4, pool: 5 } });
+    const r = evaluateTick(c, s, { now: minutes(T0, 1), sessionId: 's1', evalId: 'k1', rng: seq([0.1, 0.9, 0.5, 0.3, 0.99]) });
+    const route = r.state.hunt.route!;
+    expect(route.length).toBeGreaterThanOrEqual(2);
+    expect(route.length).toBeLessThanOrEqual(4);
+    expect(new Set(route).size).toBe(route.length);
+    const again = evaluateTick(c, r.state, { now: minutes(T0, 2), sessionId: 's1', evalId: 'k2', rng: () => 0 });
+    expect(again.state.hunt.route).toEqual(route);
+    const v = buildSessionView({ role: 'wearer', isSelfLock: true, config: c, state: again.state, history: [], now: T0 });
+    expect(v.hunt!.total).toBe(route.length);
+    expect(v.hunt!.hint).toBe(route[0]); // hint = checkpoint id in this fixture
+  });
+
+  it('only drawn checkpoints count, in the drawn order; completes after the route', () => {
+    const c = config({ min: 2, max: 2 }, { onComplete: [{ type: 'unfreeze' }] });
+    const r = new Run(c);
+    r.tick(minutes(T0, 1));
+    const route = r.state.hunt.route!;
+    const pos = (id: string) => pool.find((p) => p.id === id)!;
+    const notDrawn = pool.find((p) => !route.includes(p.id))!;
+    expect(types(r.checkin(notDrawn, minutes(T0, 5)))).toEqual([]);
+    expect(types(r.checkin(pos(route[0]!), minutes(T0, 10)))).toEqual(['remove_time']);
+    expect(types(r.checkin(pos(route[1]!), minutes(T0, 15)))).toEqual(['remove_time', 'unfreeze']);
+    expect(r.state.hunt.status).toBe('completed');
+  });
+
+  it('a wearer-started random hunt draws on start (self-lock)', () => {
+    const c = config({ min: 3, max: 3 }, { start: 'wearer' });
+    const s = initialState(c, T0);
+    const res = applyHuntAction(c, s, 'start', 'wearer', { now: T0, sessionId: 's1', evalId: 'h1', rng: () => 0.5 }, true);
+    expect(res.state.hunt.route).toHaveLength(3);
+  });
+});

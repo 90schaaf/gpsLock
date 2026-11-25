@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-25
+
+- **Random hunt route:** `rules.hunt.random {enabled, min, max}` – at the start (or first evaluation of a running hunt) N ∈ [min, max]
+  checkpoints are drawn from the pool in random order (`state.hunt.route`); everything (counts, hints, map, OwnTracks sync,
+  order sequence/any) uses the route. Validation: min ≤ max ≤ pool size. Makes hunts possible on self-locks.
+- **ntfy errors explained:** status, ntfy error text and a hint; the token is trimmed.
+
 Condensed history of the specification and the implemented behaviour, newest first. Feature IDs refer to
 [03-features.md](03-features.md).
 

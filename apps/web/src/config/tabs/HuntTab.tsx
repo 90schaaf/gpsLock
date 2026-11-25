@@ -44,6 +44,32 @@ export function HuntTab({ config, edit, commands, reach, selected, setSelected }
         ))}
       </ol>
       {R.hunt.checkpoints.length === 0 && <p class="muted small">Tap the map to add checkpoints in order.</p>}
+      <div class="card stack" data-testid="hunt-random" style={{ padding: '10px 12px' }}>
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={R.hunt.random.enabled}
+            onChange={(e) => edit((d) => {
+              d.rules.hunt.random.enabled = checked(e);
+              if (checked(e)) {
+                const n = d.rules.hunt.checkpoints.length;
+                d.rules.hunt.random.max = Math.max(1, Math.min(d.rules.hunt.random.max, n || 1));
+                d.rules.hunt.random.min = Math.min(d.rules.hunt.random.min, d.rules.hunt.random.max);
+              }
+            })}
+          />
+          <span>
+            <strong>Random route</strong> – the checkpoints above are only <em>possible</em> checkpoints; when the hunt starts,
+            Lockation draws some of them in random order. Nobody knows the route in advance – great for self-locks.
+          </span>
+        </label>
+        {R.hunt.random.enabled && (
+          <div class="grid2">
+            <NumberField path="rules.hunt.random.min" label="At least" suffix="checkpoints" min={1} max={R.hunt.checkpoints.length || 1} value={R.hunt.random.min} onChange={(v) => edit((d) => { d.rules.hunt.random.min = v ?? 1; })} />
+            <NumberField path="rules.hunt.random.max" label="At most" suffix="checkpoints" min={1} max={R.hunt.checkpoints.length || 1} value={R.hunt.random.max} hint={`Drawn from ${R.hunt.checkpoints.length} possible checkpoints.`} onChange={(v) => edit((d) => { d.rules.hunt.random.max = v ?? 1; })} />
+          </div>
+        )}
+      </div>
       <div class="grid2">
         <label class="field">
           Reveal to wearer
