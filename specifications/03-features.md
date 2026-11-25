@@ -234,62 +234,85 @@ keyholder, holdMinutes, onReleased, onEarlyLeave}`.
 
 ### F27 – Toy control via XToys (planned)
 
-> Status: **specified, not implemented** (decided 2026-11-25). Open questions at the end of this section.
+> Status: **specified, not implemented** (decided 2026-11-25). Open points at the end of this section.
 
 Lockation's rules control the wearer's toys through an **XToys private webhook**
-([guide](https://guide.xtoys.app/tools/webhook.html)). Toy actions are a new consequence type; nobody controls the toys by
-hand – neither the keyholder nor the wearer.
+([guide](https://guide.xtoys.app/tools/webhook.html)). Toy actions are a new consequence type; during a lock nobody
+controls the toys by hand – neither the keyholder nor the wearer. Only the toy test (before a lock, or in the demo) is
+manual.
 
-**Connection (wearer)**
+**Lockation XToys script (proxy)**
 
-- The wearer creates a *private webhook* on their XToys profile and enters the **Webhook ID** on the Lockation main page.
-  The ID is the only credential: stored server-side only (D1), never in the session view, never shown to the keyholder,
-  never logged, deleted when the lock ends or the toys are disconnected.
+- One XToys script, provided by Lockation and documented in the guide, receives every webhook call and **dispatches it to
+  the right toy and channel** given in the request body. One webhook ID controls all toys of the wearer.
+- The wearer adds their toys to the script in XToys (XToys handles Bluetooth / the device APIs) and gives each one the
+  same toy id they enter in Lockation.
+
+**Toys, types and channels**
+
+| Type | Channels |
+|---|---|
+| `estim` – e-stim unit | `A`, `B` |
+| `vibrator` – single motor | `main` |
+| `dual_vibrator` – two motors | `A`, `B` |
+| `vibe_rotator` – vibration + rotation | `vibration`, `rotation` |
+
+- Each toy: id, name, **type**, **body part** (`genitals`, `anal`, `nipples`, `other`), up to 8 toys per lock.
+- **Wearer limits per toy, set once when connecting** and fixed while connected: maximum intensity (0–100 %, per channel
+  for 2-channel toys) and maximum duration of a single action. Every action is clamped to them. Suggested defaults are
+  lower for `estim`. The keyholder sees toys, types, body parts and limits – never the Webhook ID.
+
+**Connection (wearer, during a lock)**
+
+- The wearer creates a *private webhook* on their XToys profile and enters the **Webhook ID** and their toys on the
+  Lockation main page. The ID is the only credential: stored server-side only (D1), never in the session view, never shown
+  to the keyholder, never logged, deleted when the lock ends or the toys are disconnected.
 - Before connecting, the wearer must accept the **toy disclaimer** (versioned like F18): toys can act at any time, also in
   public, in a car, on a train or at work – the wearer is responsible for where they are; never use it while driving or
-  operating machinery; consent; XToys must be running with the toys connected; Lockation cannot always confirm that a toy
-  reacted; third-party service (XToys). There is **no automatic pause** (neither by speed nor by time of day) – being in
-  a car or train as a passenger is fine, so the responsibility lies with the wearer, which the disclaimer makes explicit.
-- **Toys (targets):** when connecting, the wearer lists their toys – a name and a body part each (e.g. "Vibe – genitals",
-  "Plug – anal", "E-stim – nipples"), up to 8. Body parts come from a fixed list (genitals, anal, nipples, other) so the
-  keyholder can configure rules before knowing the exact toys; a rule targets a body part or "all toys".
-- **Wearer limits per toy, set once when connecting** and fixed while connected: maximum intensity (0–100 %) and maximum
-  duration of a single action. Every action is clamped to them. The keyholder sees toys, body parts and limits – never
-  the ID.
-- **Toy check (setup):** after entering the ID, Lockation sends one short test action to each toy; the wearer confirms that
-  it reacted. Until confirmed, the connection shows "not verified".
-- **Liveness check (heartbeat):** see below.
-- A ready-made **Lockation XToys script** (documented in the guide) implements the actions, the targets and the heartbeat.
+  operating machinery; e-stim safety (never across the chest / heart, follow the device's instructions); consent; XToys
+  must be running with the toys connected; Lockation cannot confirm that a toy reacted; third-party service (XToys).
+  There is **no automatic pause** (neither by speed nor by time of day) – being in a car or train as a passenger is fine,
+  so the responsibility lies with the wearer, which the disclaimer makes explicit.
+- **Setup check:** after connecting, Lockation sends one short test action to each toy (every channel); the wearer confirms
+  that it reacted. Until confirmed, the connection shows "not verified".
+
+**Toy test (wearer, before a lock and in the demo)**
+
+- A **separate page** (`toys.html`, linked from the guide, the main page and the demo) lets the wearer try everything
+  before a lock: enter the Webhook ID and the toys, then send any action to any toy / channel with an **intensity slider**
+  and a duration, a "test all toys" button and a big **Stop all** button. The disclaimer is accepted there as well.
+- Nothing is stored on the server: the ID stays in the page (optionally remembered in this browser). The page sends
+  directly to XToys if XToys allows browser requests (CORS); otherwise through a stateless, rate-limited worker endpoint
+  `/api/toy/try` that forwards the request and stores nothing.
+- The toy setup (toys, types, body parts, limits) can be **exported** and later imported when connecting in a lock.
+- **Demo:** the same test panel; in addition the option *"Send the demo rules' toy actions to my toys"* (off by default) –
+  otherwise demo toy actions are only shown ("🎮 would send pulse 60 % for 30 s – genitals").
 
 **Actions (Lockation → XToys)**
 
-- `POST https://webhook.xtoys.app/<webhookId>` with JSON `{action, target, intensity?, seconds?, pattern?}`. Actions: `pulse`,
-  `wave`, `constant`, `ramp` (to `intensity` over `seconds`), `stop`. `target` = toy id, body part or `all`. `intensity`
-  0–100, `seconds` 1–3600. The payload never contains zone names, positions or rule texts.
-- **Consequence type `toy`** `{action, target: bodyPart | "all", intensity, seconds, pattern?}` – usable everywhere consequences
-  are (zone actions, forbidden escalation, required missed / success, reward, surprise outcomes, missions, hunt, travel,
-  tracking). Applied by the worker like ntfy delivery: sent to every connected toy of that body part, clamped to each toy's
-  limits, at most one action per toy per 10 s (later ones are merged), logged in the history ("🎮 pulse 60 % for 30 s –
-  genitals"). No toy of that body part connected → skipped (logged).
+- `POST https://webhook.xtoys.app/<webhookId>` with JSON `{action, toy, channel?, intensity?, delta?, seconds?, pattern?}`.
+  `toy` = toy id (the worker resolves body parts to toys); `channel` omitted = all channels of the toy.
+- Actions:
+  - `pulse`, `wave`, `constant` – pattern at `intensity` for `seconds`;
+  - `ramp` – from the current level to `intensity` over `seconds`;
+  - `intensity` – **change the level of what is running**: absolute (`intensity`) or relative (`delta`, e.g. +10 / −20),
+    clamped to 0 … the toy's maximum;
+  - `stop`.
+  `intensity` 0–100, `seconds` 1–3600. The payload never contains zone names, positions or rule texts.
+- **Consequence type `toy`** `{action, target: {bodyPart | "all", toyType?, channel?}, intensity?, delta?, seconds?, pattern?}` –
+  usable everywhere consequences are (zone actions, forbidden escalation, required missed / success, reward, surprise
+  outcomes, missions, hunt, travel, tracking). Example: every forbidden-zone penalty `intensity +10` on the genitals toy –
+  the punishment gets stronger the longer the wearer stays. Applied by the worker like ntfy delivery: sent to every
+  matching connected toy, clamped to its limits, at most one action per toy per 10 s (later ones are merged), logged in
+  the history ("🎮 pulse 60 % for 30 s – genitals"). No matching toy connected → skipped (logged).
 - **"While inside" mode** per zone (`toy.whileInside {action, target, intensity, pattern}`): starts when the wearer enters the
   zone, stops when they leave. Also usable as "while **outside** the required zones". Implemented as a **dead-man's
   switch**: each start carries a limited `seconds` (≤ the toy's maximum) and is refreshed on every location / tick while
   the condition holds – if Lockation, the network or tracking fails, the toy stops by itself. An explicit `stop` is sent
   on leaving, when a surprise hold ends, on emergency stop, on disconnect and when the lock ends.
-- **Overlapping effects on the same toy:** a "while inside" effect is the base; a one-off action temporarily replaces it on
-  that toy and the base resumes afterwards. Two "while inside" effects on the same toy → the higher intensity wins.
-
-**Liveness check (heartbeat)**
-
-- Webhook calls are fire-and-forget, but an XToys script can send **outbound messages** over the webhook's WebSocket
-  (`wss://webhook.xtoys.app/<webhookId>`, "Script can send outbound messages"). The Lockation script answers a `ping` with
-  `{action: "pong", toys: [...]}` (the toys the script currently sees as connected, if XToys exposes that to scripts).
-- The worker checks every *n* minutes (e.g. 10): open the WebSocket, send `ping`, wait up to 10 s for `pong`, close. Waiting
-  for I/O costs no CPU time; no permanent connection or Durable Object is needed.
-- Result per lock: `online` (pong, toys connected) · `toy missing` (pong, a listed toy not connected – only if detectable) ·
-  `offline` (no pong: XToys closed, phone asleep, network).
-- **Toy required (optional, keyholder):** like the missing-signal rule – after `offlineMinutes` without a pong: warning, then
-  `onOffline` consequences, repeating. Off by default; then toy consequences are simply skipped while offline.
+- **Overlapping effects on the same toy / channel:** a "while inside" effect is the base; a one-off action temporarily
+  replaces it and the base resumes afterwards; `intensity` changes apply to whatever is running. Two "while inside"
+  effects on the same channel → the higher intensity wins.
 
 **Emergency stop and reconnecting (wearer)**
 
@@ -302,30 +325,32 @@ hand – neither the keyholder nor the wearer.
 
 **Keyholder configuration (🎮 Toys tab)**
 
-- Enable toy control; `onEmergencyStop` (at least one consequence required when enabled); optional "toy required" with
-  `offlineMinutes` and `onOffline`; optional `whileInside` per zone; toy consequences in the existing consequence editors
-  (body part, action, intensity, duration, pattern). The keyholder sees the connected toys, their limits and the liveness
-  status.
+- Enable toy control; `onEmergencyStop` (at least one consequence required when enabled); optional `whileInside` per zone;
+  toy consequences in the existing consequence editors (target body part / toy type / channel, action, intensity or
+  change, duration, pattern). The keyholder sees the connected toys and their limits.
 - Self-locks: allowed – the wearer configures their own rules and still accepts the toy disclaimer.
 
-**Demo:** toy actions are only shown ("🎮 would send pulse 60 % for 30 s – genitals"); nothing is sent; the liveness check
-is simulated.
+AC: 1. No toy action during a lock without the accepted toy disclaimer and connected toys. 2. Actions (incl. intensity
+changes) are clamped to each toy's / channel's limits. 3. The Webhook ID never appears in any view, log, history or
+notification, and the toy test page stores it nowhere on the server. 4. A "while inside" effect stops by itself within
+its refresh time if Lockation stops refreshing. 5. Emergency stop always works, sends `stop` to all toys, deletes the ID
+and applies `onEmergencyStop`; reconnecting is possible. 6. During a lock nobody can trigger a toy action by hand.
 
-AC: 1. No toy action without the accepted toy disclaimer and a connected toy. 2. Actions are clamped to each toy's limits.
-3. The Webhook ID never appears in any view, log, history or notification. 4. A "while inside" effect stops by itself
-within its refresh time if Lockation stops refreshing. 5. Emergency stop always works, sends `stop` to all toys, deletes
-the ID and applies `onEmergencyStop`; reconnecting is possible. 6. Nobody can trigger a toy action by hand. 7. With "toy
-required", a missing pong for `offlineMinutes` applies `onOffline` once per interval.
+**Later (on hold): liveness check**
 
-**Open questions / to verify before building**
+- An XToys script can send **outbound messages** over the webhook's WebSocket (`wss://webhook.xtoys.app/<webhookId>`). The
+  Lockation script would answer a `ping` with `{action: "pong", toys: [...]}`; the worker checks every *n* minutes (open the
+  WebSocket, send `ping`, wait ≤ 10 s, close – no CPU cost while waiting, no Durable Object). Status `online` / `toy
+  missing` / `offline`, and an optional **"toy required"** rule (after `offlineMinutes` without a pong: warning, then
+  `onOffline`, repeating; off by default).
+- To verify first: outbound messages reach a WebSocket client on a *private* webhook; the script can see which toys are
+  connected; it keeps working on Android in the background.
 
-1. **Outbound messages:** do outbound messages of a script reach a WebSocket client that Lockation opens on a *private*
-   webhook (the guide mentions them for the private webhook block)? Can the script see which toys are connected (for
-   `toy missing`)? → verify with the toy check.
-2. **Android background:** does XToys keep receiving webhooks and answering pings with the app in the background and the
-   screen off?
-3. **Several toys at once:** can one XToys script drive several toys independently at the same time (one community
-   project notes a "one body part at a time" limitation)? If not, the Lockation script needs one webhook per toy.
+**Open points / to verify with the toy test**
+
+1. Does XToys allow browser requests to `webhook.xtoys.app` (CORS)? Decides whether `/api/toy/try` is needed.
+2. Does XToys keep receiving webhooks on Android with the app in the background and the screen off?
+3. Can the proxy script drive several toys and channels independently at the same time (incl. both e-stim channels)?
 
 ### F7 – Consequences
 

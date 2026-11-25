@@ -2,10 +2,11 @@
 
 ## 2026-11-25
 
-- **Toy control via XToys (F27) specified** (not implemented): private webhook entered by the wearer, toy disclaimer, several
-  toys by body part with per-toy limits, consequence type `toy`, "while inside" with dead-man's switch, liveness check
-  via WebSocket ping / pong with optional "toy required", emergency stop with punishment and reconnect, no manual
-  control, no automatic pause.
+- **Toy control via XToys (F27) specified** (not implemented): Lockation proxy script (one webhook, toy + channel in the
+  body), toy types with channels (e-stim 2, vibrator 1, dual vibrator 2, vibrator + rotator 2) and body parts, per-toy
+  limits, toy test page and demo panel, consequence type `toy` incl. intensity changes, "while inside" with dead-man's
+  switch, emergency stop with punishment and reconnect, toy disclaimer, no manual control during a lock, no automatic
+  pause; liveness check on hold.
 - **Surprise zones (F26):** zone role `surprise` – visible zones whose outcome is drawn by weight on entering (reward,
   punishment, or a hold: stay for a while / until the keyholder releases, at the latest after `holdMinutes`); once or every
   visit; early leave consequences; map marks new / visited / used / holding; `/api/surprise` release.

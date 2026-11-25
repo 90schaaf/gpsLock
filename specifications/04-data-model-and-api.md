@@ -121,15 +121,18 @@ Missing or corrupt state is replaced by a fresh initial state.
 
 ## Planned: toy control (F27)
 
-- Config: `rules.toy {enabled, onEmergencyStop: Consequence[], required?: {offlineMinutes, warnBeforeMinutes?, onOffline:
-  Consequence[]}, pingMinutes}`, zone `toy.whileInside? {action, target, intensity, pattern?}`, consequence `{type: "toy",
-  action, target, intensity, seconds, pattern?}`; `target` = `"genitals" | "anal" | "nipples" | "other" | "all"`.
-- State: `toy {connectedAt?, verifiedAt?, disclaimerVersion?, toys: [{id, name, bodyPart, maxIntensity, maxSeconds}],
-  liveness {status, lastPongAt?, nextPingAt?, missedCount}, running: {[toyId]: {source, until}}, emergencyStops}` – the
-  Webhook ID is **not** in the state.
+- Config: `rules.toy {enabled, onEmergencyStop: Consequence[]}`, zone `toy.whileInside? {action, target, intensity, pattern?}`,
+  consequence `{type: "toy", action: "pulse" | "wave" | "constant" | "ramp" | "intensity" | "stop", target: {bodyPart:
+  "genitals" | "anal" | "nipples" | "other" | "all", toyType?, channel?}, intensity?, delta?, seconds?, pattern?}`.
+- Toy: `{id, name, type: "estim" | "vibrator" | "dual_vibrator" | "vibe_rotator", bodyPart, limits: {maxIntensity |
+  {[channel]: maxIntensity}, maxSeconds}}`; channels per type: estim `A, B` · vibrator `main` · dual_vibrator `A, B` ·
+  vibe_rotator `vibration, rotation`.
+- State: `toy {connectedAt?, verifiedAt?, disclaimerVersion?, toys: Toy[], running: {[toyId:channel]: {source, level, until}},
+  emergencyStops}` – the Webhook ID is **not** in the state.
 - D1 `toys`: `session_id` (PK), `webhook_id`, `created_at` – deleted on disconnect and on session end.
 - API: `/api/toy/connect {mainToken, webhookId, toys, disclaimerVersion}` (wearer), `/api/toy/test {mainToken}`,
-  `/api/toy/confirm {mainToken}`, `/api/toy/emergency-stop {mainToken}` (wearer; applies `onEmergencyStop`).
+  `/api/toy/confirm {mainToken}`, `/api/toy/emergency-stop {mainToken}` (wearer; applies `onEmergencyStop`),
+  `/api/toy/try {webhookId, action}` (toy test page; stateless, rate-limited, only if XToys blocks browser requests).
 
 ## Worker HTTP API
 
