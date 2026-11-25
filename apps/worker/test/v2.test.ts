@@ -337,3 +337,64 @@ describe('toys (F27)', () => {
     expect(db.rows('toys')).toEqual([]);
   });
 });
+
+describe('toys: effects while inside (F27 step 3)', () => {
+  const effCfg = {
+    ...config,
+    zones: [
+      config.zones[0],
+      { ...config.zones[1], toy: { whileInside: { target: { bodyPart: 'genitals' }, shape: 'wave', intensity: 50 } } },
+    ],
+    rules: { ...config.rules, toy: { enabled: true, onEmergencyStop: [{ type: 'add_time', seconds: 7200 }] } },
+  };
+  const toys = [
+    { id: 'vibe', name: 'Bullet', type: 'vibrator', bodyPart: 'genitals', maxIntensity: [40], maxSeconds: 300 },
+    { id: 'plug', name: 'Plug', type: 'vibrator', bodyPart: 'anal', maxIntensity: [100], maxSeconds: 300 },
+  ];
+  let sent: string[];
+  const toyFetch = async (url: string) => {
+    sent.push(url);
+    return new Response('OK', { status: 200 });
+  };
+  const ov = () => ({ ...o(), toyFetch });
+  const postT = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+    handleRequest(new Request(`https://worker.test${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://user.github.io', ...headers }, body: JSON.stringify(body) }), env, ov());
+
+  beforeEach(() => {
+    sent = [];
+    fake.addSession('s1', effCfg as any);
+  });
+
+  it('starts on entering, is renewed by the cron before it ends, stops on leaving', async () => {
+    expect((await postT('/api/toy/connect', { mainToken: 'wearer-token', webhookId: 'HOOK2', toys, disclaimerVersion: 1 })).status).toBe(200);
+    expect(sent).toEqual([]); // not inside yet
+    const p = (await (await postT('/api/tracking/pair', { mainToken: 'wearer-token' })).json()) as any;
+    await postT('/track/owntracks', loc(BAR, now), basic(p.username, p.password));
+    expect(sent).toHaveLength(1); // genitals → Bullet only
+    expect(sent[0]).toContain('cmd=play');
+    expect(sent[0]).toContain('shape=wave');
+    expect(sent[0]).toContain('level=40'); // clamped
+    expect(sent[0]).toContain('seconds=300'); // ends by itself after the toy's maximum
+    let v = (await (await postT('/api/session', { mainToken: 'kh-token' })).json()) as any;
+    expect(v.toys.running).toEqual([expect.objectContaining({ toy: 'Bullet', shape: 'wave', level: 40, label: 'while in "Bar"' })]);
+
+    sent = [];
+    now = at(3);
+    await runCron(env, ov(), 40, { full: false });
+    expect(sent).toEqual([]); // still running
+    now = at(4.1);
+    await runCron(env, ov(), 40, { full: false });
+    expect(sent).toHaveLength(1); // renewed a minute before the end
+    expect(sent[0]).toContain('cmd=play');
+
+    sent = [];
+    now = at(5);
+    await postT('/track/owntracks', loc(HOME, now), basic(p.username, p.password));
+    expect(sent).toEqual(['https://webhook.xtoys.app/HOOK2?action=lockation&slot=part-vibrator-a&ch=all&cmd=stop']);
+    v = (await (await postT('/api/session', { mainToken: 'kh-token' })).json()) as any;
+    expect(v.toys.running).toEqual([]);
+    const log = fake.calls.filter((c) => c.path.endsWith('/logs/custom')).map((c) => c.body.description).join('\n');
+    expect(log).toContain('🎮 Bullet: wave 40 % while in "Bar".');
+    expect(log).toContain('🎮 Bullet: stopped (while in "Bar").');
+  });
+});

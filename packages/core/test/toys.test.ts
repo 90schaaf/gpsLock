@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildXToysScript, ConsequenceSchema, defaultToy, describeConsequence, parseConfig, resolveToyConsequence, TOY_COMMENTS, ToyCommandError, toyCommand, toyComment, ToySetupSchema, toySlots, type ToyConsequence, type ToySetup, type ToyWebhookBody } from '../src/index.js';
+import { desiredToyEffects, initialState, nextDueAt, pauseToyEffects, reconcileToyEffects, refreshAfterMs, buildXToysScript, ConsequenceSchema, defaultToy, describeConsequence, parseConfig, resolveToyConsequence, TOY_COMMENTS, ToyCommandError, toyCommand, toyComment, ToySetupSchema, toySlots, type ToyConsequence, type ToySetup, type ToyWebhookBody } from '../src/index.js';
 
 const setup: ToySetup = ToySetupSchema.parse({
   toys: [
@@ -218,5 +218,79 @@ describe('toy consequences (step 2)', () => {
     expect(parseConfig({ version: 2, rules: { toy: { enabled: true, onEmergencyStop: [c({})] } } }).ok).toBe(false);
     expect(parseConfig({ version: 2, rules: { toy: { enabled: true, onEmergencyStop: [{ type: 'add_time', seconds: 7200 }] } } }).ok).toBe(true);
     expect(ConsequenceSchema.safeParse(c({ shape: 'zigzag' })).success).toBe(false);
+  });
+});
+
+describe('effects while a condition holds (step 3)', () => {
+  const toys = setup.toys; // stim (estim, max 40/30), vibe, duo (max 80/100, 60 s), vibe2
+  const T0 = new Date('2026-06-01T10:00:00Z');
+  const sec = (s: number) => new Date(T0.getTime() + s * 1000);
+  const eff = (x: Record<string, unknown> = {}) => ({ target: { bodyPart: 'all' }, shape: 'wave' as const, intensity: 50, ...x }) as any;
+  const d = (source: string, e = eff()) => ({ source, label: `while in "${source}"`, effect: e });
+
+  it('renews a minute before the self-ending pattern runs out (at least halfway)', () => {
+    expect(refreshAfterMs(300)).toBe(240_000);
+    expect(refreshAfterMs(60)).toBe(30_000);
+    expect(refreshAfterMs(10)).toBe(5_000);
+  });
+
+  it('starts, keeps, renews and stops an effect', () => {
+    const only = [toys[1]!]; // vibe: max 100 %, 300 s
+    const a = reconcileToyEffects(only, [d('zone:bar')], {}, T0);
+    expect(a.commands.map((c) => c.body)).toEqual([{ action: 'lockation', slot: 'part-vibrator-a', ch: 'all', cmd: 'play', shape: 'wave', level: '50', seconds: '300' }]);
+    expect(a.running['vibe:all']).toMatchObject({ source: 'zone:bar', level: 50, refreshAt: sec(240).toISOString() });
+    expect(reconcileToyEffects(only, [d('zone:bar')], a.running, sec(100)).commands).toEqual([]);
+    const renewed = reconcileToyEffects(only, [d('zone:bar')], a.running, sec(241));
+    expect(renewed.commands).toHaveLength(1);
+    const stopped = reconcileToyEffects(only, [], renewed.running, sec(300));
+    expect(stopped.commands.map((c) => c.body.cmd)).toEqual(['stop']);
+    expect(stopped.running).toEqual({});
+  });
+
+  it('the higher intensity wins on the same toy; channels are separate', () => {
+    const r = reconcileToyEffects(toys, [d('zone:a', eff({ intensity: 20 })), d('zone:b', eff({ intensity: 70, target: { bodyPart: 'genitals', toyType: 'estim', channel: 'A' } }))], {}, T0);
+    expect(r.running['vibe:all']).toMatchObject({ source: 'zone:a', level: 20 });
+    expect(r.running['stim:A']).toMatchObject({ source: 'zone:b', level: 40 }); // stored as sent: clamped to channel A's 40 %
+    expect(r.commands.find((c) => c.toy.id === 'stim' && c.body.ch === '1')!.body.level).toBe('40'); // clamped to the toy
+    const both = reconcileToyEffects([toys[1]!], [d('zone:a', eff({ intensity: 20 })), d('zone:b', eff({ intensity: 70 }))], {}, T0);
+    expect(both.running['vibe:all']).toMatchObject({ source: 'zone:b', level: 70 });
+  });
+
+  it('a one-off action pauses the effect; it resumes afterwards', () => {
+    const only = [toys[1]!];
+    const a = reconcileToyEffects(only, [d('zone:bar')], {}, T0);
+    const paused = pauseToyEffects(a.running, ['vibe'], sec(30));
+    expect(reconcileToyEffects(only, [d('zone:bar')], paused, sec(10)).commands).toEqual([]);
+    const resumed = reconcileToyEffects(only, [d('zone:bar')], paused, sec(31));
+    expect(resumed.commands.map((c) => c.body.cmd)).toEqual(['play']);
+    expect(resumed.running['vibe:all']!.resumeAt).toBeUndefined();
+  });
+});
+
+describe('effects in the engine and config', () => {
+  const cfgWith = (extra: Record<string, unknown>) =>
+    parseConfig({
+      version: 2,
+      timezone: 'Europe/Zurich',
+      zones: [{ id: 'bar', name: 'Bar', lat: 47.39, lng: 8.515, radiusM: 100, toy: { whileInside: { target: { bodyPart: 'all' }, shape: 'pulse', intensity: 40 } } }],
+      rules: { toy: { enabled: true, onEmergencyStop: [{ type: 'add_time', seconds: 60 }] } },
+      ...extra,
+    });
+
+  it('"while inside" needs background tracking', () => {
+    expect(cfgWith({}).ok).toBe(false);
+    expect(cfgWith({ tracking: { enabled: true } }).ok).toBe(true);
+  });
+
+  it('desired effects follow the presence; running effects are due for renewal', () => {
+    const r = cfgWith({ tracking: { enabled: true } });
+    if (!r.ok) throw new Error('config');
+    const T0 = new Date('2026-06-01T10:00:00Z');
+    const state = initialState(r.config, T0);
+    expect(desiredToyEffects(r.config, state)).toEqual([]);
+    state.presence.bar = { since: T0.toISOString(), lastSeen: T0.toISOString() };
+    expect(desiredToyEffects(r.config, state)).toEqual([{ source: 'zone:bar', label: 'while in "Bar"', effect: { target: { bodyPart: 'all' }, shape: 'pulse', intensity: 40 } }]);
+    state.toy.running = { 'vibe:all': { source: 'zone:bar', label: 'x', shape: 'pulse', level: 40, sentAt: T0.toISOString(), refreshAt: '2026-06-01T10:04:00.000Z' } };
+    expect(nextDueAt(r.config, state, T0)!.toISOString() <= '2026-06-01T10:04:00.000Z').toBe(true);
   });
 });

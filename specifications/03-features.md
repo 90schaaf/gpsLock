@@ -234,8 +234,8 @@ keyholder, holdMinutes, onReleased, onEarlyLeave}`.
 
 ### F27 – Toy control via XToys (planned)
 
-> Status: step 1 (toy test page, script) and **step 2 (toys in a lock, consequence type, emergency stop) implemented**;
-> step 3 ("while inside") open. Liveness check on hold.
+> Status: steps 1–3 **implemented** (toy test page and script; toys in a lock with consequence type and emergency stop;
+> effects while inside / while outside the required zones). Liveness check on hold.
 
 Lockation's rules control the wearer's toys through an **XToys private webhook**
 ([guide](https://guide.xtoys.app/tools/webhook.html)). Toy actions are a new consequence type; during a lock nobody
@@ -317,7 +317,12 @@ manual.
   comment** ("🎮 pulse 60 % for 30s (toys – genitals) → Bullet." + "😈 …"). No (matching) toy connected or toy control
   off → skipped and logged. Toy actions are sent even if the wearer has not confirmed the setup check (warning shown).
   Keyholder pushes only for connected / confirmed / emergency stop (high priority – never rate-limited).
-- **"While inside" mode** per zone (`toy.whileInside {action, target, intensity, pattern}`): starts when the wearer enters the
+- **"While inside" mode** per zone (`toy.whileInside {target, shape, intensity}`) and `rules.toy.whileOutsideRequired` – both
+  need background tracking (validated). The app reconciles after every evaluation (`desiredToyEffects` →
+  `reconcileToyEffects`, state `toy.running[<toyId>:<channel|all>] {source, label, shape, level (as sent), sentAt,
+  refreshAt, resumeAt?}`): `seconds` = the toy's maximum, renewed at `max(½, maxSeconds − 60 s)` via `nextDueAt` (cron);
+  one-off `play` / `shock` set `resumeAt`; starts and stops are logged, renewals are not.
+  Original wording: starts when the wearer enters the
   zone, stops when they leave. Also usable as "while **outside** the required zones". Implemented as a **dead-man's
   switch**: each start carries a limited `seconds` (≤ the toy's maximum) and is refreshed on every location / tick while
   the condition holds – if Lockation, the network or tracking fails, the toy stops by itself. An explicit `stop` is sent

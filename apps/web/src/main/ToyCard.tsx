@@ -55,6 +55,15 @@ export function ToyCard({ view, backend, mock, onView, onError }: { view: Sessio
               </li>
             ))}
           </ul>
+          {T.running.length > 0 && (
+            <p class="small" style={{ margin: 0 }} data-testid="toy-running">
+              {T.running.map((r) => (
+                <span key={r.toy + r.channel} style={{ display: 'block' }}>
+                  ▶ <strong>{r.toy}</strong>{r.channel !== 'all' ? ` ${r.channel}` : ''}: {r.shape} {r.level} % {r.label}{r.paused ? ' (paused for a one-off action)' : ''}
+                </span>
+              ))}
+            </p>
+          )}
           {!T.verified && (
             <p class="small warn-text" style={{ margin: 0 }} data-testid="toy-unverified">
               {wearer ? 'Please test your toys and confirm that they react.' : 'The wearer has not confirmed yet that the toys react.'} Toy actions are sent anyway.

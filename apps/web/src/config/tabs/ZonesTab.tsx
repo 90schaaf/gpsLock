@@ -1,5 +1,5 @@
 import { MAX_RADIUS_M, MIN_RADIUS_M, SMALL_RADIUS_HINT_M, zonesWithRole, type Zone } from '@lockation/core';
-import { ConsequenceEditor, NumberField } from '../editors.js';
+import { ConsequenceEditor, NumberField, ToyEffectEditor } from '../editors.js';
 import { applyRoles, droppedRolesWithSettings, toggleRole, type RoleChoice } from '../helpers.js';
 import { PlacesInfo, ReachNote, setAck, val, zoneColor, type TabProps } from '../shared.js';
 
@@ -67,6 +67,16 @@ export function ZonesTab({ config, edit, commands, reach, selected, setSelected 
               </span>
             )}
             <ReachNote status={reach[z.id]} ack={z.reachabilityAck} onAck={(on) => setAck(edit, 'zone', z.id, reach[z.id], on)} />
+            {config.rules.toy.enabled && (
+              <div class="full" onClick={(e) => e.stopPropagation()}>
+                <ToyEffectEditor
+                  label="🎮 Toy effect while inside"
+                  hint={config.tracking.enabled ? 'runs from entering until leaving' : 'needs background tracking'}
+                  value={z.toy.whileInside}
+                  onChange={(v) => edit((d) => { d.zones[i]!.toy = v ? { whileInside: v } : {}; })}
+                />
+              </div>
+            )}
             <details class="zone-details full" data-testid="zone-actions" onClick={(e) => e.stopPropagation()} open={z.actions.onEnter.length + z.actions.onLeave.length > 0 && z.id === selected}>
               <summary class="small">
                 ⚡ Actions on enter / leave{z.actions.onEnter.length + z.actions.onLeave.length ? ` (${z.actions.onEnter.length + z.actions.onLeave.length})` : ''}

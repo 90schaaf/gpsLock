@@ -13,6 +13,7 @@ import {
   type Zone,
   zonesWithRole,
 } from './config.js';
+import { type DesiredToyEffect } from './toys.js';
 import { appliesAt, type Consequence, describeConsequence, formatDuration, scaleConsequence } from './consequences.js';
 import { distanceBand, haversineM, isInside, roundCoord } from './geo.js';
 import {
@@ -1085,6 +1086,7 @@ export function nextDueAt(config: LockationConfig, state: LockationState, now: D
   if (h.enabled && state.hunt.status === 'not_started' && h.start === 'scheduled') push(huntScheduledStart(config, state)?.getTime());
   if (state.nextLiveVerification) push(Date.parse(state.nextLiveVerification));
   if (config.rules.surprise.enabled) for (const st of Object.values(state.surprise.zones)) if (st.active) push(Date.parse(st.active.until));
+  for (const r of Object.values(state.toy.running)) push(Date.parse(r.resumeAt ?? r.refreshAt));
   const m = config.rules.mission;
   if (m.enabled) {
     const a = state.mission.active;
@@ -1512,4 +1514,21 @@ export function applySurpriseAction(config: LockationConfig, prevState: Lockatio
   releaseSurprise(z, outcomeOf(z, st.active!.outcomeId), st, 'keyholder', plan);
   trackFreeze(state, plan.list, ctx.now);
   return { state, consequences: plan.list, events: plan.events, notices: plan.finish() };
+}
+
+// ---------- F27 toy effects that run while a condition holds ----------
+
+/** The "while inside" / "while outside the required zones" effects that should run now. */
+export function desiredToyEffects(config: LockationConfig, state: LockationState): DesiredToyEffect[] {
+  const T = config.rules.toy;
+  if (!T.enabled || !config.tracking.enabled) return [];
+  const out: DesiredToyEffect[] = [];
+  for (const z of config.zones) {
+    if (z.toy.whileInside && state.presence[z.id]) out.push({ source: `zone:${z.id}`, label: `while in "${z.name}"`, effect: z.toy.whileInside });
+  }
+  if (T.whileOutsideRequired && state.tracking.lastSeenAt) {
+    const req = zonesWithRole(config, 'required');
+    if (req.length && !req.some((z) => state.presence[z.id])) out.push({ source: 'outsideRequired', label: 'while outside the required zones', effect: T.whileOutsideRequired });
+  }
+  return out;
 }

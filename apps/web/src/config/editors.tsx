@@ -1,4 +1,4 @@
-import { BODY_PARTS, ConsequenceSchema, MAX_WINDOWS, PLANNED_EXTENSIONS, TOY_SHAPES, TOY_TYPE_IDS, TOY_TYPES, WEEKDAYS, type Consequence, type TimeWindow, type ToyConsequence, type ToyType, type Weekday, type When } from '@lockation/core';
+import { BODY_PARTS, ConsequenceSchema, MAX_WINDOWS, PLANNED_EXTENSIONS, TOY_SHAPES, TOY_TYPE_IDS, TOY_TYPES, WEEKDAYS, type Consequence, type TimeWindow, type ToyConsequence, type ToyEffect, type ToyType, type Weekday, type When } from '@lockation/core';
 import { useState } from 'preact/hooks';
 import type { CommandInfo } from '../lib/backend.js';
 import { useFieldIssues } from './issues.js';
@@ -538,6 +538,65 @@ function ToyFields({ c, onChange }: { c: ToyConsequence; onChange: (c: Consequen
         )}
       </div>
       <span class="small muted">Sent to every connected toy that matches; the wearer's limits always apply. Skipped (and logged) if none is connected.</span>
+    </div>
+  );
+}
+
+/** F27 step 3 – an effect that runs while a condition holds (off = undefined). */
+export function ToyEffectEditor({ label, value, onChange, hint }: { label: string; value: ToyEffect | undefined; onChange: (v: ToyEffect | undefined) => void; hint?: string }) {
+  const set = (patch: Partial<ToyEffect>) => onChange({ ...value!, ...patch });
+  const target = (patch: Partial<ToyEffect['target']>) => {
+    const t = { ...value!.target, ...patch };
+    for (const k of Object.keys(t) as (keyof typeof t)[]) if (t[k] === undefined || t[k] === '') delete t[k];
+    set({ target: t as ToyEffect['target'] });
+  };
+  const channels = value?.target.toyType ? (TOY_TYPES[value.target.toyType].channels as readonly string[]) : ['A', 'B'];
+  return (
+    <div class="stack" data-testid="toy-effect">
+      <label class="check small">
+        <input type="checkbox" checked={!!value} onChange={(e) => onChange((e.target as HTMLInputElement).checked ? { target: { bodyPart: 'all' }, shape: 'pulse', intensity: 40 } : undefined)} />
+        <span><strong>{label}</strong>{hint ? <span class="muted"> – {hint}</span> : null}</span>
+      </label>
+      {value && (
+        <div class="grid2">
+          <label class="field">
+            Body part
+            <select value={value.target.bodyPart} onChange={(e) => target({ bodyPart: (e.target as HTMLSelectElement).value })}>
+              <option value="all">All toys</option>
+              {BODY_PARTS.map((b) => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+          </label>
+          <label class="field">
+            Toy type
+            <select value={value.target.toyType ?? ''} onChange={(e) => target({ toyType: ((e.target as HTMLSelectElement).value || undefined) as ToyType | undefined, channel: undefined })}>
+              <option value="">Any</option>
+              {TOY_TYPE_IDS.map((t) => (
+                <option key={t} value={t}>{TOY_TYPES[t].label}</option>
+              ))}
+            </select>
+          </label>
+          <label class="field">
+            Channel
+            <select value={value.target.channel ?? ''} onChange={(e) => target({ channel: (e.target as HTMLSelectElement).value || undefined })}>
+              <option value="">All channels</option>
+              {channels.filter((ch) => ch !== 'main').map((ch) => (
+                <option key={ch} value={ch}>{ch}</option>
+              ))}
+            </select>
+          </label>
+          <label class="field">
+            Pattern
+            <select value={value.shape} onChange={(e) => set({ shape: (e.target as HTMLSelectElement).value as ToyEffect['shape'] })}>
+              {TOY_SHAPES.map((sh) => (
+                <option key={sh} value={sh}>{sh}</option>
+              ))}
+            </select>
+          </label>
+          <NumberField label="Intensity (%)" min={0} max={100} value={value.intensity} onChange={(v) => set({ intensity: v ?? 0 })} />
+        </div>
+      )}
     </div>
   );
 }

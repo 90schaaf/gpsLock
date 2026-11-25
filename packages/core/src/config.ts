@@ -6,6 +6,7 @@
  * there is no migration.)
  */
 import { z } from 'zod';
+import { ToyEffectSchema } from './toys.js';
 import { ConsequenceListSchema } from './consequences.js';
 
 export const CONFIG_VERSION = 2;
@@ -137,6 +138,8 @@ export const ZoneSchema = z.object({
   forbidden: ZoneForbiddenSchema,
   reward: ZoneRewardSchema,
   surprise: ZoneSurpriseSchema,
+  /** F27 – a toy effect that runs while the wearer is inside this zone. */
+  toy: z.object({ whileInside: ToyEffectSchema.optional() }).default({}),
   actions: ZoneActionsSchema,
   reachabilityAck: ReachabilityAckSchema.optional(),
 });
@@ -318,6 +321,8 @@ export const ToyRuleSchema = z
     enabled: z.boolean().default(false),
     /** Applied when the wearer disconnects the toys (emergency stop). Required when toy control is enabled. */
     onEmergencyStop: ConsequenceListSchema,
+    /** Runs while the wearer is outside all required zones. Needs background tracking. */
+    whileOutsideRequired: ToyEffectSchema.optional(),
   })
   .default({});
 
@@ -403,6 +408,9 @@ export const LockationConfigSchema = z
           issue(['zones', i, 'forbidden', 'repeatWarningAfterMinutes'], 'the repeat warning must come before the next penalty');
         }
       }
+      if (z.toy.whileInside && cfg.rules.toy.enabled && !cfg.tracking.enabled) {
+        issue(['zones', i, 'toy', 'whileInside'], '"while inside" toy effects need background tracking to notice when the wearer leaves');
+      }
       if (z.roles.includes('required') && z.required.stayWindows.length && !cfg.tracking.enabled) {
         issue(['zones', i, 'required', 'stayWindows'], '"must stay inside" windows need background tracking to be enabled');
       }
@@ -445,6 +453,8 @@ export const LockationConfigSchema = z
     if (R.toy.enabled) {
       if (!R.toy.onEmergencyStop.length) issue(['rules', 'toy', 'onEmergencyStop'], 'set a consequence for the emergency stop (e.g. add 2 hours)');
       if (R.toy.onEmergencyStop.some((c) => c.type === 'toy')) issue(['rules', 'toy', 'onEmergencyStop'], 'the emergency stop cannot trigger toy actions');
+      if (R.toy.whileOutsideRequired && !cfg.tracking.enabled) issue(['rules', 'toy', 'whileOutsideRequired'], 'needs background tracking to notice where the wearer is');
+      if (R.toy.whileOutsideRequired && !withRole('required').length) issue(['rules', 'toy', 'whileOutsideRequired'], 'mark at least one zone as required');
     }
     const M = R.mission;
     if (M.enabled) {

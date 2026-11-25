@@ -335,3 +335,117 @@ export function toyComment(key: string): string {
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
   return TOY_COMMENTS[h % TOY_COMMENTS.length]!;
 }
+
+// ---------- continuous effects (F27 step 3: "while inside") ----------
+
+/** A toy effect that runs as long as its condition holds (e.g. while the wearer is inside a zone). */
+export const ToyEffectSchema = z.object({
+  target: z.object({
+    bodyPart: z.enum([...BODY_PARTS, 'all'] as [string, ...string[]]),
+    toyType: z.enum(TOY_TYPE_IDS as [ToyType, ...ToyType[]]).optional(),
+    channel: z.string().max(20).optional(),
+  }),
+  shape: z.enum(TOY_SHAPES).default('pulse'),
+  intensity: z.number().int().min(0).max(100).default(40),
+});
+export type ToyEffect = z.infer<typeof ToyEffectSchema>;
+
+/** What should run right now: one entry per condition that holds. */
+export interface DesiredToyEffect {
+  /** Stable id of the condition, e.g. `zone:casino` or `outsideRequired`. */
+  source: string;
+  /** Human readable, e.g. `while in "Casino"`. */
+  label: string;
+  effect: ToyEffect;
+}
+
+/** One running effect per toy channel (`<toyId>:<channel | all>`). Stored in the state. */
+export interface RunningToyEffect {
+  source: string;
+  label: string;
+  shape: ToyShape;
+  level: number;
+  /** When the current (self-ending) pattern was sent and when it must be renewed. */
+  sentAt: string;
+  refreshAt: string;
+  /** A one-off action took the toy over; send the effect again at this time. */
+  resumeAt?: string;
+}
+
+export const RunningToyEffectSchema = z.object({
+  source: z.string(),
+  label: z.string(),
+  shape: z.enum(TOY_SHAPES),
+  level: z.number(),
+  sentAt: z.string(),
+  refreshAt: z.string(),
+  resumeAt: z.string().optional(),
+});
+
+/** Renew a self-ending pattern a minute before it ends (the cron runs every minute), at least halfway through. */
+export function refreshAfterMs(seconds: number): number {
+  return Math.max(seconds * 500, (seconds - 60) * 1000);
+}
+
+/**
+ * Compare what should run with what runs: start / renew / replace effects and stop the ones whose condition ended.
+ * The highest intensity wins per toy channel. Pure – the caller sends `commands` and stores `running`.
+ */
+export function reconcileToyEffects(
+  toys: Toy[],
+  desired: DesiredToyEffect[],
+  running: Record<string, RunningToyEffect>,
+  now: Date,
+): { commands: { toy: Toy; body: ToyWebhookBody }[]; running: Record<string, RunningToyEffect> } {
+  const setup: ToySetup = { version: 1, toys };
+  const want: Record<string, { toy: Toy; channel?: string; d: DesiredToyEffect; level: number }> = {};
+  for (const d of desired) {
+    for (const toy of toys) {
+      const e = d.effect;
+      if (e.target.bodyPart !== 'all' && toy.bodyPart !== e.target.bodyPart) continue;
+      if (e.target.toyType && toy.type !== e.target.toyType) continue;
+      const chans = TOY_TYPES[toy.type].channels as readonly string[];
+      if (e.target.channel && chans.length > 1 && !chans.includes(e.target.channel)) continue;
+      const channel = e.target.channel && chans.length > 1 ? e.target.channel : undefined;
+      const key = `${toy.id}:${channel ?? 'all'}`;
+      if (!want[key] || e.intensity > want[key]!.level) want[key] = { toy, channel, d, level: e.intensity };
+    }
+  }
+  const t = now.getTime();
+  const commands: { toy: Toy; body: ToyWebhookBody }[] = [];
+  const next: Record<string, RunningToyEffect> = {};
+  for (const [key, w] of Object.entries(want)) {
+    const cur = running[key];
+    const seconds = w.toy.maxSeconds;
+    const body = toyCommand(setup, w.toy.id, { cmd: 'play', shape: w.d.effect.shape, intensity: w.level, seconds, channel: w.channel });
+    const level = Number(body.level); // what the toy really gets (clamped to its limit)
+    const same = cur && cur.source === w.d.source && cur.level === level && cur.shape === w.d.effect.shape;
+    if (same && cur.resumeAt && t < Date.parse(cur.resumeAt)) {
+      next[key] = cur; // a one-off action is playing – resume afterwards
+      continue;
+    }
+    if (same && !cur.resumeAt && t < Date.parse(cur.refreshAt)) {
+      next[key] = cur;
+      continue;
+    }
+    commands.push({ toy: w.toy, body });
+    next[key] = { source: w.d.source, label: w.d.label, shape: w.d.effect.shape, level, sentAt: now.toISOString(), refreshAt: new Date(t + refreshAfterMs(seconds)).toISOString() };
+  }
+  for (const key of Object.keys(running)) {
+    if (next[key]) continue;
+    const [toyId, ch] = key.split(':');
+    const toy = toys.find((x) => x.id === toyId);
+    if (toy) commands.push({ toy, body: toyCommand(setup, toy.id, { cmd: 'stop', channel: ch === 'all' ? undefined : ch }) });
+  }
+  return { commands, running: next };
+}
+
+/** A one-off `play` took these toys over for `seconds`: their running effects resume afterwards. */
+export function pauseToyEffects(running: Record<string, RunningToyEffect>, toyIds: string[], until: Date): Record<string, RunningToyEffect> {
+  const out: Record<string, RunningToyEffect> = {};
+  for (const [key, r] of Object.entries(running)) {
+    const resume = toyIds.includes(key.split(':')[0]!) ? until.toISOString() : r.resumeAt;
+    out[key] = resume && (!r.resumeAt || resume > r.resumeAt) ? { ...r, resumeAt: resume } : r;
+  }
+  return out;
+}

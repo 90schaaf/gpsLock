@@ -2,6 +2,10 @@
 
 ## 2026-11-25
 
+- **Toy effects while inside (F27, step 3):** zone `toy.whileInside` and `rules.toy.whileOutsideRequired` (need background
+  tracking); reconciled after every evaluation into `state.toy.running`; self-ending patterns renewed a minute before
+  their end via the due cron; one-off actions pause and resume them; highest intensity wins per toy channel; starts /
+  stops logged; the toy card shows running effects; demo casino plays a wave while inside.
 - **Toys in a lock (F27, step 2):** `rules.toy {enabled, onEmergencyStop}`, consequence type `toy` (play / intensity / shock /
   stop; target body part, toy type, channel), app port `toys` (Webhook ID in D1 `toys`, migration 0002), endpoints
   `/api/toy/connect|test|confirm|emergency-stop`, toy card on the main page, 🎮 Toys tab, demo (shown only unless real

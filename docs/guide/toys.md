@@ -1,7 +1,7 @@
 # Toys (XToys) – test page
 
 ::: tip Status
-Toy actions as consequences work in locks. Effects that run *while* you are inside a zone are not available yet.
+Toy actions as consequences and effects *while* you are inside a zone work in locks.
 :::
 
 Lockation controls toys through [XToys](https://xtoys.app) and its **private webhook**. XToys talks to the toys
@@ -70,3 +70,23 @@ toys reacted**. Toy actions are sent even before you confirm.
 
 **Demo** – the demo has toy control enabled (the casino pulses your toys). Toy actions are only shown in the log, unless
 you tick *really send the demo rules' toy actions to my toys* on the 🎮 Toys card.
+
+## Effects while inside
+
+Besides one-off actions, the keyholder can let a toy **run as long as a condition holds**:
+
+- **🎮 Toy effect while inside** – per zone (🗺 Zones tab): starts when the wearer enters, stops when they leave;
+- **Effect while outside the required zones** – 🎮 Toys tab: runs until the wearer is back in a required zone.
+
+Each effect has a target (body part, optionally toy type and channel), a pattern and an intensity. Both need
+**background tracking** (otherwise Lockation would not notice that the wearer left).
+
+- Each start is a pattern that **ends by itself** after the toy's maximum duration; Lockation renews it about a minute
+  before. If Lockation, the network or tracking fails, the toy stops on its own. Tip: a maximum duration of at least
+  2 minutes per action keeps effects running without gaps.
+- A **one-off action** (e.g. the punishment pulse at the casino) takes the toy over for its duration; the effect resumes
+  afterwards. Two effects on the same toy: the higher intensity wins.
+- Starts and stops appear in the lock history; renewals do not. The 🎮 Toys card shows what is running.
+- The emergency stop, disconnecting and the end of the lock stop everything.
+
+In the demo, the casino plays a wave while you are inside (on top of the punishment pulse when you enter).

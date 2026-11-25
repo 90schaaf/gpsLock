@@ -202,7 +202,7 @@ export function ConfigApp({ backend, bridge, reachCheck }: { backend: Backend; b
     } else {
       const id = newId('z');
       edit((d) => {
-        d.zones.push({ id, name: (name ?? `Zone ${d.zones.length + 1}`).slice(0, 60), lat: p.lat, lng: p.lng, radiusM: 150, roles: [], required: { intervalCheckins: true, stayWindows: [], onMissed: [], onSuccess: [], onOutsideDuringWindow: [] }, forbidden: { windows: [], onEnter: [] }, reward: { onEnter: [] }, surprise: { visits: 'once', cooldownMinutes: 60, outcomes: [] }, actions: { onEnter: [], onLeave: [], minStayMinutes: 0, cooldownMinutes: 0 } });
+        d.zones.push({ id, name: (name ?? `Zone ${d.zones.length + 1}`).slice(0, 60), lat: p.lat, lng: p.lng, radiusM: 150, roles: [], required: { intervalCheckins: true, stayWindows: [], onMissed: [], onSuccess: [], onOutsideDuringWindow: [] }, forbidden: { windows: [], onEnter: [] }, reward: { onEnter: [] }, surprise: { visits: 'once', cooldownMinutes: 60, outcomes: [] }, toy: {}, actions: { onEnter: [], onLeave: [], minStayMinutes: 0, cooldownMinutes: 0 } });
       });
       setSelected(id);
       if (tab !== 'zones') setTab('zones');

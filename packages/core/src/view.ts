@@ -103,6 +103,8 @@ export interface SessionView {
     emergencyStops: number;
     /** What the emergency stop costs (described). */
     onEmergencyStop: string;
+    /** Effects running now ("while inside" …). */
+    running: { toy: string; channel: string; shape: string; level: number; label: string; paused: boolean }[];
   };
   /** F26 – surprise zones that currently hold the wearer. */
   surpriseHolds?: { zoneId: string; zoneName: string; label: string; mode: 'stay' | 'keyholder'; since: string; until: string; canRelease: boolean }[];
@@ -258,6 +260,8 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
       lines: [
         'When you connect your toys (XToys), the rules can control them – look for 🎮 in the consequences. Your limits always apply.',
         `Emergency stop (disconnect the toys): ${list(config.rules.toy.onEmergencyStop)}.`,
+        ...config.zones.filter((z) => z.toy.whileInside).map((z) => `While you are in "${z.name}": ${effectText(z.toy.whileInside!)} – until you leave.`),
+        ...(config.rules.toy.whileOutsideRequired ? [`While you are outside the required zones: ${effectText(config.rules.toy.whileOutsideRequired)}.`] : []),
       ],
     });
   }
@@ -485,6 +489,10 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
       toys: T.toys.map((t) => ({ id: t.id, name: t.name, type: t.type, bodyPart: t.bodyPart, maxIntensity: [...t.maxIntensity], maxSeconds: t.maxSeconds })),
       emergencyStops: T.emergencyStops,
       onEmergencyStop: list(config.rules.toy.onEmergencyStop),
+      running: Object.entries(T.running).map(([key, r]) => {
+        const [toyId, channel] = key.split(":");
+        return { toy: T.toys.find((t) => t.id === toyId)?.name ?? toyId!, channel: channel ?? "all", shape: r.shape, level: r.level, label: r.label, paused: !!r.resumeAt && Date.parse(r.resumeAt) > now.getTime() };
+      }),
     };
   }
 
@@ -620,4 +628,9 @@ export function buildLogEntry(
     color: record?.outcome === 'rejected' ? '#c0392b' : consequences.length ? '#e67e22' : '#27ae60',
     icon: 'map-marker-alt',
   };
+}
+
+/** "🎮 pulse 40 % (toys – genitals)" for a running effect. */
+function effectText(e: { shape: string; intensity: number; target: { bodyPart: string; toyType?: string; channel?: string } }): string {
+  return `🎮 ${e.shape} ${e.intensity} % (${e.target.toyType ?? "toys"}${e.target.bodyPart === "all" ? "" : ` – ${e.target.bodyPart}`}${e.target.channel ? ` ${e.target.channel}` : ""})`;
 }

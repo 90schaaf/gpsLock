@@ -11,6 +11,7 @@ import {
   type Actor,
   applyHuntAction,
   applyMissionAction,
+  desiredToyEffects,
   applySurpriseAction,
   type SurpriseAction,
   SurpriseActionError,
@@ -36,7 +37,7 @@ import {
 import { initialState, type LockationState } from './state.js';
 import { buildLogEntry, buildSessionView, type Role, type SessionView } from './view.js';
 import { describeConsequence } from './consequences.js';
-import { resolveToyConsequence, TOY_DISCLAIMER_VERSION, toyCommand, toyComment, type ToyConsequence, ToySetupSchema, type ToyWebhookBody, type Toy } from './toys.js';
+import { TOY_TYPES, pauseToyEffects, reconcileToyEffects, resolveToyConsequence, TOY_DISCLAIMER_VERSION, toyCommand, toyComment, type ToyConsequence, ToySetupSchema, type ToyWebhookBody, type Toy } from './toys.js';
 
 /** An error with an HTTP-like status, mapped to the transport by the caller (worker: HTTP response, demo: ApiError). */
 export class AppError extends Error {
@@ -116,7 +117,7 @@ export class LockationApp<S extends LockSession = LockSession> {
    * Apply consequences: toy actions go to the wearer's toys (XToys), everything else to the lock (Chaster).
    * Returns the per-consequence results and extra log lines (toy actions, skipped ones, a cheeky comment).
    */
-  private async apply(s: S, state: LockationState, list: PlannedConsequence[]): Promise<{ applied: { ok: boolean; error?: string }[]; lines: string[] }> {
+  private async apply(s: S, state: LockationState, list: PlannedConsequence[]): Promise<{ applied: { ok: boolean; error?: string }[]; lines: string[]; paused: { toyIds: string[]; until: Date }[] }> {
     const applied: { ok: boolean; error?: string }[] = new Array(list.length);
     const lines: string[] = [];
     const lock = list.map((p, i) => [p, i] as const).filter(([p]) => p.consequence.type !== 'toy');
@@ -125,7 +126,8 @@ export class LockationApp<S extends LockSession = LockSession> {
       const r = await this.ports.applyConsequences(s, lock.map(([p]) => p));
       lock.forEach(([, i], j) => (applied[i] = r[j] ?? { ok: false }));
     }
-    if (!toy.length) return { applied, lines };
+    const paused: { toyIds: string[]; until: Date }[] = [];
+    if (!toy.length) return { applied, lines, paused };
     const enabled = s.config.rules.toy.enabled;
     const webhookId = enabled && state.toy.connectedAt && state.toy.toys.length ? await this.ports.toys?.getWebhookId(s) : undefined;
     let sent = false;
@@ -158,20 +160,21 @@ export class LockationApp<S extends LockSession = LockSession> {
         }
       }
       applied[i] = errors.length ? { ok: false, error: errors.join('; ') } : { ok: true };
+      if (c.action === 'play' || c.action === 'shock') paused.push({ toyIds: targets.map((x) => x.toy.id), until: new Date(this.ports.now().getTime() + Number(targets[0]!.body.seconds ?? 1) * 1000) });
       if (errors.length < targets.length) sent = true;
       lines.push(`${what} → ${targets.map((t) => t.toy.name).join(', ')}${errors.length ? ` (failed: ${errors.join('; ')})` : ''}.`);
     }
     if (sent) lines.push(`😈 ${toyComment(toy[0]![0].idempotencyKey)}`);
-    return { applied, lines };
+    return { applied, lines, paused };
   }
 
   /** Apply, log, persist, record and notify the result of one evaluation. */
   async finish(s: S, result: EvalResult & { record?: CheckinRecord }, kind: 'checkin' | 'tick', opts: { history?: boolean } = {}) {
-    const { applied, lines } = result.consequences.length ? await this.apply(s, result.state, result.consequences) : { applied: [], lines: [] };
+    const { applied, lines, paused } = result.consequences.length ? await this.apply(s, result.state, result.consequences) : { applied: [], lines: [], paused: [] };
     if (result.record) result.record.consequences = result.record.consequences.map((x, i) => ({ ...x, ok: applied[i]?.ok, error: applied[i]?.error }));
     const entry = buildLogEntry(kind, [...result.events, ...lines], result.consequences, result.record);
     if (entry) await this.ports.log(s, entry).catch(() => undefined);
-    await this.ports.saveState(s, result.state);
+    await this.ports.saveState(s, await this.syncToyEffects(s, withPaused(result.state, paused)));
     if (result.record && opts.history !== false) await this.ports.appendHistory(s, result.record);
     await this.ports.deliver(s, result.notices);
   }
@@ -265,6 +268,37 @@ export class LockationApp<S extends LockSession = LockSession> {
 
   // ---------- F27 toys ----------
 
+  /**
+   * Start / renew / stop the effects that run while a condition holds ("while inside"). Starts and stops are logged,
+   * renewals are not. Without connected toys nothing runs.
+   */
+  private async syncToyEffects(s: S, state: LockationState): Promise<LockationState> {
+    const T = state.toy;
+    const ports = this.ports.toys;
+    const connected = s.config.rules.toy.enabled && !!T.connectedAt && T.toys.length > 0 && !!ports;
+    if (!connected && !Object.keys(T.running).length) return state;
+    const webhookId = connected ? await ports!.getWebhookId(s) : undefined;
+    if (!webhookId) return Object.keys(T.running).length ? { ...state, toy: { ...T, running: {} } } : state;
+    const now = this.ports.now();
+    const desired = s.config.rules.toy.enabled ? desiredToyEffects(s.config, state) : [];
+    const r = reconcileToyEffects(T.toys, desired, T.running, now);
+    if (!r.commands.length && JSON.stringify(r.running) === JSON.stringify(T.running)) return state;
+    const lines: string[] = [];
+    for (const c of r.commands) {
+      const key = `${c.toy.id}:${c.body.ch === 'all' || !c.body.ch ? 'all' : (TOY_CHANNELS[c.toy.type] ?? [])[Number(c.body.ch) - 1] ?? 'all'}`;
+      const before = T.running[key];
+      const after = r.running[key];
+      let ok = true;
+      await ports!.send(s, webhookId, c.body).catch(() => (ok = false));
+      if (c.body.cmd === 'stop') lines.push(`🎮 ${c.toy.name}: stopped (${before?.label ?? 'effect ended'}).`);
+      else if (!before || before.source !== after?.source || before.level !== after?.level || before.shape !== after?.shape) {
+        lines.push(`🎮 ${c.toy.name}: ${after?.shape} ${after?.level} % ${after?.label ?? ''}${ok ? '' : ' (XToys did not accept it)'}.`);
+      }
+    }
+    if (lines.length) await this.ports.log(s, { title: 'Lockation toys', description: lines.join('\n').slice(0, 2000), icon: 'gamepad' }).catch(() => undefined);
+    return { ...state, toy: { ...T, running: r.running } };
+  }
+
   private requireToys(s: S, role: Role) {
     if (role !== 'wearer') throw new AppError(403, 'not_wearer', 'Only the wearer can connect their toys.');
     this.requireLocked(s);
@@ -293,7 +327,9 @@ export class LockationApp<S extends LockSession = LockSession> {
     const now = this.ports.now();
     await ports.setWebhookId(s, webhookId);
     const toys = setup.data.toys;
-    await this.ports.saveState(s, { ...s.state, toy: { ...s.state.toy, connectedAt: now.toISOString(), verifiedAt: undefined, disclaimerVersion: input.disclaimerVersion, toys } });
+    const connected: LockationState = { ...s.state, toy: { ...s.state.toy, connectedAt: now.toISOString(), verifiedAt: undefined, disclaimerVersion: input.disclaimerVersion, toys, running: {} } };
+    s.state = connected;
+    await this.ports.saveState(s, await this.syncToyEffects(s, connected));
     await this.ports.log(s, { title: 'Lockation toys', description: `🎮 Toys connected: ${toyList(toys)}.`, icon: 'gamepad' }).catch(() => undefined);
     await this.ports.deliver(s, [{ audience: 'keyholder', kind: 'toys', title: 'Lockation: toys connected', message: `The wearer connected: ${toyList(toys)}.`, priority: 'default', key: `toys:connected:${now.toISOString()}` }]);
     return this.view(s, role);
@@ -338,7 +374,7 @@ export class LockationApp<S extends LockSession = LockSession> {
     const now = this.ports.now();
     const punishment = s.config.rules.toy.onEmergencyStop.filter((c) => c.type !== 'toy');
     const consequences: PlannedConsequence[] = punishment.map((c, i) => ({ consequence: c, source: 'toy.onEmergencyStop', idempotencyKey: `${s.sessionId}:toy-estop:${now.toISOString()}:${i}` }));
-    const state: LockationState = { ...s.state, toy: { ...s.state.toy, connectedAt: undefined, verifiedAt: undefined, toys: [], emergencyStops: s.state.toy.emergencyStops + 1 } };
+    const state: LockationState = { ...s.state, toy: { ...s.state.toy, connectedAt: undefined, verifiedAt: undefined, toys: [], running: {}, emergencyStops: s.state.toy.emergencyStops + 1 } };
     const what = punishment.length ? punishment.map(describeConsequence).join(', ') : 'nothing';
     await this.finish(
       s,
@@ -396,6 +432,7 @@ export class LockationApp<S extends LockSession = LockSession> {
       if (result.consequences.length) {
         const r = await this.apply(s, state, result.consequences);
         lines = r.lines;
+        state = withPaused(state, r.paused);
         result.record.consequences = result.record.consequences.map((x, i) => ({ ...x, ok: r.applied[i]?.ok, error: r.applied[i]?.error }));
       }
       if (result.consequences.length || result.notices.some((n) => n.audience === 'wearer')) {
@@ -406,6 +443,7 @@ export class LockationApp<S extends LockSession = LockSession> {
       notices.push(...result.notices);
       results.push(result);
     }
+    state = await this.syncToyEffects(s, state);
     if (opts.beforeSave) state = opts.beforeSave(state);
     await this.ports.saveState(s, state);
     await this.ports.deliver(s, notices);
@@ -422,11 +460,12 @@ export class LockationApp<S extends LockSession = LockSession> {
   /** Deadlines, warnings, escalations … Returns whether consequences were applied. */
   async tick(s: S, opts: { hadState?: boolean } = {}): Promise<boolean> {
     const result = evaluateTick(s.config, s.state, { ...this.ctx(s), evalId: `tick-${this.ports.now().toISOString()}` });
-    if (tickIsNoop(result) && opts.hadState !== false && JSON.stringify(result.state) === JSON.stringify(s.state)) {
+    const synced = await this.syncToyEffects(s, result.state);
+    if (tickIsNoop(result) && opts.hadState !== false && JSON.stringify(synced) === JSON.stringify(s.state)) {
       await this.ports.idle?.(s);
       return false;
     }
-    await this.finish(s, result, 'tick');
+    await this.finish(s, { ...result, state: synced }, 'tick');
     return result.consequences.length > 0;
   }
 
@@ -456,3 +495,13 @@ export class LockationApp<S extends LockSession = LockSession> {
 export type { ZoneRole };
 
 const toyList = (toys: Toy[]) => toys.map((t) => `${t.name} (${t.bodyPart})`).join(', ');
+
+/** Channel names per toy type (index 0 = XToys channel "1"). */
+const TOY_CHANNELS: Record<string, readonly string[]> = Object.fromEntries(Object.entries(TOY_TYPES).map(([k, v]) => [k, v.channels]));
+
+function withPaused(state: LockationState, paused: { toyIds: string[]; until: Date }[]): LockationState {
+  if (!paused.length || !Object.keys(state.toy.running).length) return state;
+  let running = state.toy.running;
+  for (const p of paused) running = pauseToyEffects(running, p.toyIds, p.until);
+  return { ...state, toy: { ...state.toy, running } };
+}

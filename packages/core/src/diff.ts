@@ -49,6 +49,7 @@ export function diffConfig(before: LockationConfig, after: LockationConfig): str
     if (z.roles.includes('reward') && !same(o.reward, z.reward)) out.push(`"${z.name}" reward settings changed.`);
     // The content of a surprise stays a surprise – only say that it changed.
     if (z.roles.includes('surprise') && !same(o.surprise, z.surprise)) out.push(`"${z.name}" surprise changed.`);
+    if (!same(o.toy, z.toy)) out.push(`"${z.name}" toy effect while inside: ${z.toy.whileInside ? `${z.toy.whileInside.shape} ${z.toy.whileInside.intensity} %` : "none"}.`);
     if (!same(o.actions, z.actions)) {
       const a = z.actions;
       out.push(`"${z.name}" zone actions: entering ${cons(a.onEnter)}; leaving ${cons(a.onLeave)}${a.minStayMinutes ? ` (after ${fmtMinutes(a.minStayMinutes)})` : ''}.`);
@@ -87,6 +88,7 @@ export function diffConfig(before: LockationConfig, after: LockationConfig): str
     const m = R1.mission;
     out.push(`Surprise missions: ${fmtMinutes(m.leadMinutes)} to get there; in time: ${cons(m.onSuccess)}; too late: ${cons(m.onFail)}.`);
   }
+  if (R1.toy.enabled && !same(R0.toy.whileOutsideRequired, R1.toy.whileOutsideRequired)) out.push(`Toy effect while outside the required zones: ${R1.toy.whileOutsideRequired ? `${R1.toy.whileOutsideRequired.shape} ${R1.toy.whileOutsideRequired.intensity} %` : "none"}.`);
   if (R1.toy.enabled && !same(R0.toy.onEmergencyStop, R1.toy.onEmergencyStop)) out.push(`Toy emergency stop: ${cons(R1.toy.onEmergencyStop)}.`);
   const t0 = before.tracking;
   const t1 = after.tracking;

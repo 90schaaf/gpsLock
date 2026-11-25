@@ -80,6 +80,7 @@ export function demoConfig(center = { lat: 47.3769, lng: 8.5417 }): LockationCon
         roles: ['forbidden'],
         matchMode: 'strict',
         forbidden: { onEnter: [{ type: 'toy', action: 'play', target: { bodyPart: 'all' }, shape: 'pulse', intensity: 60, seconds: 30 }] },
+        toy: { whileInside: { target: { bodyPart: 'all' }, shape: 'wave', intensity: 30 } },
       },
       {
         id: 'park',
