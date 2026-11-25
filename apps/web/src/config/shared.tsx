@@ -10,11 +10,11 @@ export type { Tab };
 export const TABS: { id: Tab; label: string }[] = [
   { id: 'zones', label: '🗺 Zones' },
   { id: 'required', label: '⏱ Required' },
+  { id: 'surprise', label: '🎁 Surprise' },
   { id: 'forbidden', label: '⛔ Forbidden' },
   { id: 'reward', label: '🏆 Reward' },
   { id: 'travel', label: '🚶 Travel' },
   { id: 'hunt', label: '🧭 Hunt' },
-  { id: 'surprise', label: '🎁 Surprise' },
   { id: 'mission', label: '🎯 Missions' },
   { id: 'tracking', label: '📡 Tracking' },
   { id: 'notify', label: '🔔 Notifications' },
