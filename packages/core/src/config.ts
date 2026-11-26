@@ -6,8 +6,7 @@
  * there is no migration.)
  */
 import { z } from 'zod';
-import { ToyEffectSchema } from './toys.js';
-import { ConsequenceListSchema } from './consequences.js';
+import { ConsequenceListSchema, type Consequence } from './consequences.js';
 
 export const CONFIG_VERSION = 2;
 export const MIN_RADIUS_M = 20;
@@ -138,8 +137,6 @@ export const ZoneSchema = z.object({
   forbidden: ZoneForbiddenSchema,
   reward: ZoneRewardSchema,
   surprise: ZoneSurpriseSchema,
-  /** F27 – a toy effect that runs while the wearer is inside this zone. */
-  toy: z.object({ whileInside: ToyEffectSchema.optional() }).default({}),
   actions: ZoneActionsSchema,
   reachabilityAck: ReachabilityAckSchema.optional(),
 });
@@ -321,8 +318,6 @@ export const ToyRuleSchema = z
     enabled: z.boolean().default(false),
     /** Applied when the wearer disconnects the toys (emergency stop). Optional (empty = free). */
     onEmergencyStop: ConsequenceListSchema,
-    /** Runs while the wearer is outside all required zones. Needs background tracking. */
-    whileOutsideRequired: ToyEffectSchema.optional(),
   })
   .default({});
 
@@ -408,9 +403,6 @@ export const LockationConfigSchema = z
           issue(['zones', i, 'forbidden', 'repeatWarningAfterMinutes'], 'the repeat warning must come before the next penalty');
         }
       }
-      if (z.toy.whileInside && cfg.rules.toy.enabled && !cfg.tracking.enabled) {
-        issue(['zones', i, 'toy', 'whileInside'], '"while inside" toy effects need background tracking to notice when the wearer leaves');
-      }
       if (z.roles.includes('required') && z.required.stayWindows.length && !cfg.tracking.enabled) {
         issue(['zones', i, 'required', 'stayWindows'], '"must stay inside" windows need background tracking to be enabled');
       }
@@ -452,8 +444,12 @@ export const LockationConfigSchema = z
     if (R.hunt.enabled && R.hunt.checkpoints.length === 0) issue(['rules', 'hunt', 'checkpoints'], 'add at least one checkpoint');
     if (R.toy.enabled) {
       if (R.toy.onEmergencyStop.some((c) => c.type === 'toy')) issue(['rules', 'toy', 'onEmergencyStop'], 'the emergency stop cannot trigger toy actions');
-      if (R.toy.whileOutsideRequired && !cfg.tracking.enabled) issue(['rules', 'toy', 'whileOutsideRequired'], 'needs background tracking to notice where the wearer is');
-      if (R.toy.whileOutsideRequired && !withRole('required').length) issue(['rules', 'toy', 'whileOutsideRequired'], 'mark at least one zone as required');
+      // "Keep running until leaving / back / released" needs background tracking to notice where the wearer is.
+      if (!cfg.tracking.enabled) {
+        walkToyConsequences(cfg, [], (c, path) => {
+          if (c.action === 'play' && c.keep && c.keep.until !== 'time') issue(path, '"keep running until …" needs background tracking to notice where the wearer is');
+        });
+      }
     }
     const M = R.mission;
     if (M.enabled) {
@@ -548,6 +544,15 @@ export function backgroundCounts(cfg: Pick<LockationConfig, 'tracking'>): boolea
 /** Smallest allowed required interval: 3 min if background locations count as check-ins, otherwise 5 min (manual check-ins). */
 export function minRequiredInterval(cfg: Pick<LockationConfig, 'tracking'>): number {
   return backgroundCounts(cfg) ? 3 : 5;
+}
+
+/** Visit every toy consequence anywhere in the configuration (with its path). */
+function walkToyConsequences(v: unknown, path: (string | number)[], fn: (c: Extract<Consequence, { type: 'toy' }>, path: (string | number)[]) => void) {
+  if (Array.isArray(v)) v.forEach((x, i) => walkToyConsequences(x, [...path, i], fn));
+  else if (v && typeof v === 'object') {
+    if ((v as { type?: unknown }).type === 'toy') fn(v as Extract<Consequence, { type: 'toy' }>, path);
+    else for (const [k, x] of Object.entries(v)) walkToyConsequences(x, [...path, k], fn);
+  }
 }
 
 export function zonesWithRole(cfg: LockationConfig, role: ZoneRole): Zone[] {

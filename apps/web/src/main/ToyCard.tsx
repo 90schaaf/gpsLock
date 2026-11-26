@@ -90,6 +90,11 @@ export function ToyCard({ view, backend, mock, onView, onError }: { view: Sessio
               🛑 EMERGENCY STOP – disconnect toys
             </button>
           )}
+          {wearer && (
+            <a class="small" href="toys.html" target="_blank" rel="noopener" data-testid="toy-test-page">
+              🎮 Toy test page (set up, script, try every action)
+            </a>
+          )}
           {wearer && <p class="small muted" style={{ margin: 0 }}>{free ? 'The emergency stop has no consequences.' : `Emergency stop costs: ${T.onEmergencyStop}.`} You can connect again afterwards.</p>}
         </>
       ) : wearer ? (

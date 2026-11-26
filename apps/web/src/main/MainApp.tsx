@@ -613,7 +613,6 @@ function DemoBar({
         <span>no Chaster account needed – data stays in this browser</span>
         <span class="grow" />
         <button onClick={() => { mock.setRole(role === 'wearer' ? 'keyholder' : 'wearer'); onChange(); }}>View as {role === 'wearer' ? 'keyholder' : 'wearer'}</button>
-        <button data-testid="demo-toys" onClick={() => window.open('toys.html', '_blank', 'noopener')}>🎮 Toy test</button>
         {simulating && <button onClick={onClearSim}>Use real GPS</button>}
         {trackingOn && role === 'wearer' && (
           <button onClick={onToggleClickSends} aria-pressed={clickSends} data-testid="demo-click-sends" title="What a click on the map does">

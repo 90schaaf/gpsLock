@@ -79,8 +79,14 @@ export function demoConfig(center = { lat: 47.3769, lng: 8.5417 }): LockationCon
         radiusM: 100,
         roles: ['forbidden'],
         matchMode: 'strict',
-        forbidden: { onEnter: [{ type: 'toy', action: 'play', target: { bodyPart: 'all' }, shape: 'pulse', intensity: 60, seconds: 30 }] },
-        toy: { whileInside: { target: { bodyPart: 'all' }, shape: 'wave', intensity: 30 } },
+        // Toys: a pulse at every penalty, a wave that keeps running until leaving – 10 % stronger at every further penalty.
+        forbidden: {
+          onEnter: [
+            { type: 'toy', action: 'play', target: { bodyPart: 'all' }, shape: 'pulse', intensity: 60, seconds: 30 },
+            { type: 'toy', action: 'play', target: { bodyPart: 'all' }, shape: 'wave', intensity: 30, keep: { until: 'leave' } },
+            { type: 'toy', action: 'intensity', target: { bodyPart: 'all' }, delta: 10, when: { everyNth: 2 } },
+          ],
+        },
       },
       {
         id: 'park',

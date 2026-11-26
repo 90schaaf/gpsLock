@@ -235,7 +235,7 @@ keyholder, holdMinutes, onReleased, onEarlyLeave}`.
 ### F27 – Toy control via XToys (planned)
 
 > Status: steps 1–3 **implemented** (toy test page and script; toys in a lock with consequence type and emergency stop;
-> effects while inside / while outside the required zones). Liveness check on hold.
+> toy actions that keep running). Liveness check on hold.
 
 Lockation's rules control the wearer's toys through an **XToys private webhook**
 ([guide](https://guide.xtoys.app/tools/webhook.html)). Toy actions are a new consequence type; during a lock nobody
@@ -289,7 +289,7 @@ manual.
 
 **Toy test (wearer, before a lock and in the demo)**
 
-- A **separate page** (`toys.html`, **implemented**, linked from the guide and the demo bar) lets the wearer try everything
+- A **separate page** (`toys.html`, **implemented**, linked from the guide, the 🎮 Toys card on the main page and the 🎮 Toys tab) lets the wearer try everything
   before a lock: enter the Webhook ID and the toys, then send any action to any toy / channel with an **intensity slider**
   and a duration, a "test all toys" button and a big **Stop all** button. The disclaimer is accepted there as well.
 - Nothing is stored on the server: the ID stays in the page (optionally remembered in this browser). The page sends
@@ -318,19 +318,42 @@ manual.
   comment** ("🎮 pulse 60 % for 30s (toys – genitals) → Bullet." + "😈 …"). No (matching) toy connected or toy control
   off → skipped and logged. Toy actions are sent even if the wearer has not confirmed the setup check (warning shown).
   Keyholder pushes only for connected / confirmed / emergency stop (high priority – never rate-limited).
-- **"While inside" mode** per zone (`toy.whileInside {target, shape, intensity}`) and `rules.toy.whileOutsideRequired` – both
-  need background tracking (validated). The app reconciles after every evaluation (`desiredToyEffects` →
-  `reconcileToyEffects`, state `toy.running[<toyId>:<channel|all>] {source, label, shape, level (as sent), sentAt,
-  refreshAt, resumeAt?}`): `seconds` = the toy's maximum, renewed at `max(½, maxSeconds − 60 s)` via `nextDueAt` (cron);
-  one-off `play` / `shock` set `resumeAt`; starts and stops are logged, renewals are not.
-  Original wording: starts when the wearer enters the
-  zone, stops when they leave. Also usable as "while **outside** the required zones". Implemented as a **dead-man's
-  switch**: each start carries a limited `seconds` (≤ the toy's maximum) and is refreshed on every location / tick while
-  the condition holds – if Lockation, the network or tracking fails, the toy stops by itself. An explicit `stop` is sent
-  on leaving, when a surprise hold ends, on emergency stop, on disconnect and when the lock ends.
-- **Overlapping effects on the same toy / channel:** a "while inside" effect is the base; a one-off action temporarily
-  replaces it and the base resumes afterwards; `intensity` changes apply to whatever is running. Two "while inside"
-  effects on the same channel → the higher intensity wins.
+- **Keep running** (replaces the former "while inside" zone effect and "effect while outside the required zones",
+  2026-11-26): a `play` toy action can, instead of `seconds`, **keep running until the situation ends** –
+  `keep: {until, minutes?}`:
+
+  | `until` | Offered for (trigger) | Ends |
+  |---|---|---|
+  | – (`seconds`) | everywhere | after `seconds` (≤ the toy's maximum) – a one-off action as before |
+  | `leave` | triggered by **entering** a zone: zone actions on enter, forbidden-zone penalties, reward, surprise outcome on enter / on release | when the wearer leaves that zone |
+  | `return` | triggered by **leaving** / being outside: zone actions on leave, surprise "left too early", required "checking in outside", required "outside during a stay window" | when the wearer is back in that zone (any of the zones for the required rules) |
+  | `released` | surprise outcome on enter with a hold | when the hold ends (released, or left too early) |
+  | `time` | everywhere | after `minutes` (1–1440), renewed beyond the toy's per-action maximum |
+
+  - `minutes` with `leave` / `return` / `released` = optional **"at the latest after"** cap (otherwise a wearer who never
+    comes back keeps it running – apart from the emergency stop).
+  - The editor offers only the endings that fit the trigger. In a context without a fitting ending (e.g. edited by hand),
+    the action falls back to a one-off `play` with `seconds`.
+  - `leave` / `return` / `released` need **background tracking** (validated) – otherwise Lockation would not notice the
+    change.
+  - **No stacking:** an action that already keeps running (same rule, zone(s), target and pattern) is not started again –
+    e.g. a forbidden zone that punishes every 5 minutes starts the effect once.
+  - **Stronger over time:** an `intensity` action (absolute or `delta`, e.g. +10 % at every penalty) changes the level of
+    the kept-running effects on the toys it targets, and the change **sticks** until the effect ends (renewals use the new
+    level). A `stop` action ends the kept-running effects on the toys it targets.
+  - Toy control off → not kept (skipped and logged). No toys connected → kept anyway and logged as waiting; it starts as
+    soon as the wearer connects while the situation lasts.
+- **Mechanics (dead-man's switch):** state `toy.kept[<id>] {label, target, shape, level, until, zoneIds, holdSince?,
+  startedAt, endsAt?}` (what should run, with its end condition) and `toy.running[<toyId>:<channel|all>] {source, label,
+  shape, level (as sent), sentAt, refreshAt, resumeAt?}` (what runs on each toy channel). After every evaluation the app
+  registers new kept actions and intensity / stop changes (`keepToyConsequences`), removes ended ones
+  (`pruneKeptToyEffects`) and reconciles (`desiredToyEffects` → `reconcileToyEffects`): each start is a self-ending
+  pattern of the toy's maximum duration, renewed at `max(½, maxSeconds − 60 s)` via `nextDueAt` (cron), which also
+  covers `endsAt`. If Lockation, the network or tracking fails, the toy stops by itself. An explicit `stop` is sent when
+  the effect ends, on emergency stop (which also clears `kept`), on disconnect and when the lock ends. Starts, level
+  changes and stops are logged, renewals are not.
+- **Overlapping effects on the same toy / channel:** a one-off action temporarily takes the toy over and the kept-running
+  effect resumes afterwards (`resumeAt`). Two kept-running effects on the same channel → the higher intensity wins.
 
 **Emergency stop and reconnecting (wearer)**
 
@@ -343,15 +366,15 @@ manual.
 
 **Keyholder configuration (🎮 Toys tab)**
 
-- Enable toy control; `onEmergencyStop` (optional; toy actions not allowed); optional `whileInside` per zone;
-  toy consequences in the existing consequence editors (target body part / toy type / channel, action, intensity or
-  change, duration, pattern). The keyholder sees the connected toys and their limits.
+- Enable toy control; `onEmergencyStop` (optional; toy actions not allowed); toy consequences in the existing
+  consequence editors (target body part / toy type / channel, action, intensity or change, pattern, duration or **keep
+  running** with the endings that fit the trigger). The keyholder sees the connected toys and their limits.
 - Self-locks: allowed – the wearer configures their own rules and still accepts the toy disclaimer.
 
 AC: 1. No toy action during a lock without the accepted toy disclaimer and connected toys. 2. Actions (incl. intensity
 changes) are clamped to each toy's / channel's limits. 3. The Webhook ID never appears in any view, log, history or
-notification, and the toy test page stores it nowhere on the server. 4. A "while inside" effect stops by itself within
-its refresh time if Lockation stops refreshing. 5. Emergency stop always works, sends `stop` to all toys, deletes the ID
+notification, and the toy test page stores it nowhere on the server. 4. A kept-running effect stops by itself within
+its refresh time if Lockation stops refreshing, and an intensity change on it sticks until it ends. 5. Emergency stop always works, sends `stop` to all toys, deletes the ID
 and applies `onEmergencyStop`; reconnecting is possible. 6. During a lock nobody can trigger a toy action by hand.
 
 **Later (on hold): liveness check**

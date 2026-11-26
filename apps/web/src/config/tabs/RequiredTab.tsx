@@ -27,7 +27,7 @@ export function RequiredTab({ config, edit, editZone, commands, selected, setTab
         <TimeRange label="Quiet hours (no deadline inside)" value={R.required.quietHours} onChange={(v) => edit((d) => { d.rules.required.quietHours = v; })} />
       </div>
       <ConsequenceEditor label="When a check-in is missed (all zones)" repeating="miss" value={R.required.onMissed} commands={commands} onChange={(v) => edit((d) => { d.rules.required.onMissed = v; })} />
-      <ConsequenceEditor label="When checking in outside the required zones" value={R.required.onOutside} commands={commands} onChange={(v) => edit((d) => { d.rules.required.onOutside = v; })} />
+      <ConsequenceEditor label="When checking in outside the required zones" toyKeep={['return']} value={R.required.onOutside} commands={commands} onChange={(v) => edit((d) => { d.rules.required.onOutside = v; })} />
       <ConsequenceEditor label="On every successful check-in (all zones)" value={R.required.onSuccess} commands={commands} onChange={(v) => edit((d) => { d.rules.required.onSuccess = v; })} />
 
       <h3>Required zones</h3>
@@ -63,7 +63,7 @@ export function RequiredTab({ config, edit, editZone, commands, selected, setTab
             <ConsequenceEditor label={`Extra when the check-in in ${z.name} is missed`} repeating="miss" value={z.required.onMissed} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.required.onMissed = v; })} />
             <ConsequenceEditor label={`Extra on a successful check-in in ${z.name}`} value={z.required.onSuccess} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.required.onSuccess = v; })} />
             {z.required.stayWindows.length > 0 && (
-              <ConsequenceEditor label={`Extra when outside ${z.name} during a stay window`} value={z.required.onOutsideDuringWindow} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.required.onOutsideDuringWindow = v; })} />
+              <ConsequenceEditor label={`Extra when outside ${z.name} during a stay window`} toyKeep={['return']} value={z.required.onOutsideDuringWindow} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.required.onOutsideDuringWindow = v; })} />
             )}
           </div>
         </details>
@@ -72,7 +72,7 @@ export function RequiredTab({ config, edit, editZone, commands, selected, setTab
         <>
           <h3>Stay-inside windows (all zones)</h3>
           <NumberField label="At most once every" suffix="minutes" min={0} value={R.required.windowCooldownMinutes} onChange={(v) => edit((d) => { d.rules.required.windowCooldownMinutes = v ?? 60; })} />
-          <ConsequenceEditor label="When outside during a stay window" value={R.required.onOutsideDuringWindow} commands={commands} onChange={(v) => edit((d) => { d.rules.required.onOutsideDuringWindow = v; })} />
+          <ConsequenceEditor label="When outside during a stay window" toyKeep={['return']} value={R.required.onOutsideDuringWindow} commands={commands} onChange={(v) => edit((d) => { d.rules.required.onOutsideDuringWindow = v; })} />
         </>
       )}
     </Section>

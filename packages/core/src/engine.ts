@@ -13,7 +13,7 @@ import {
   type Zone,
   zonesWithRole,
 } from './config.js';
-import { type DesiredToyEffect } from './toys.js';
+import { type DesiredToyEffect, type KeptToyEffect, targetsOverlap, type ToyConsequence } from './toys.js';
 import { appliesAt, type Consequence, describeConsequence, formatDuration, scaleConsequence } from './consequences.js';
 import { distanceBand, haversineM, isInside, roundCoord } from './geo.js';
 import {
@@ -55,6 +55,14 @@ export interface PlannedConsequence {
   /** Which rule produced it, e.g. `required.onMissed`. */
   source: string;
   idempotencyKey: string;
+  /** The situation that triggered it (F27 "keep running": entering / leaving these zones). */
+  context?: TriggerContext;
+}
+
+/** Entering (or being inside) / leaving (or being outside) these zones. */
+export interface TriggerContext {
+  kind: 'enter' | 'leave';
+  zoneIds: string[];
 }
 
 /**
@@ -137,21 +145,22 @@ class Planner {
   readonly notices: Notice[] = [];
   constructor(private readonly ctx: EvalContext) {}
 
-  add(source: string, consequences: Consequence[], factor = 1, keySuffix = '') {
+  add(source: string, consequences: Consequence[], factor = 1, keySuffix = '', context?: TriggerContext) {
     for (const c of consequences) {
       const idx = this.list.length;
       this.list.push({
         consequence: scaleConsequence(c, factor),
         source,
         idempotencyKey: `${this.ctx.sessionId}:${this.ctx.evalId}${keySuffix}:${idx}`,
+        ...(context ? { context } : {}),
       });
     }
   }
 
   /** Add with an idempotency key that is stable across retries (cron, repeated observations). */
-  addStable(source: string, consequences: Consequence[], stableKey: string) {
+  addStable(source: string, consequences: Consequence[], stableKey: string, context?: TriggerContext) {
     consequences.forEach((c, i) => {
-      this.list.push({ consequence: c, source, idempotencyKey: `${this.ctx.sessionId}:${stableKey}:${i}` });
+      this.list.push({ consequence: c, source, idempotencyKey: `${this.ctx.sessionId}:${stableKey}:${i}`, ...(context ? { context } : {}) });
     });
   }
 
@@ -478,13 +487,13 @@ function evalZoneActions(config: LockationConfig, state: LockationState, entered
     const cooldown = a.cooldownMinutes * MINUTE;
     if (a.onEnter.length && entered.includes(z.id) && msSince(mark.lastEnter, ctx.now) >= cooldown) {
       mark.lastEnter = ctx.now.toISOString();
-      plan.addStable('zone.onEnter', a.onEnter, `zone-enter:${z.id}:${state.presence[z.id]?.since ?? ctx.now.toISOString()}`);
+      plan.addStable('zone.onEnter', a.onEnter, `zone-enter:${z.id}:${state.presence[z.id]?.since ?? ctx.now.toISOString()}`, { kind: 'enter', zoneIds: [z.id] });
       plan.event(`Entered "${z.name}": ${list(a.onEnter)}.`);
     }
     const l = left.find((x) => x.id === z.id);
     if (a.onLeave.length && l && l.durationMs >= a.minStayMinutes * MINUTE && msSince(mark.lastLeave, ctx.now) >= cooldown) {
       mark.lastLeave = ctx.now.toISOString();
-      plan.addStable('zone.onLeave', a.onLeave, `zone-leave:${z.id}:${l.since}`);
+      plan.addStable('zone.onLeave', a.onLeave, `zone-leave:${z.id}:${l.since}`, { kind: 'leave', zoneIds: [z.id] });
       plan.event(`Left "${z.name}" after ${Math.round(l.durationMs / MINUTE)} min: ${list(a.onLeave)}.`);
     }
   }
@@ -640,7 +649,7 @@ function evalRequired(config: LockationConfig, state: LockationState, inside: Se
   }
   const zoneSlots = slots.filter((s) => s.zoneIds !== null);
   if (zoneSlots.length && !zoneSlots.some((s) => slotValid(s, inside))) {
-    plan.add('required.onOutside', r.onOutside);
+    plan.add('required.onOutside', r.onOutside, 1, '', { kind: 'leave', zoneIds: zoneSlots.flatMap((s) => s.zoneIds ?? []) });
     plan.event(`Not inside a required zone (${zoneSlots.map((s) => s.name).join(', ')}).`);
   }
 }
@@ -655,7 +664,7 @@ function evalStayWindows(config: LockationConfig, state: LockationState, inside:
   if (active.some((z) => inside.has(z.id) || state.presence[z.id])) return;
   if (msSince(state.required.windowLastTriggered, ctx.now) < r.windowCooldownMinutes * MINUTE) return;
   state.required.windowLastTriggered = ctx.now.toISOString();
-  plan.add('required.onOutsideDuringWindow', [...r.onOutsideDuringWindow, ...active.flatMap((z) => z.required.onOutsideDuringWindow)], 1, ':window');
+  plan.add('required.onOutsideDuringWindow', [...r.onOutsideDuringWindow, ...active.flatMap((z) => z.required.onOutsideDuringWindow)], 1, ':window', { kind: 'leave', zoneIds: active.map((z) => z.id) });
   plan.event(`Outside ${active.map((z) => `"${z.name}"`).join(' / ')} during a "must stay inside" window!`);
 }
 
@@ -685,7 +694,7 @@ function advanceVisit(config: LockationConfig, z: Zone, visit: VisitState, upTo:
     const due = penaltyDue(visit, n, T.firstPenalty, T.repeatEvery);
     if (due > upTo) break;
     const consequences = [...rule.onEnter, ...z.forbidden.onEnter].filter((c) => appliesAt(c, n));
-    plan.addStable('forbidden.onEnter', consequences, `forbidden:${z.id}:${visit.since}:${n}`);
+    plan.addStable('forbidden.onEnter', consequences, `forbidden:${z.id}:${visit.since}:${n}`, { kind: 'enter', zoneIds: [z.id] });
     const mins = Math.round((due - Date.parse(visit.since)) / MINUTE);
     plan.event(`Inside forbidden zone "${z.name}" for ${mins} min – penalty ${n}${consequences.length ? `: ${list(consequences)}` : ''}.`);
     if (n === 1 && T.firstWarning === null) {
@@ -751,7 +760,7 @@ function evalForbidden(config: LockationConfig, state: LockationState, inside: S
         }
         const n = visit.penalties + 1;
         const consequences = [...f.onEnter, ...z.forbidden.onEnter].filter((c) => appliesAt(c, n));
-        plan.addStable('forbidden.onEnter', consequences, `forbidden:${z.id}:${visit.since}:${n}`);
+        plan.addStable('forbidden.onEnter', consequences, `forbidden:${z.id}:${visit.since}:${n}`, { kind: 'enter', zoneIds: [z.id] });
         visit.penalties = n;
         visit.lastPenaltyAt = ctx.now.toISOString();
         plan.event(`Inside forbidden zone "${z.name}"!`);
@@ -852,7 +861,7 @@ function evalReward(config: LockationConfig, state: LockationState, inside: Set<
     state.reward.countToday += 1;
     state.reward.countByZone[id] = (state.reward.countByZone[id] ?? 0) + 1;
     const consequences = [...r.onEnter, ...z.reward.onEnter];
-    plan.add('reward.onEnter', consequences, 1, `:r:${id}`);
+    plan.add('reward.onEnter', consequences, 1, `:r:${id}`, { kind: 'enter', zoneIds: [id] });
     plan.event(`Reward zone "${name}" reached!`);
     plan.notify({ audience: 'keyholder', kind: 'reward', title: 'Lockation: reward earned', message: `Reward zone "${name}": ${list(consequences)}.`, key: `reward:${id}:${ctx.now.toISOString()}`, zoneId: id });
   }
@@ -1087,6 +1096,7 @@ export function nextDueAt(config: LockationConfig, state: LockationState, now: D
   if (state.nextLiveVerification) push(Date.parse(state.nextLiveVerification));
   if (config.rules.surprise.enabled) for (const st of Object.values(state.surprise.zones)) if (st.active) push(Date.parse(st.active.until));
   for (const r of Object.values(state.toy.running)) push(Date.parse(r.resumeAt ?? r.refreshAt));
+  for (const k of Object.values(state.toy.kept)) if (k.endsAt) push(Date.parse(k.endsAt));
   const m = config.rules.mission;
   if (m.enabled) {
     const a = state.mission.active;
@@ -1425,7 +1435,7 @@ function releaseSurprise(z: Zone, o: SurpriseOutcome | undefined, st: LockationS
   const a = st.active!;
   st.active = undefined;
   const cons = o?.onReleased ?? [];
-  plan.addStable('surprise.onReleased', cons, `surprise:${z.id}:${a.since}:released`);
+  plan.addStable('surprise.onReleased', cons, `surprise:${z.id}:${a.since}:released`, { kind: 'enter', zoneIds: [z.id] });
   plan.event(`Released from the surprise zone "${z.name}"${by === 'keyholder' ? ' by the keyholder' : ''}${cons.length ? `: ${list(cons)}` : ''}.`);
   plan.notify({ audience: 'wearer', title: '🎁 Released', message: `You may leave "${z.name}" now${cons.length ? ` – ${list(cons)}` : ''}.`, priority: 'high', key: `surprise:${z.id}:${a.since}:released` });
   if (by === 'time') plan.notify({ audience: 'keyholder', kind: 'surprise', title: 'Lockation: surprise zone', message: `The wearer stayed in "${z.name}" long enough and was released.`, key: `surprise:${z.id}:${a.since}:released` });
@@ -1447,7 +1457,7 @@ function evalSurprise(config: LockationConfig, state: LockationState, entered: s
     }
     st.active = undefined;
     const cons = o?.onEarlyLeave ?? [];
-    plan.addStable('surprise.onEarlyLeave', cons, `surprise:${z.id}:${a.since}:early`);
+    plan.addStable('surprise.onEarlyLeave', cons, `surprise:${z.id}:${a.since}:early`, { kind: 'leave', zoneIds: [z.id] });
     plan.event(`Left the surprise zone "${z.name}" too early${cons.length ? `: ${list(cons)}` : ''}.`);
     plan.notify({ audience: 'wearer', title: '🎁 Left too early', message: `You left "${z.name}" before you were released${cons.length ? `: ${list(cons)}` : ''}.`, priority: 'high', key: `surprise:${z.id}:${a.since}:early` });
     plan.notify({ audience: 'keyholder', kind: 'surprise', title: 'Lockation: surprise zone left early', message: `The wearer left "${z.name}" before being released.`, key: `surprise:${z.id}:${a.since}:early` });
@@ -1464,7 +1474,7 @@ function evalSurprise(config: LockationConfig, state: LockationState, entered: s
     st.visits += 1;
     st.lastAt = atIso;
     st.lastOutcome = o.label;
-    plan.addStable('surprise.onEnter', o.onEnter, `surprise:${id}:${atIso}:enter`);
+    plan.addStable('surprise.onEnter', o.onEnter, `surprise:${id}:${atIso}:enter`, { kind: 'enter', zoneIds: [id] });
     let hold = '';
     if (o.hold !== 'none' && o.holdMinutes) {
       const until = new Date(now.getTime() + o.holdMinutes * MINUTE);
@@ -1519,16 +1529,100 @@ export function applySurpriseAction(config: LockationConfig, prevState: Lockatio
 // ---------- F27 toy effects that run while a condition holds ----------
 
 /** The "while inside" / "while outside the required zones" effects that should run now. */
-export function desiredToyEffects(config: LockationConfig, state: LockationState): DesiredToyEffect[] {
-  const T = config.rules.toy;
-  if (!T.enabled || !config.tracking.enabled) return [];
-  const out: DesiredToyEffect[] = [];
-  for (const z of config.zones) {
-    if (z.toy.whileInside && state.presence[z.id]) out.push({ source: `zone:${z.id}`, label: `while in "${z.name}"`, effect: z.toy.whileInside });
-  }
-  if (T.whileOutsideRequired && state.tracking.lastSeenAt) {
-    const req = zonesWithRole(config, 'required');
-    if (req.length && !req.some((z) => state.presence[z.id])) out.push({ source: 'outsideRequired', label: 'while outside the required zones', effect: T.whileOutsideRequired });
-  }
+export function desiredToyEffects(config: LockationConfig, state: LockationState, now: Date): DesiredToyEffect[] {
+  if (!config.rules.toy.enabled) return [];
+  return Object.entries(state.toy.kept)
+    .filter(([, k]) => !keptEnded(config, state, k, now))
+    .map(([id, k]) => ({ source: id, label: k.label, effect: { target: k.target, shape: k.shape, intensity: k.level } }));
+}
+
+/** Has the situation of a kept-running toy action ended? */
+function keptEnded(config: LockationConfig, state: LockationState, k: KeptToyEffect, now: Date): boolean {
+  if (k.endsAt && now.getTime() >= Date.parse(k.endsAt)) return true;
+  if (k.zoneIds.some((id) => !config.zones.some((z) => z.id === id))) return true; // zone removed
+  if (k.until === 'leave') return !k.zoneIds.some((id) => state.presence[id]);
+  if (k.until === 'return') return k.zoneIds.some((id) => state.presence[id]);
+  if (k.until === 'released') return state.surprise.zones[k.zoneIds[0] ?? '']?.active?.since !== k.holdSince;
+  return false;
+}
+
+/** Drop kept-running toy actions whose situation ended (all of them when toy control is off). Pure. */
+export function pruneKeptToyEffects(config: LockationConfig, state: LockationState, now: Date): Record<string, KeptToyEffect> {
+  const out: Record<string, KeptToyEffect> = {};
+  if (!config.rules.toy.enabled) return out;
+  for (const [id, k] of Object.entries(state.toy.kept)) if (!keptEnded(config, state, k, now)) out[id] = k;
   return out;
+}
+
+const zoneNames = (config: LockationConfig, ids: string[]) => ids.map((id) => `"${config.zones.find((z) => z.id === id)?.name ?? id}"`).join(' or ');
+
+function hashKey(s: string): string {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
+/**
+ * F27 – register the "keep running" toy actions of an evaluation in `state.toy.kept` (not stacked: the same rule,
+ * zone(s), target and pattern run only once), apply intensity changes (they stick until the effect ends) and stops to
+ * kept effects. Returns the new `kept` and the indexes of the consequences that are kept (the caller does not send those
+ * as one-off actions). A `keep` whose ending does not fit the trigger falls back to a one-off `play`.
+ */
+export function keepToyConsequences(
+  config: LockationConfig,
+  state: LockationState,
+  list: PlannedConsequence[],
+  now: Date,
+): { kept: Record<string, KeptToyEffect>; handled: Set<number> } {
+  const kept: Record<string, KeptToyEffect> = { ...state.toy.kept };
+  const handled = new Set<number>();
+  if (!config.rules.toy.enabled) return { kept, handled };
+  list.forEach((p, i) => {
+    if (p.consequence.type !== 'toy') return;
+    const c = p.consequence as ToyConsequence;
+    if (c.action === 'play' && c.keep) {
+      const k = c.keep;
+      const ctx = p.context;
+      const hold = ctx ? state.surprise.zones[ctx.zoneIds[0] ?? '']?.active : undefined;
+      const fits =
+        k.until === 'time' ||
+        (k.until === 'leave' && ctx?.kind === 'enter') ||
+        (k.until === 'return' && ctx?.kind === 'leave') ||
+        (k.until === 'released' && ctx?.kind === 'enter' && p.source === 'surprise.onEnter' && !!hold);
+      if (!fits || (k.until !== 'time' && !ctx?.zoneIds.length)) return;
+      handled.add(i);
+      const zoneIds = k.until === 'time' ? [] : ctx!.zoneIds;
+      const id = `k${hashKey(JSON.stringify([p.source, zoneIds, c.target, c.shape ?? 'pulse', k.until]))}`;
+      if (kept[id]) return; // already running – no stacking
+      const minutes = k.until === 'time' ? (k.minutes ?? 30) : k.minutes;
+      const endsAt = minutes ? new Date(now.getTime() + minutes * MINUTE) : undefined;
+      const names = zoneNames(config, zoneIds);
+      const label =
+        k.until === 'leave'
+          ? `until you leave ${names}`
+          : k.until === 'return'
+            ? `until you are back in ${names}`
+            : k.until === 'released'
+              ? `until you are released from ${names}`
+              : `until ${formatLocalTime(endsAt!, config.timezone)}`;
+      kept[id] = {
+        label: k.until !== 'time' && endsAt ? `${label} (at the latest ${formatLocalTime(endsAt, config.timezone)})` : label,
+        target: c.target,
+        shape: c.shape ?? 'pulse',
+        level: Math.max(0, Math.min(100, c.intensity ?? 50)),
+        until: k.until,
+        zoneIds,
+        ...(k.until === 'released' ? { holdSince: hold!.since } : {}),
+        startedAt: now.toISOString(),
+        ...(endsAt ? { endsAt: endsAt.toISOString() } : {}),
+      };
+    } else if (c.action === 'intensity' || c.action === 'stop') {
+      for (const [id, e] of Object.entries(kept)) {
+        if (!targetsOverlap(c.target, e.target)) continue;
+        if (c.action === 'stop') delete kept[id];
+        else kept[id] = { ...e, level: Math.max(0, Math.min(100, c.delta !== undefined ? e.level + c.delta : (c.intensity ?? 50))) };
+      }
+    }
+  });
+  return { kept, handled };
 }

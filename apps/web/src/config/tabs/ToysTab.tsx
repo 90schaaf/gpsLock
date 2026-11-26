@@ -1,4 +1,4 @@
-import { ConsequenceEditor, ToyEffectEditor } from '../editors.js';
+import { ConsequenceEditor } from '../editors.js';
 import { Section, type TabProps } from '../shared.js';
 
 /** F27 – toy control via XToys: on / off and the optional emergency-stop punishment. Toy actions are 🎮 consequences everywhere. */
@@ -23,15 +23,10 @@ export function ToysTab({ config, edit, commands }: TabProps) {
         </li>
       </ul>
       <ConsequenceEditor label="Emergency stop" value={T.onEmergencyStop} commands={commands} onChange={(v) => edit((d) => { d.rules.toy.onEmergencyStop = v; })} />
-      <ToyEffectEditor
-        label="Effect while outside the required zones"
-        hint={config.tracking.enabled ? 'runs until the wearer is back in a required zone' : 'needs background tracking'}
-        value={T.whileOutsideRequired}
-        onChange={(v) => edit((d) => { d.rules.toy.whileOutsideRequired = v; })}
-      />
       <p class="small muted" style={{ margin: 0 }}>
-        Effects <strong>while inside</strong> a zone are set per zone in the 🗺 Zones tab. They need background tracking, run as long as the condition holds and end by
-        themselves if Lockation loses contact. Tip for wearers: a maximum duration of at least 2 minutes per action keeps them running without gaps.
+        A <strong>▶ Play</strong> action can <strong>keep running</strong> until the situation ends – e.g. until the wearer leaves the zone (entering), is back in the zone
+        (leaving), is released (surprise hold), or for a number of minutes. Intensity changes on it stick, so "+10 % at every penalty" gets stronger over time. It ends
+        by itself if Lockation loses contact. Tip for wearers: a maximum duration of at least 2 minutes per action keeps it running without gaps.
       </p>
       <p class="small muted" style={{ margin: 0 }}>
         Wearers can set up and try their toys on the <a href="toys.html" target="_blank" rel="noopener">toy test page</a> before the lock.

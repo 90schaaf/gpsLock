@@ -119,16 +119,18 @@ Missing or corrupt state is replaced by a fresh initial state.
 | `lastPosition` | wearer always (approximate in zone-only mode); keyholder only with exact sharing |
 | `presentZones`, `travel`, `freezeUntil`, `rulesChanged`, `notifications {available, subscribed}`, `stats`, `history` | |
 
-## Planned: toy control (F27)
+## Toy control (F27)
 
-- Config: `rules.toy {enabled, onEmergencyStop: Consequence[]}`, zone `toy.whileInside? {action, target, intensity, pattern?}`,
-  consequence `{type: "toy", action: "pulse" | "wave" | "constant" | "ramp" | "intensity" | "stop", target: {bodyPart:
-  "genitals" | "anal" | "nipples" | "other" | "all", toyType?, channel?}, intensity?, delta?, seconds?, pattern?}`.
+- Config: `rules.toy {enabled, onEmergencyStop: Consequence[]}`, consequence `{type: "toy", action: "play" | "intensity" |
+  "shock" | "stop", target: {bodyPart: "genitals" | "anal" | "nipples" | "other" | "all", toyType?, channel?}, shape?:
+  "constant" | "pulse" | "wave" | "ramp", intensity?, delta?, seconds?, keep?: {until: "leave" | "return" | "released" |
+  "time", minutes?}}` (`keep` only with `play`).
 - Toy: `{id, name, type: "estim" | "vibrator" | "dual_vibrator" | "vibe_rotator" | "rotator", bodyPart, limits: {maxIntensity |
   {[channel]: maxIntensity}, maxSeconds}}`; channels per type: estim `A, B` · vibrator `main` · dual_vibrator `A, B` ·
   vibe_rotator `vibration, rotation` · rotator `main`.
-- State: `toy {connectedAt?, verifiedAt?, disclaimerVersion?, toys: Toy[], running: {[toyId:channel]: {source, level, until}},
-  emergencyStops}` – the Webhook ID is **not** in the state.
+- State: `toy {connectedAt?, verifiedAt?, disclaimerVersion?, toys: Toy[], kept: {[id]: {label, target, shape, level, until,
+  zoneIds, holdSince?, startedAt, endsAt?}}, running: {[toyId:channel]: {source, label, shape, level, sentAt, refreshAt,
+  resumeAt?}}, emergencyStops}` – the Webhook ID is **not** in the state.
 - D1 `toys`: `session_id` (PK), `webhook_id`, `created_at` – deleted on disconnect and on session end.
 - API: `/api/toy/connect {mainToken, webhookId, toys, disclaimerVersion}` (wearer), `/api/toy/test {mainToken}`,
   `/api/toy/confirm {mainToken}`, `/api/toy/emergency-stop {mainToken}` (wearer; applies `onEmergencyStop`). The toy test page talks to XToys directly (no worker endpoint).

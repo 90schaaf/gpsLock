@@ -351,14 +351,23 @@ describe('toys (F27)', () => {
   });
 });
 
-describe('toys: effects while inside (F27 step 3)', () => {
+describe('toys: actions that keep running (F27 step 3)', () => {
   const effCfg = {
     ...config,
-    zones: [
-      config.zones[0],
-      { ...config.zones[1], toy: { whileInside: { target: { bodyPart: 'genitals' }, shape: 'wave', intensity: 50 } } },
-    ],
-    rules: { ...config.rules, toy: { enabled: true, onEmergencyStop: [{ type: 'add_time', seconds: 7200 }] } },
+    rules: {
+      ...config.rules,
+      forbidden: {
+        enabled: true,
+        firstWarningAfterMinutes: null,
+        firstPenaltyAfterMinutes: 0,
+        repeatEveryMinutes: 5,
+        onEnter: [
+          { type: 'toy', action: 'play', target: { bodyPart: 'anal' }, shape: 'wave', intensity: 30, keep: { until: 'leave' } },
+          { type: 'toy', action: 'intensity', target: { bodyPart: 'anal' }, delta: 10 },
+        ],
+      },
+      toy: { enabled: true, onEmergencyStop: [] },
+    },
   };
   const toys = [
     { id: 'vibe', name: 'Bullet', type: 'vibrator', bodyPart: 'genitals', maxIntensity: [40], maxSeconds: 300 },
@@ -372,42 +381,62 @@ describe('toys: effects while inside (F27 step 3)', () => {
   const ov = () => ({ ...o(), toyFetch });
   const postT = (path: string, body: unknown, headers: Record<string, string> = {}) =>
     handleRequest(new Request(`https://worker.test${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://user.github.io', ...headers }, body: JSON.stringify(body) }), env, ov());
+  const plays = () => sent.filter((u) => u.includes('cmd=play'));
 
   beforeEach(() => {
     sent = [];
     fake.addSession('s1', effCfg as any);
   });
 
-  it('starts on entering, is renewed by the cron before it ends, stops on leaving', async () => {
+  it('keeps running until leaving, not stacked, 10 % stronger at every penalty, renewed by the cron, stopped on leaving', async () => {
     expect((await postT('/api/toy/connect', { mainToken: 'wearer-token', webhookId: 'HOOK2', toys, disclaimerVersion: 1 })).status).toBe(200);
-    expect(sent).toEqual([]); // not inside yet
     const p = (await (await postT('/api/tracking/pair', { mainToken: 'wearer-token' })).json()) as any;
     await postT('/track/owntracks', loc(BAR, now), basic(p.username, p.password));
-    expect(sent).toHaveLength(1); // genitals → Bullet only
-    expect(sent[0]).toContain('cmd=play');
-    expect(sent[0]).toContain('shape=wave');
-    expect(sent[0]).toContain('level=40'); // clamped
-    expect(sent[0]).toContain('seconds=300'); // ends by itself after the toy's maximum
+    // penalty 1: the wave starts on the Plug (anal) only, already +10 %
+    expect(plays()).toHaveLength(1);
+    expect(plays()[0]).toContain('slot=part-vibrator-b');
+    expect(plays()[0]).toContain('shape=wave');
+    expect(plays()[0]).toContain('level=40');
+    expect(plays()[0]).toContain('seconds=300'); // ends by itself after the toy's maximum
     let v = (await (await postT('/api/session', { mainToken: 'kh-token' })).json()) as any;
-    expect(v.toys.running).toEqual([expect.objectContaining({ toy: 'Bullet', shape: 'wave', level: 40, label: 'while in "Bar"' })]);
+    expect(v.toys.running).toEqual([expect.objectContaining({ toy: 'Plug', shape: 'wave', level: 40, label: 'until you leave "Bar"' })]);
+
+    // penalty 2 (cron): no second wave, but 10 % stronger – and it sticks
+    sent = [];
+    now = at(5.1);
+    await runCron(env, ov(), 40, { full: false });
+    expect(plays()).toHaveLength(1);
+    expect(plays()[0]).toContain('level=50');
+    v = (await (await postT('/api/session', { mainToken: 'kh-token' })).json()) as any;
+    expect(v.toys.running).toEqual([expect.objectContaining({ toy: 'Plug', level: 50 })]);
+
+    // renewed a minute before it ends, at the new level
+    sent = [];
+    now = at(9.2);
+    await runCron(env, ov(), 40, { full: false });
+    expect(plays().length).toBeGreaterThanOrEqual(1);
+    expect(plays().every((u) => /level=(50|60)/.test(u))).toBe(true);
 
     sent = [];
-    now = at(3);
-    await runCron(env, ov(), 40, { full: false });
-    expect(sent).toEqual([]); // still running
-    now = at(4.1);
-    await runCron(env, ov(), 40, { full: false });
-    expect(sent).toHaveLength(1); // renewed a minute before the end
-    expect(sent[0]).toContain('cmd=play');
-
-    sent = [];
-    now = at(5);
+    now = at(9.5);
     await postT('/track/owntracks', loc(HOME, now), basic(p.username, p.password));
-    expect(sent).toEqual(['https://webhook.xtoys.app/HOOK2?action=lockation&slot=part-vibrator-a&ch=all&cmd=stop']);
+    expect(sent).toContain('https://webhook.xtoys.app/HOOK2?action=lockation&slot=part-vibrator-b&ch=all&cmd=stop');
     v = (await (await postT('/api/session', { mainToken: 'kh-token' })).json()) as any;
     expect(v.toys.running).toEqual([]);
     const log = fake.calls.filter((c) => c.path.endsWith('/logs/custom')).map((c) => c.body.description).join('\n');
-    expect(log).toContain('🎮 Bullet: wave 40 % while in "Bar".');
-    expect(log).toContain('🎮 Bullet: stopped (while in "Bar").');
+    expect(log).toContain('🎮 Plug: wave 40 % until you leave "Bar".');
+    expect(log).toContain('🎮 Plug: wave 50 % until you leave "Bar".');
+    expect(log).toContain('🎮 Plug: stopped (until you leave "Bar").');
+  });
+
+  it('without connected toys the action waits and starts once the wearer connects (still inside)', async () => {
+    const p = (await (await postT('/api/tracking/pair', { mainToken: 'wearer-token' })).json()) as any;
+    await postT('/track/owntracks', loc(BAR, now), basic(p.username, p.password));
+    expect(sent).toEqual([]);
+    const log = fake.calls.filter((c) => c.path.endsWith('/logs/custom')).map((c) => c.body.description).join('\n');
+    expect(log).toContain('🎮 Waiting for toys (none connected)');
+    await postT('/api/toy/connect', { mainToken: 'wearer-token', webhookId: 'HOOK2', toys, disclaimerVersion: 1 });
+    expect(plays()).toHaveLength(1);
+    expect(plays()[0]).toContain('slot=part-vibrator-b');
   });
 });

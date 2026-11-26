@@ -24,7 +24,7 @@ export function ForbiddenTab({ config, edit, editZone, commands, selected, setTa
         <NullableMinutesField path="rules.forbidden.repeatWarningAfterMinutes" label="Warning after each penalty" value={R.forbidden.repeatWarningAfterMinutes} fallback={1} min={0} onChange={(v) => edit((d) => { d.rules.forbidden.repeatWarningAfterMinutes = v ?? null; })} />
       </div>
       <p class="small muted" data-testid="forbidden-timeline" style={{ margin: 0 }}>Default timeline: {forbiddenTimeline(ruleTimings)}</p>
-      <ConsequenceEditor label="Penalty (all forbidden zones)" repeating="penalty" value={R.forbidden.onEnter} commands={commands} onChange={(v) => edit((d) => { d.rules.forbidden.onEnter = v; })} />
+      <ConsequenceEditor label="Penalty (all forbidden zones)" repeating="penalty" toyKeep={['leave']} value={R.forbidden.onEnter} commands={commands} onChange={(v) => edit((d) => { d.rules.forbidden.onEnter = v; })} />
 
       <h3>Forbidden zones</h3>
       {zones.length === 0 && <NoZonesHint role="forbidden" setTab={setTab} />}
@@ -56,7 +56,7 @@ export function ForbiddenTab({ config, edit, editZone, commands, selected, setTa
                 <NullableMinutesField path={`zones.${config.zones.indexOf(z)}.forbidden.repeatWarningAfterMinutes`} label="Warning after each penalty" value={z.forbidden.repeatWarningAfterMinutes} fallback={1} min={0} inherited={{ value: R.forbidden.repeatWarningAfterMinutes, format: offOr }} onChange={(v) => editZone(z.id, (x) => { x.forbidden.repeatWarningAfterMinutes = v; })} />
               </div>
               <p class="small muted" style={{ margin: 0 }}>{z.name}: {forbiddenTimeline(t)}</p>
-              <ConsequenceEditor label={`Extra punishment in ${z.name} (after the common penalty)`} repeating="penalty" value={z.forbidden.onEnter} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.forbidden.onEnter = v; })} />
+              <ConsequenceEditor label={`Extra punishment in ${z.name} (after the common penalty)`} repeating="penalty" toyKeep={['leave']} value={z.forbidden.onEnter} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.forbidden.onEnter = v; })} />
             </div>
           </details>
         );

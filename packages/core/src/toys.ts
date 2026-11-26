@@ -23,6 +23,24 @@ export const BODY_PARTS = ['genitals', 'anal', 'nipples', 'other'] as const;
 export type BodyPart = (typeof BODY_PARTS)[number];
 
 export const MAX_TOYS = 8;
+
+/** Which toys a toy action / effect addresses. */
+export const ToyTargetSchema = z.object({
+  bodyPart: z.enum([...BODY_PARTS, 'all'] as [string, ...string[]]),
+  toyType: z.enum(Object.keys(TOY_TYPES) as [ToyType, ...ToyType[]]).optional(),
+  channel: z.string().max(20).optional(),
+});
+export type ToyTarget = z.infer<typeof ToyTargetSchema>;
+
+/**
+ * Keep running (play only): `leave` – until the wearer leaves the zone (enter triggers); `return` – until back in the
+ * zone (leave triggers); `released` – until a surprise hold ends; `time` – for `minutes`. With the zone endings,
+ * `minutes` is an optional "at the latest after" cap.
+ */
+export const TOY_KEEP_UNTIL = ['leave', 'return', 'released', 'time'] as const;
+export type ToyKeepUntil = (typeof TOY_KEEP_UNTIL)[number];
+export const ToyKeepSchema = z.object({ until: z.enum(TOY_KEEP_UNTIL), minutes: z.number().int().min(1).max(1440).optional() });
+export type ToyKeep = z.infer<typeof ToyKeepSchema>;
 export const MAX_TOY_SECONDS = 3600;
 export const TOY_SHAPES = ['constant', 'pulse', 'wave', 'ramp'] as const;
 export type ToyShape = (typeof TOY_SHAPES)[number];
@@ -338,25 +356,41 @@ export function toyComment(key: string): string {
   return TOY_COMMENTS[h % TOY_COMMENTS.length]!;
 }
 
-// ---------- continuous effects (F27 step 3: "while inside") ----------
+// ---------- continuous effects (F27 step 3: toy actions that keep running) ----------
 
-/** A toy effect that runs as long as its condition holds (e.g. while the wearer is inside a zone). */
-export const ToyEffectSchema = z.object({
-  target: z.object({
-    bodyPart: z.enum([...BODY_PARTS, 'all'] as [string, ...string[]]),
-    toyType: z.enum(TOY_TYPE_IDS as [ToyType, ...ToyType[]]).optional(),
-    channel: z.string().max(20).optional(),
-  }),
-  shape: z.enum(TOY_SHAPES).default('pulse'),
-  intensity: z.number().int().min(0).max(100).default(40),
+/** A toy effect that runs as long as its condition holds. */
+export interface ToyEffect {
+  target: ToyTarget;
+  shape: ToyShape;
+  intensity: number;
+}
+
+/** A toy action that keeps running until its situation ends (state `toy.kept`). `level` follows intensity changes. */
+export const KeptToyEffectSchema = z.object({
+  label: z.string(),
+  target: ToyTargetSchema,
+  shape: z.enum(TOY_SHAPES),
+  level: z.number().int().min(0).max(100),
+  until: z.enum(TOY_KEEP_UNTIL),
+  zoneIds: z.array(z.string()).default([]),
+  /** `released`: the surprise hold this effect belongs to (its `since`). */
+  holdSince: z.string().optional(),
+  startedAt: z.string(),
+  endsAt: z.string().optional(),
 });
-export type ToyEffect = z.infer<typeof ToyEffectSchema>;
+export type KeptToyEffect = z.infer<typeof KeptToyEffectSchema>;
+
+/** Do two targets address at least one common toy channel (independent of the connected toys)? */
+export function targetsOverlap(a: ToyTarget, b: ToyTarget): boolean {
+  const eq = (x: string | undefined, y: string | undefined) => !x || !y || x === y;
+  return (a.bodyPart === 'all' || b.bodyPart === 'all' || a.bodyPart === b.bodyPart) && eq(a.toyType, b.toyType) && eq(a.channel, b.channel);
+}
 
 /** What should run right now: one entry per condition that holds. */
 export interface DesiredToyEffect {
-  /** Stable id of the condition, e.g. `zone:casino` or `outsideRequired`. */
+  /** Stable id of the condition (the `toy.kept` key). */
   source: string;
-  /** Human readable, e.g. `while in "Casino"`. */
+  /** Human readable, e.g. `until you leave "Casino"`. */
   label: string;
   effect: ToyEffect;
 }

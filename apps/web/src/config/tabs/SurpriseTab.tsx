@@ -92,11 +92,11 @@ export function SurpriseTab({ config, edit, editZone, commands, selected, setTab
                       />
                     )}
                   </div>
-                  <ConsequenceEditor label="When entering" value={o.onEnter} commands={commands} onChange={(v) => setOutcome(j, (x) => { x.onEnter = v; })} />
+                  <ConsequenceEditor label="When entering" toyKeep={o.hold !== 'none' ? ['leave', 'released'] : ['leave']} value={o.onEnter} commands={commands} onChange={(v) => setOutcome(j, (x) => { x.onEnter = v; })} />
                   {o.hold !== 'none' && (
                     <>
-                      <ConsequenceEditor label="When released" value={o.onReleased} commands={commands} onChange={(v) => setOutcome(j, (x) => { x.onReleased = v; })} />
-                      <ConsequenceEditor label="Leaving before being released" value={o.onEarlyLeave} commands={commands} onChange={(v) => setOutcome(j, (x) => { x.onEarlyLeave = v; })} />
+                      <ConsequenceEditor label="When released" toyKeep={['leave']} value={o.onReleased} commands={commands} onChange={(v) => setOutcome(j, (x) => { x.onReleased = v; })} />
+                      <ConsequenceEditor label="Leaving before being released" toyKeep={['return']} value={o.onEarlyLeave} commands={commands} onChange={(v) => setOutcome(j, (x) => { x.onEarlyLeave = v; })} />
                     </>
                   )}
                 </div>

@@ -1,4 +1,4 @@
-import { BODY_PARTS, ConsequenceSchema, MAX_WINDOWS, PLANNED_EXTENSIONS, TOY_SHAPES, TOY_TYPE_IDS, TOY_TYPES, WEEKDAYS, type Consequence, type TimeWindow, type ToyConsequence, type ToyEffect, type ToyType, type Weekday, type When } from '@lockation/core';
+import { BODY_PARTS, ConsequenceSchema, MAX_WINDOWS, PLANNED_EXTENSIONS, TOY_SHAPES, TOY_TYPE_IDS, TOY_TYPES, WEEKDAYS, type Consequence, type TimeWindow, type ToyConsequence, type ToyKeepUntil, type ToyType, type Weekday, type When } from '@lockation/core';
 import { useState } from 'preact/hooks';
 import type { CommandInfo } from '../lib/backend.js';
 import { useFieldIssues } from './issues.js';
@@ -248,6 +248,7 @@ export function ConsequenceEditor({
   onChange,
   commands,
   repeating,
+  toyKeep,
 }: {
   label: string;
   value: Consequence[];
@@ -255,6 +256,8 @@ export function ConsequenceEditor({
   commands: CommandInfo[];
   /** The list applies repeatedly (e.g. "penalty", "missed check-in"): shows a "when" selector per row. */
   repeating?: string;
+  /** F27 – endings a kept-running toy action may have in this list ("for N minutes" is always offered). */
+  toyKeep?: Exclude<ToyKeepUntil, 'time'>[];
 }) {
   const [adding, setAdding] = useState<Consequence['type']>('add_time');
   const set = (i: number, c: Consequence) => onChange(value.map((v, j) => (j === i ? c : v)));
@@ -265,7 +268,7 @@ export function ConsequenceEditor({
       {value.map((c, i) => (
         <div class="cons-item" key={i}>
           <div class="stack">
-            <ConsequenceFields c={c} onChange={(n) => set(i, n)} commands={commands} />
+            <ConsequenceFields c={c} onChange={(n) => set(i, n)} commands={commands} toyKeep={toyKeep} />
             {repeating && <WhenSelect value={c.when} noun={repeating} onChange={(when) => set(i, withWhen(c, when))} />}
           </div>
           <button class="link danger" aria-label="remove" onClick={() => onChange(value.filter((_, j) => j !== i))}>
@@ -331,7 +334,7 @@ export function WhenSelect({ value, onChange, noun }: { value: When | undefined;
   );
 }
 
-function ConsequenceFields({ c, onChange, commands }: { c: Consequence; onChange: (c: Consequence) => void; commands: CommandInfo[] }) {
+function ConsequenceFields({ c, onChange, commands, toyKeep }: { c: Consequence; onChange: (c: Consequence) => void; commands: CommandInfo[]; toyKeep?: Exclude<ToyKeepUntil, 'time'>[] }) {
   const title = TYPES.find((t) => t.type === c.type)?.label;
   const valid = ConsequenceSchema.safeParse(c).success;
   return (
@@ -342,7 +345,7 @@ function ConsequenceFields({ c, onChange, commands }: { c: Consequence; onChange
       {(c.type === 'add_time' || c.type === 'remove_time') && (
         <NumberField label="Minutes" value={minutesOf(c.seconds)} min={1} onChange={(v) => onChange({ ...c, seconds: Math.max(1, (v ?? 1) * 60) })} />
       )}
-      {c.type === 'toy' && <ToyFields c={c} onChange={onChange} />}
+      {c.type === 'toy' && <ToyFields c={c} onChange={onChange} keepOptions={toyKeep ?? []} />}
       {c.type === 'freeze' && (
         <NumberField label="Duration in minutes – empty = until unfrozen" optional value={c.durationMinutes} min={1} onChange={(v) => onChange({ ...c, durationMinutes: v })} />
       )}
@@ -439,8 +442,14 @@ function CommandFields({ c, onChange, commands }: { c: Extract<Consequence, { ty
   );
 }
 
+const KEEP_LABELS: Record<Exclude<ToyKeepUntil, 'time'>, string> = {
+  leave: 'keep running until the wearer leaves the zone',
+  return: 'keep running until the wearer is back in the zone',
+  released: 'keep running until released (surprise hold)',
+};
+
 /** F27 – a toy action: target (body part, optional toy type / channel), action and its values. */
-function ToyFields({ c, onChange }: { c: ToyConsequence; onChange: (c: Consequence) => void }) {
+function ToyFields({ c, onChange, keepOptions }: { c: ToyConsequence; onChange: (c: Consequence) => void; keepOptions: Exclude<ToyKeepUntil, 'time'>[] }) {
   const set = (patch: Partial<ToyConsequence>) => onChange({ ...c, ...patch } as Consequence);
   const target = (patch: Partial<ToyConsequence['target']>) => {
     const t = { ...c.target, ...patch };
@@ -533,70 +542,49 @@ function ToyFields({ c, onChange }: { c: ToyConsequence; onChange: (c: Consequen
         ) : (
           c.action !== 'stop' && <NumberField label="Intensity (%)" min={0} max={100} value={c.intensity} onChange={(v) => set({ intensity: v ?? 0 })} />
         )}
-        {(c.action === 'play' || c.action === 'shock') && (
+        {c.action === 'play' && (
+          <label class="field">
+            Duration
+            <select
+              value={c.keep?.until ?? 'once'}
+              data-testid="toy-keep"
+              onChange={(e) => {
+                const v = (e.target as HTMLSelectElement).value as ToyKeepUntil | 'once';
+                const { keep: _k, seconds: _s, ...rest } = c;
+                onChange((v === 'once' ? { ...rest, seconds: c.seconds ?? 30 } : { ...rest, keep: v === 'time' ? { until: v, minutes: 30 } : { until: v } }) as Consequence);
+              }}
+            >
+              <option value="once">for … seconds</option>
+              {[...new Set([...keepOptions, ...(c.keep && c.keep.until !== 'time' ? [c.keep.until] : [])])].map((u) => (
+                <option key={u} value={u}>{KEEP_LABELS[u]}</option>
+              ))}
+              <option value="time">keep running for … minutes</option>
+            </select>
+          </label>
+        )}
+        {(c.action === 'shock' || (c.action === 'play' && !c.keep)) && (
           <NumberField label={c.action === 'shock' ? 'Shock length (seconds, max 10)' : 'Duration (seconds)'} min={1} max={c.action === 'shock' ? 10 : 3600} value={c.seconds} onChange={(v) => set({ seconds: v ?? 1 })} />
         )}
+        {c.action === 'play' && c.keep && (
+          <NumberField
+            label={c.keep.until === 'time' ? 'Minutes' : 'At the latest after (minutes)'}
+            optional={c.keep.until !== 'time'}
+            placeholder={c.keep.until === 'time' ? undefined : 'no limit'}
+            min={1}
+            max={1440}
+            value={c.keep.minutes}
+            onChange={(v) => set({ keep: { until: c.keep!.until, ...(v ? { minutes: v } : c.keep!.until === 'time' ? { minutes: 1 } : {}) } })}
+          />
+        )}
       </div>
+      {c.action === 'play' && c.keep && (
+        <span class="small muted">
+          Keeps running (renewed before it ends by itself) until the situation ends; not started twice while it runs. Intensity changes (e.g. +10 % at every penalty)
+          stick until it ends.{c.keep.until !== 'time' ? ' Needs background tracking.' : ''}
+        </span>
+      )}
       <span class="small muted">Sent to every connected toy that matches; the wearer's limits always apply. Skipped (and logged) if none is connected.</span>
     </div>
   );
 }
 
-/** F27 step 3 – an effect that runs while a condition holds (off = undefined). */
-export function ToyEffectEditor({ label, value, onChange, hint }: { label: string; value: ToyEffect | undefined; onChange: (v: ToyEffect | undefined) => void; hint?: string }) {
-  const set = (patch: Partial<ToyEffect>) => onChange({ ...value!, ...patch });
-  const target = (patch: Partial<ToyEffect['target']>) => {
-    const t = { ...value!.target, ...patch };
-    for (const k of Object.keys(t) as (keyof typeof t)[]) if (t[k] === undefined || t[k] === '') delete t[k];
-    set({ target: t as ToyEffect['target'] });
-  };
-  const channels = value?.target.toyType ? (TOY_TYPES[value.target.toyType].channels as readonly string[]) : ['A', 'B'];
-  return (
-    <div class="stack" data-testid="toy-effect">
-      <label class="check small">
-        <input type="checkbox" checked={!!value} onChange={(e) => onChange((e.target as HTMLInputElement).checked ? { target: { bodyPart: 'all' }, shape: 'pulse', intensity: 40 } : undefined)} />
-        <span><strong>{label}</strong>{hint ? <span class="muted"> – {hint}</span> : null}</span>
-      </label>
-      {value && (
-        <div class="grid2">
-          <label class="field">
-            Body part
-            <select value={value.target.bodyPart} onChange={(e) => target({ bodyPart: (e.target as HTMLSelectElement).value })}>
-              <option value="all">All toys</option>
-              {BODY_PARTS.map((b) => (
-                <option key={b} value={b}>{b}</option>
-              ))}
-            </select>
-          </label>
-          <label class="field">
-            Toy type
-            <select value={value.target.toyType ?? ''} onChange={(e) => target({ toyType: ((e.target as HTMLSelectElement).value || undefined) as ToyType | undefined, channel: undefined })}>
-              <option value="">Any</option>
-              {TOY_TYPE_IDS.map((t) => (
-                <option key={t} value={t}>{TOY_TYPES[t].label}</option>
-              ))}
-            </select>
-          </label>
-          <label class="field">
-            Channel
-            <select value={value.target.channel ?? ''} onChange={(e) => target({ channel: (e.target as HTMLSelectElement).value || undefined })}>
-              <option value="">All channels</option>
-              {channels.filter((ch) => ch !== 'main').map((ch) => (
-                <option key={ch} value={ch}>{ch}</option>
-              ))}
-            </select>
-          </label>
-          <label class="field">
-            Pattern
-            <select value={value.shape} onChange={(e) => set({ shape: (e.target as HTMLSelectElement).value as ToyEffect['shape'] })}>
-              {TOY_SHAPES.map((sh) => (
-                <option key={sh} value={sh}>{sh}</option>
-              ))}
-            </select>
-          </label>
-          <NumberField label="Intensity (%)" min={0} max={100} value={value.intensity} onChange={(v) => set({ intensity: v ?? 0 })} />
-        </div>
-      )}
-    </div>
-  );
-}

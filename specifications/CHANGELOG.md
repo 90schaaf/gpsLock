@@ -2,6 +2,10 @@
 
 ## 2026-11-26
 
+- **Toy actions that keep running (F27):** replaces zone `toy.whileInside` and `rules.toy.whileOutsideRequired`. A `play`
+  toy consequence takes `keep {until: leave | return | released | time, minutes?}` – the editor offers the endings that
+  fit the trigger; state `toy.kept`; no stacking; intensity changes stick until the effect ends ("stronger at every
+  penalty"); `stop` ends kept effects; emergency stop clears them.
 - **Toy emergency stop: consequences optional (F27):** `rules.toy.onEmergencyStop` may be empty; the wearer's card, the
   rule summary and the keyholder notice then say that it has no consequences.
 - **Toy types vibrator + rotator and rotator (F27):** XToys types `part-vibrator|part-rotator` (channels vibration,

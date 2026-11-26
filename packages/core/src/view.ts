@@ -103,7 +103,7 @@ export interface SessionView {
     emergencyStops: number;
     /** What the emergency stop costs (described). */
     onEmergencyStop: string;
-    /** Effects running now ("while inside" …). */
+    /** Toy actions running now (kept running until their situation ends). */
     running: { toy: string; channel: string; shape: string; level: number; label: string; paused: boolean }[];
   };
   /** F26 – surprise zones that currently hold the wearer. */
@@ -262,8 +262,6 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
         config.rules.toy.onEmergencyStop.length
           ? `Emergency stop (disconnect the toys): ${list(config.rules.toy.onEmergencyStop)}.`
           : 'Emergency stop (disconnect the toys): possible at any time, without consequences.',
-        ...config.zones.filter((z) => z.toy.whileInside).map((z) => `While you are in "${z.name}": ${effectText(z.toy.whileInside!)} – until you leave.`),
-        ...(config.rules.toy.whileOutsideRequired ? [`While you are outside the required zones: ${effectText(config.rules.toy.whileOutsideRequired)}.`] : []),
       ],
     });
   }
@@ -630,9 +628,4 @@ export function buildLogEntry(
     color: record?.outcome === 'rejected' ? '#c0392b' : consequences.length ? '#e67e22' : '#27ae60',
     icon: 'map-marker-alt',
   };
-}
-
-/** "🎮 pulse 40 % (toys – genitals)" for a running effect. */
-function effectText(e: { shape: string; intensity: number; target: { bodyPart: string; toyType?: string; channel?: string } }): string {
-  return `🎮 ${e.shape} ${e.intensity} % (${e.target.toyType ?? "toys"}${e.target.bodyPart === "all" ? "" : ` – ${e.target.bodyPart}`}${e.target.channel ? ` ${e.target.channel}` : ""})`;
 }

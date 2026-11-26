@@ -1,12 +1,12 @@
 # Toys (XToys) – test page
 
 ::: tip Status
-Toy actions as consequences and effects *while* you are inside a zone work in locks.
+Toy actions as consequences – one-off or kept running until the situation ends – work in locks.
 :::
 
 Lockation controls toys through [XToys](https://xtoys.app) and its **private webhook**. XToys talks to the toys
 (Bluetooth, device apps); Lockation only tells XToys what to do. Open the **[toy test page](/app/toys.html)** – also
-linked from the demo (🎮 Toy test).
+linked from the 🎮 Toys card on the main page and from the 🎮 Toys tab (also in the demo).
 
 ## Before you start
 
@@ -54,8 +54,9 @@ got lost.
 missions, …):
 
 - **Target**: a body part or all toys, optionally a toy type and a channel;
-- **Action**: play a pattern (constant, pulse, wave, ramp) with intensity and duration, **change the intensity** (to a
-  value, or by e.g. +10 % – stronger at every penalty), ⚡ **shock** (e-stim) or **stop**.
+- **Action**: play a pattern (constant, pulse, wave, ramp) with intensity and duration – or [keep it running](#keep-running)
+  until the situation ends –, **change the intensity** (to a value, or by e.g. +10 % – stronger at every penalty),
+  ⚡ **shock** (e-stim) or **stop**.
 
 **Wearer** – on the main page, card **🎮 Toys**: accept the safety notes, enter your Webhook ID and your toys (the
 setup from the toy test page in the same browser is filled in), **Connect toys**. Then **▶ Test pulse** and **✓ My
@@ -73,22 +74,33 @@ toys reacted**. Toy actions are sent even before you confirm.
 **Demo** – the demo has toy control enabled (the casino pulses your toys). Toy actions are only shown in the log, unless
 you tick *really send the demo rules' toy actions to my toys* on the 🎮 Toys card.
 
-## Effects while inside
+## Keep running
 
-Besides one-off actions, the keyholder can let a toy **run as long as a condition holds**:
+A **▶ Play** action can, instead of a number of seconds, **keep running until the situation ends**. The editor offers
+the endings that fit the trigger:
 
-- **🎮 Toy effect while inside** – per zone (🗺 Zones tab): starts when the wearer enters, stops when they leave;
-- **Effect while outside the required zones** – 🎮 Toys tab: runs until the wearer is back in a required zone.
+| Duration | Offered for | Ends |
+|---|---|---|
+| for … seconds | everywhere | after the seconds (at most the toy's limit) – a one-off action |
+| until the wearer leaves the zone | anything triggered by *entering*: zone actions on enter, forbidden-zone penalties, rewards, surprise outcomes | on leaving |
+| until the wearer is back in the zone | anything triggered by *leaving*: zone actions on leave, a surprise zone left too early, required zones (checking in outside, outside during a stay window) | on returning |
+| until released | surprise outcomes with a hold | when the hold ends |
+| for … minutes | everywhere (missed check-in, failed mission, …) | after the minutes |
 
-Each effect has a target (body part, optionally toy type and channel), a pattern and an intensity. Both need
-**background tracking** (otherwise Lockation would not notice that the wearer left).
-
+- For the zone endings you can set **at the latest after … minutes** – otherwise it runs until the wearer leaves /
+  comes back (or uses the emergency stop). The zone endings need **background tracking**.
+- **Not stacked:** while it runs, the same action is not started again – e.g. a forbidden zone that punishes every
+  5 minutes starts the wave once.
+- **Stronger over time:** a *change the intensity* action (e.g. +10 % at every penalty) changes what keeps running, and
+  the change sticks until it ends. A *stop* action ends it.
 - Each start is a pattern that **ends by itself** after the toy's maximum duration; Lockation renews it about a minute
   before. If Lockation, the network or tracking fails, the toy stops on its own. Tip: a maximum duration of at least
-  2 minutes per action keeps effects running without gaps.
-- A **one-off action** (e.g. the punishment pulse at the casino) takes the toy over for its duration; the effect resumes
-  afterwards. Two effects on the same toy: the higher intensity wins.
-- Starts and stops appear in the lock history; renewals do not. The 🎮 Toys card shows what is running.
+  2 minutes per action keeps it running without gaps.
+- A **one-off action** (e.g. the punishment pulse at the casino) takes the toy over for its duration; what keeps running
+  resumes afterwards. Two on the same toy: the higher intensity wins.
+- No toys connected yet → it waits and starts as soon as the wearer connects (while the situation lasts).
+- Starts, intensity changes and stops appear in the lock history; renewals do not. The 🎮 Toys card shows what is running.
 - The emergency stop, disconnecting and the end of the lock stop everything.
 
-In the demo, the casino plays a wave while you are inside (on top of the punishment pulse when you enter).
+In the demo, the casino plays a wave that keeps running until you leave – 10 % stronger at every second penalty – on top
+of the punishment pulse.

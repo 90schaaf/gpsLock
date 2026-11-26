@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { desiredToyEffects, initialState, nextDueAt, pauseToyEffects, reconcileToyEffects, refreshAfterMs, buildXToysScript, ConsequenceSchema, defaultToy, describeConsequence, parseConfig, resolveToyConsequence, TOY_COMMENTS, ToyCommandError, toyCommand, toyComment, ToySetupSchema, toySlots, type ToyConsequence, type ToySetup, type ToyWebhookBody } from '../src/index.js';
+import { desiredToyEffects, initialState, keepToyConsequences, nextDueAt, pruneKeptToyEffects, pauseToyEffects, reconcileToyEffects, refreshAfterMs, buildXToysScript, ConsequenceSchema, defaultToy, describeConsequence, parseConfig, resolveToyConsequence, TOY_COMMENTS, ToyCommandError, toyCommand, toyComment, ToySetupSchema, toySlots, type ToyConsequence, type ToySetup, type ToyWebhookBody } from '../src/index.js';
 
 const setup: ToySetup = ToySetupSchema.parse({
   toys: [
@@ -284,30 +284,107 @@ describe('effects while a condition holds (step 3)', () => {
   });
 });
 
-describe('effects in the engine and config', () => {
-  const cfgWith = (extra: Record<string, unknown>) =>
+describe('toy actions that keep running', () => {
+  const cfgWith = (extra: Record<string, unknown> = {}, until: string = 'leave') =>
     parseConfig({
       version: 2,
       timezone: 'Europe/Zurich',
-      zones: [{ id: 'bar', name: 'Bar', lat: 47.39, lng: 8.515, radiusM: 100, toy: { whileInside: { target: { bodyPart: 'all' }, shape: 'pulse', intensity: 40 } } }],
-      rules: { toy: { enabled: true, onEmergencyStop: [{ type: 'add_time', seconds: 60 }] } },
+      zones: [
+        { id: 'bar', name: 'Bar', lat: 47.39, lng: 8.515, radiusM: 100, actions: { onEnter: [{ type: 'toy', action: 'play', target: { bodyPart: 'all' }, shape: 'wave', intensity: 40, keep: { until } }] } },
+        { id: 'park', name: 'Park', lat: 47.4, lng: 8.52, radiusM: 100, roles: ['surprise'], surprise: { outcomes: [{ id: 'o1', label: 'Trap', onEnter: [], hold: 'stay', holdMinutes: 20 }] } },
+      ],
+      rules: { toy: { enabled: true }, surprise: { enabled: true } },
       ...extra,
     });
+  const T0 = new Date('2026-06-01T10:00:00Z');
+  const min = (m: number) => new Date(T0.getTime() + m * 60_000);
+  const play = (keep: Record<string, unknown>, x: Record<string, unknown> = {}) => ({ type: 'toy', action: 'play', target: { bodyPart: 'all' }, shape: 'wave', intensity: 40, keep, ...x }) as ToyConsequence;
+  const planned = (consequence: unknown, source = 'zone.onEnter', context: unknown = { kind: 'enter', zoneIds: ['bar'] }) => ({ consequence, source, idempotencyKey: 'k', context: context ?? undefined }) as any;
+  const ready = () => {
+    const r = cfgWith({ tracking: { enabled: true } });
+    if (!r.ok) throw new Error(JSON.stringify(r));
+    const state = initialState(r.config, T0);
+    state.presence.bar = { since: T0.toISOString(), lastSeen: T0.toISOString() };
+    return { config: r.config, state };
+  };
 
-  it('"while inside" needs background tracking', () => {
-    expect(cfgWith({}).ok).toBe(false);
+  it('"until leaving / back / released" needs background tracking, "for N minutes" does not', () => {
+    expect(cfgWith().ok).toBe(false);
     expect(cfgWith({ tracking: { enabled: true } }).ok).toBe(true);
+    expect(cfgWith({}, 'time').ok).toBe(true);
+    expect(describeConsequence(play({ until: 'leave', minutes: 120 }))).toBe('🎮 wave 40 % until leaving the zone (at most 2h) (toys)');
+    expect(describeConsequence(play({ until: 'time', minutes: 30 }))).toBe('🎮 wave 40 % for 30m, kept running (toys)');
   });
 
-  it('desired effects follow the presence; running effects are due for renewal', () => {
-    const r = cfgWith({ tracking: { enabled: true } });
-    if (!r.ok) throw new Error('config');
-    const T0 = new Date('2026-06-01T10:00:00Z');
-    const state = initialState(r.config, T0);
-    expect(desiredToyEffects(r.config, state)).toEqual([]);
-    state.presence.bar = { since: T0.toISOString(), lastSeen: T0.toISOString() };
-    expect(desiredToyEffects(r.config, state)).toEqual([{ source: 'zone:bar', label: 'while in "Bar"', effect: { target: { bodyPart: 'all' }, shape: 'pulse', intensity: 40 } }]);
-    state.toy.running = { 'vibe:all': { source: 'zone:bar', label: 'x', shape: 'pulse', level: 40, sentAt: T0.toISOString(), refreshAt: '2026-06-01T10:04:00.000Z' } };
-    expect(nextDueAt(r.config, state, T0)!.toISOString() <= '2026-06-01T10:04:00.000Z').toBe(true);
+  it('runs until the wearer leaves – not stacked, and intensity changes stick (stronger at every penalty)', () => {
+    const { config, state } = ready();
+    const a = keepToyConsequences(config, state, [planned(play({ until: 'leave' }))], T0);
+    expect([...a.handled]).toEqual([0]);
+    const [id, k] = Object.entries(a.kept)[0]!;
+    expect(k).toMatchObject({ label: 'until you leave "Bar"', level: 40, until: 'leave', zoneIds: ['bar'] });
+    state.toy.kept = a.kept;
+    expect(desiredToyEffects(config, state, T0)).toEqual([{ source: id, label: 'until you leave "Bar"', effect: { target: { bodyPart: 'all' }, shape: 'wave', intensity: 40 } }]);
+    // the same rule again (e.g. the next forbidden-zone penalty): not started twice, but +10 % sticks
+    const plus = { type: 'toy', action: 'intensity', target: { bodyPart: 'genitals' }, delta: 10 };
+    const b = keepToyConsequences(config, state, [planned(play({ until: 'leave' })), planned(plus)], min(5));
+    expect(Object.keys(b.kept)).toEqual([id]);
+    expect(b.kept[id]!.level).toBe(50);
+    state.toy.kept = b.kept;
+    const c = keepToyConsequences(config, state, [planned(plus)], min(10));
+    expect(c.kept[id]!.level).toBe(60);
+    state.toy.kept = c.kept;
+    expect(desiredToyEffects(config, state, min(10))[0]!.effect.intensity).toBe(60);
+    // leaving ends it
+    delete state.presence.bar;
+    expect(desiredToyEffects(config, state, min(11))).toEqual([]);
+    expect(pruneKeptToyEffects(config, state, min(11))).toEqual({});
+  });
+
+  it('a stop action ends kept effects on its toys', () => {
+    const { config, state } = ready();
+    state.toy.kept = keepToyConsequences(config, state, [planned(play({ until: 'leave' }, { target: { bodyPart: 'nipples' } }))], T0).kept;
+    expect(Object.keys(keepToyConsequences(config, state, [planned({ type: 'toy', action: 'stop', target: { bodyPart: 'anal' } })], T0).kept)).toHaveLength(1);
+    expect(keepToyConsequences(config, state, [planned({ type: 'toy', action: 'stop', target: { bodyPart: 'nipples' } })], T0).kept).toEqual({});
+    expect(keepToyConsequences(config, state, [planned({ type: 'toy', action: 'stop', target: { bodyPart: 'all' } })], T0).kept).toEqual({});
+  });
+
+  it('until back in the zone, for N minutes (due for the cron), at-the-latest cap', () => {
+    const { config, state } = ready();
+    delete state.presence.bar;
+    const back = keepToyConsequences(config, state, [planned(play({ until: 'return', minutes: 60 }), 'zone.onLeave', { kind: 'leave', zoneIds: ['bar'] })], T0).kept;
+    expect(Object.values(back)[0]).toMatchObject({ label: 'until you are back in "Bar" (at the latest Mon 13:00)', endsAt: min(60).toISOString() });
+    state.toy.kept = back;
+    expect(desiredToyEffects(config, state, min(59))).toHaveLength(1);
+    expect(desiredToyEffects(config, state, min(60))).toEqual([]); // cap reached
+    state.presence.bar = { since: min(5).toISOString(), lastSeen: min(5).toISOString() };
+    expect(desiredToyEffects(config, state, min(6))).toEqual([]); // back inside
+    const timed = keepToyConsequences(config, { ...state, toy: { ...state.toy, kept: {} } }, [planned(play({ until: 'time', minutes: 30 }), 'mission.onFail', null)], T0).kept;
+    expect(Object.values(timed)[0]).toMatchObject({ label: 'until Mon 12:30', until: 'time', zoneIds: [], endsAt: min(30).toISOString() });
+    expect(nextDueAt(config, { ...state, toy: { ...state.toy, kept: timed } }, T0)!.getTime()).toBeLessThanOrEqual(min(30).getTime());
+  });
+
+  it('an ending that does not fit the trigger falls back to a one-off action', () => {
+    const { config, state } = ready();
+    expect(keepToyConsequences(config, state, [planned(play({ until: 'return' }))], T0).handled.size).toBe(0); // "back" on an enter trigger
+    expect(keepToyConsequences(config, state, [planned(play({ until: 'leave' }), 'mission.onFail', null)], T0).handled.size).toBe(0);
+    expect(keepToyConsequences(config, state, [planned(play({ until: 'released' }), 'surprise.onEnter', { kind: 'enter', zoneIds: ['park'] })], T0).handled.size).toBe(0); // no hold
+  });
+
+  it('until released: ends when the surprise hold ends', () => {
+    const { config, state } = ready();
+    state.presence.park = { since: T0.toISOString(), lastSeen: T0.toISOString() };
+    state.surprise.zones.park = { visits: 1, active: { outcomeId: 'o1', since: T0.toISOString(), until: min(20).toISOString(), mode: 'stay' } };
+    const r = keepToyConsequences(config, state, [planned(play({ until: 'released' }), 'surprise.onEnter', { kind: 'enter', zoneIds: ['park'] })], T0);
+    expect(Object.values(r.kept)[0]).toMatchObject({ label: 'until you are released from "Park"', holdSince: T0.toISOString() });
+    state.toy.kept = r.kept;
+    expect(desiredToyEffects(config, state, min(5))).toHaveLength(1);
+    state.surprise.zones.park.active = undefined;
+    expect(desiredToyEffects(config, state, min(21))).toEqual([]);
+  });
+
+  it('toy control off: nothing is kept', () => {
+    const { config, state } = ready();
+    const off = { ...config, rules: { ...config.rules, toy: { ...config.rules.toy, enabled: false } } };
+    expect(keepToyConsequences(off, state, [planned(play({ until: 'leave' }))], T0).handled.size).toBe(0);
   });
 });

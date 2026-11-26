@@ -12,6 +12,8 @@ import {
   applyHuntAction,
   applyMissionAction,
   desiredToyEffects,
+  keepToyConsequences,
+  pruneKeptToyEffects,
   applySurpriseAction,
   type SurpriseAction,
   SurpriseActionError,
@@ -37,7 +39,7 @@ import {
 import { initialState, type LockationState } from './state.js';
 import { buildLogEntry, buildSessionView, type Role, type SessionView } from './view.js';
 import { describeConsequence } from './consequences.js';
-import { TOY_TYPES, pauseToyEffects, reconcileToyEffects, resolveToyConsequence, TOY_DISCLAIMER_VERSION, toyCommand, toyComment, type ToyConsequence, ToySetupSchema, type ToyWebhookBody, type Toy } from './toys.js';
+import { type KeptToyEffect, TOY_TYPES, pauseToyEffects, reconcileToyEffects, resolveToyConsequence, TOY_DISCLAIMER_VERSION, toyCommand, toyComment, type ToyConsequence, ToySetupSchema, type ToyWebhookBody, type Toy } from './toys.js';
 
 /** An error with an HTTP-like status, mapped to the transport by the caller (worker: HTTP response, demo: ApiError). */
 export class AppError extends Error {
@@ -117,7 +119,7 @@ export class LockationApp<S extends LockSession = LockSession> {
    * Apply consequences: toy actions go to the wearer's toys (XToys), everything else to the lock (Chaster).
    * Returns the per-consequence results and extra log lines (toy actions, skipped ones, a cheeky comment).
    */
-  private async apply(s: S, state: LockationState, list: PlannedConsequence[]): Promise<{ applied: { ok: boolean; error?: string }[]; lines: string[]; paused: { toyIds: string[]; until: Date }[] }> {
+  private async apply(s: S, state: LockationState, list: PlannedConsequence[]): Promise<Applied> {
     const applied: { ok: boolean; error?: string }[] = new Array(list.length);
     const lines: string[] = [];
     const lock = list.map((p, i) => [p, i] as const).filter(([p]) => p.consequence.type !== 'toy');
@@ -128,6 +130,8 @@ export class LockationApp<S extends LockSession = LockSession> {
     }
     const paused: { toyIds: string[]; until: Date }[] = [];
     if (!toy.length) return { applied, lines, paused };
+    // "Keep running" actions, intensity changes and stops on them (F27) – started by syncToyEffects.
+    const { kept, handled } = keepToyConsequences(s.config, state, list, this.ports.now());
     const enabled = s.config.rules.toy.enabled;
     const webhookId = enabled && state.toy.connectedAt && state.toy.toys.length ? await this.ports.toys?.getWebhookId(s) : undefined;
     let sent = false;
@@ -140,6 +144,14 @@ export class LockationApp<S extends LockSession = LockSession> {
       };
       if (!enabled) {
         skip('toy control is off');
+        continue;
+      }
+      if (handled.has(i)) {
+        // Kept running: syncToyEffects starts it (and logs the start) – here only what cannot start now.
+        applied[i] = { ok: true };
+        if (!webhookId || !this.ports.toys) lines.push(`🎮 Waiting for toys (none connected): ${what} – starts once they are connected.`);
+        else if (!resolveToyConsequence(state.toy.toys, { ...c, keep: undefined }).length) lines.push(`🎮 Skipped (no matching toy connected): ${what}.`);
+        else sent = true;
         continue;
       }
       if (!webhookId || !this.ports.toys) {
@@ -165,16 +177,17 @@ export class LockationApp<S extends LockSession = LockSession> {
       lines.push(`${what} → ${targets.map((t) => t.toy.name).join(', ')}${errors.length ? ` (failed: ${errors.join('; ')})` : ''}.`);
     }
     if (sent) lines.push(`😈 ${toyComment(toy[0]![0].idempotencyKey)}`);
-    return { applied, lines, paused };
+    return { applied, lines, paused, kept };
   }
 
   /** Apply, log, persist, record and notify the result of one evaluation. */
   async finish(s: S, result: EvalResult & { record?: CheckinRecord }, kind: 'checkin' | 'tick', opts: { history?: boolean } = {}) {
-    const { applied, lines, paused } = result.consequences.length ? await this.apply(s, result.state, result.consequences) : { applied: [], lines: [], paused: [] };
+    const r: Applied = result.consequences.length ? await this.apply(s, result.state, result.consequences) : { applied: [], lines: [], paused: [] };
+    const { applied, lines } = r;
     if (result.record) result.record.consequences = result.record.consequences.map((x, i) => ({ ...x, ok: applied[i]?.ok, error: applied[i]?.error }));
     const entry = buildLogEntry(kind, [...result.events, ...lines], result.consequences, result.record);
     if (entry) await this.ports.log(s, entry).catch(() => undefined);
-    await this.ports.saveState(s, await this.syncToyEffects(s, withPaused(result.state, paused)));
+    await this.ports.saveState(s, await this.syncToyEffects(s, afterApply(result.state, r)));
     if (result.record && opts.history !== false) await this.ports.appendHistory(s, result.record);
     await this.ports.deliver(s, result.notices);
   }
@@ -269,18 +282,20 @@ export class LockationApp<S extends LockSession = LockSession> {
   // ---------- F27 toys ----------
 
   /**
-   * Start / renew / stop the effects that run while a condition holds ("while inside"). Starts and stops are logged,
-   * renewals are not. Without connected toys nothing runs.
+   * Start / renew / stop the toy actions that keep running until their situation ends (`toy.kept`, F27). Ended ones
+   * are dropped first. Starts, level changes and stops are logged, renewals are not. Without connected toys nothing runs.
    */
-  private async syncToyEffects(s: S, state: LockationState): Promise<LockationState> {
+  private async syncToyEffects(s: S, before: LockationState): Promise<LockationState> {
+    const now = this.ports.now();
+    const kept = pruneKeptToyEffects(s.config, before, now);
+    const state = JSON.stringify(kept) === JSON.stringify(before.toy.kept) ? before : { ...before, toy: { ...before.toy, kept } };
     const T = state.toy;
     const ports = this.ports.toys;
     const connected = s.config.rules.toy.enabled && !!T.connectedAt && T.toys.length > 0 && !!ports;
     if (!connected && !Object.keys(T.running).length) return state;
     const webhookId = connected ? await ports!.getWebhookId(s) : undefined;
     if (!webhookId) return Object.keys(T.running).length ? { ...state, toy: { ...T, running: {} } } : state;
-    const now = this.ports.now();
-    const desired = s.config.rules.toy.enabled ? desiredToyEffects(s.config, state) : [];
+    const desired = desiredToyEffects(s.config, state, now);
     const r = reconcileToyEffects(T.toys, desired, T.running, now);
     if (!r.commands.length && JSON.stringify(r.running) === JSON.stringify(T.running)) return state;
     const lines: string[] = [];
@@ -374,7 +389,7 @@ export class LockationApp<S extends LockSession = LockSession> {
     const now = this.ports.now();
     const punishment = s.config.rules.toy.onEmergencyStop.filter((c) => c.type !== 'toy');
     const consequences: PlannedConsequence[] = punishment.map((c, i) => ({ consequence: c, source: 'toy.onEmergencyStop', idempotencyKey: `${s.sessionId}:toy-estop:${now.toISOString()}:${i}` }));
-    const state: LockationState = { ...s.state, toy: { ...s.state.toy, connectedAt: undefined, verifiedAt: undefined, toys: [], running: {}, emergencyStops: s.state.toy.emergencyStops + 1 } };
+    const state: LockationState = { ...s.state, toy: { ...s.state.toy, connectedAt: undefined, verifiedAt: undefined, toys: [], kept: {}, running: {}, emergencyStops: s.state.toy.emergencyStops + 1 } };
     const what = punishment.length ? punishment.map(describeConsequence).join(', ') : 'nothing';
     await this.finish(
       s,
@@ -432,7 +447,7 @@ export class LockationApp<S extends LockSession = LockSession> {
       if (result.consequences.length) {
         const r = await this.apply(s, state, result.consequences);
         lines = r.lines;
-        state = withPaused(state, r.paused);
+        state = afterApply(state, r);
         result.record.consequences = result.record.consequences.map((x, i) => ({ ...x, ok: r.applied[i]?.ok, error: r.applied[i]?.error }));
       }
       if (result.consequences.length || result.notices.some((n) => n.audience === 'wearer')) {
@@ -460,8 +475,13 @@ export class LockationApp<S extends LockSession = LockSession> {
   /** Deadlines, warnings, escalations … Returns whether consequences were applied. */
   async tick(s: S, opts: { hadState?: boolean } = {}): Promise<boolean> {
     const result = evaluateTick(s.config, s.state, { ...this.ctx(s), evalId: `tick-${this.ports.now().toISOString()}` });
+    if (!tickIsNoop(result) || opts.hadState === false) {
+      await this.finish(s, result, 'tick'); // syncs the toys once, after applying
+      return result.consequences.length > 0;
+    }
+    // Nothing happened – except, maybe, toy renewals or ended kept-running actions.
     const synced = await this.syncToyEffects(s, result.state);
-    if (tickIsNoop(result) && opts.hadState !== false && JSON.stringify(synced) === JSON.stringify(s.state)) {
+    if (JSON.stringify(synced) === JSON.stringify(s.state)) {
       await this.ports.idle?.(s);
       return false;
     }
@@ -499,9 +519,23 @@ const toyList = (toys: Toy[]) => toys.map((t) => `${t.name} (${t.bodyPart})`).jo
 /** Channel names per toy type (index 0 = XToys channel "1"). */
 const TOY_CHANNELS: Record<string, readonly string[]> = Object.fromEntries(Object.entries(TOY_TYPES).map(([k, v]) => [k, v.channels]));
 
-function withPaused(state: LockationState, paused: { toyIds: string[]; until: Date }[]): LockationState {
-  if (!paused.length || !Object.keys(state.toy.running).length) return state;
-  let running = state.toy.running;
-  for (const p of paused) running = pauseToyEffects(running, p.toyIds, p.until);
-  return { ...state, toy: { ...state.toy, running } };
+interface Applied {
+  applied: { ok: boolean; error?: string }[];
+  lines: string[];
+  /** One-off actions took these toys over until then (kept-running effects resume afterwards). */
+  paused: { toyIds: string[]; until: Date }[];
+  /** The new `toy.kept` (only when toy consequences were planned). */
+  kept?: Record<string, KeptToyEffect>;
+}
+
+/** Store what applying changed in the toy state: kept-running actions and pauses for one-off actions. */
+function afterApply(state: LockationState, r: Applied): LockationState {
+  let toy = state.toy;
+  if (r.kept) toy = { ...toy, kept: r.kept };
+  if (r.paused.length && Object.keys(toy.running).length) {
+    let running = toy.running;
+    for (const p of r.paused) running = pauseToyEffects(running, p.toyIds, p.until);
+    toy = { ...toy, running };
+  }
+  return toy === state.toy ? state : { ...state, toy };
 }

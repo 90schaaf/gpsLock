@@ -203,6 +203,20 @@ describe('surprise zones', () => {
   });
 });
 
+describe('toy actions that keep running (F27)', () => {
+  it('the editor offers only the endings that fit the trigger', async () => {
+    const { el, openTab, unmount } = await mount();
+    await openTab('Forbidden');
+    const keeps = [...el.querySelectorAll('select[data-testid="toy-keep"]')] as HTMLSelectElement[];
+    const kept = keeps.find((s) => s.value === 'leave'); // the demo casino's wave
+    expect(kept).toBeDefined();
+    const options = [...kept!.options].map((o) => o.value);
+    expect(options).toEqual(['once', 'leave', 'time']);
+    expect(el.textContent).toContain('At the latest after (minutes)');
+    unmount();
+  });
+});
+
 describe('toys in the demo (F27)', () => {
   it('connect, test, confirm and emergency stop – nothing is sent unless the wearer switches it on', async () => {
     const { MockBackend } = await import('../src/lib/mock-backend.js');
