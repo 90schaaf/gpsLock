@@ -4,7 +4,7 @@
  * The script is generated from the wearer's toy list: one XToys output slot per toy, one webhook trigger (`lockation`)
  * whose JavaScript dispatches each command to the slot / channel named in the request. Timed actions are non-looping
  * patterns that end at 0, so a toy stops by itself even if no `stop` arrives (dead-man's switch on the toy side).
- * Format reference: `examples/xtoys/local webhook.json` (official XToys export).
+ * Format reference: an official XToys script export (not in the repo) and the Bondage Club XToys integration script.
  */
 import { z } from 'zod';
 import type { Consequence } from './consequences.js';
