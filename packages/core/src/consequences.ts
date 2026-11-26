@@ -1,5 +1,6 @@
 /** F7 – consequences that rules can trigger. */
 import { z } from 'zod';
+import { TOY_SHAPES, TOY_TYPES, ToyKeepSchema, ToyTargetSchema } from './toys.js';
 
 export const MAX_TIME_SECONDS = 31_536_000; // one year
 
@@ -24,6 +25,19 @@ const BaseConsequenceSchema = z.discriminatedUnion('type', [
     durationMinutes: z.number().int().min(1).max(1440).optional(),
   }),
   z.object({ type: z.literal('verification_picture') }),
+  /** F27 – toy action via XToys, sent to every connected toy that matches `target` (the wearer's limits are set in XToys). */
+  z.object({
+    type: z.literal('toy'),
+    action: z.enum(['play', 'intensity', 'shock', 'stop']),
+    target: ToyTargetSchema,
+    shape: z.enum(TOY_SHAPES).optional(),
+    intensity: z.number().int().min(0).max(100).optional(),
+    /** Relative intensity change (action `intensity`), e.g. +10 / −20. */
+    delta: z.number().int().min(-100).max(100).optional(),
+    seconds: z.number().int().min(1).max(3600).optional(),
+    /** `play` only: keep running until the situation ends (instead of `seconds`). */
+    keep: ToyKeepSchema.optional(),
+  }),
   z.object({
     type: z.literal('command'),
     commandId: z.string().regex(/^[a-z0-9-]+\.[a-z0-9-_.]+$/, 'commandId must look like "<extension>.<command>"'),
@@ -72,6 +86,14 @@ export function scaleConsequence(c: Consequence, factor: number): Consequence {
   return c;
 }
 
+const KEEP_TEXT = { leave: 'until leaving the zone', return: 'until back in the zone', released: 'until released' } as const;
+
+/** "until leaving the zone (at most 2h)" / "for 30m, kept running". */
+export function keepText(k: { until: 'leave' | 'return' | 'released' | 'time'; minutes?: number }): string {
+  if (k.until === 'time') return `for ${formatDuration((k.minutes ?? 30) * 60)}, kept running`;
+  return `${KEEP_TEXT[k.until]}${k.minutes ? ` (at most ${formatDuration(k.minutes * 60)})` : ''}`;
+}
+
 export function formatDuration(totalSeconds: number): string {
   const s = Math.round(totalSeconds);
   const d = Math.floor(s / 86_400);
@@ -106,5 +128,13 @@ export function describeConsequence(c: Consequence): string {
       return 'verification picture';
     case 'command':
       return c.label ?? `run ${c.commandId}`;
+    case 'toy': {
+      const who = `${c.target.toyType ? TOY_TYPES[c.target.toyType].label.toLowerCase() : 'toys'}${c.target.bodyPart === 'all' ? '' : ` – ${c.target.bodyPart}`}${c.target.channel ? ` ${c.target.channel}` : ''}`;
+      if (c.action === 'play' && c.keep) return `🎮 ${c.shape ?? 'pulse'} ${c.intensity ?? 50} % ${keepText(c.keep)} (${who})`;
+      if (c.action === 'play') return `🎮 ${c.shape ?? 'pulse'} ${c.intensity ?? 50} % for ${formatDuration(c.seconds ?? 30)} (${who})`;
+      if (c.action === 'intensity') return `🎮 intensity ${c.delta !== undefined ? `${c.delta >= 0 ? '+' : ''}${c.delta} %` : `${c.intensity ?? 50} %`} (${who})`;
+      if (c.action === 'shock') return `🎮 shock ${c.intensity ?? 30} % (${who})`;
+      return `🎮 stop (${who})`;
+    }
   }
 }

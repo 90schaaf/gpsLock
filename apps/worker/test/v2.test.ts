@@ -238,3 +238,205 @@ describe('surprise mission endpoint', () => {
     expect(d.mission.stats.declined).toBe(1);
   });
 });
+
+describe('toys (F27)', () => {
+  const toyCfg = {
+    ...config,
+    rules: {
+      ...config.rules,
+      forbidden: { enabled: true, firstWarningAfterMinutes: null, firstPenaltyAfterMinutes: 0, onEnter: [{ type: 'toy', action: 'play', target: { bodyPart: 'genitals' }, shape: 'pulse', intensity: 90, seconds: 30 }] },
+      toy: { enabled: true, onEmergencyStop: [{ type: 'add_time', seconds: 7200 }] },
+    },
+  };
+  const toys = [
+    { id: 'vibe', name: 'Bullet', type: 'vibrator', bodyPart: 'genitals' },
+    { id: 'stim', name: 'Coyote', type: 'estim', bodyPart: 'nipples' },
+  ];
+  let sent: string[];
+  const toyFetch = async (url: string) => {
+    sent.push(url);
+    return new Response('OK', { status: 200 });
+  };
+  const postT = (path: string, body: unknown) =>
+    handleRequest(new Request(`https://worker.test${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://user.github.io' }, body: JSON.stringify(body) }), env, { ...o(), toyFetch });
+  const connect = () => postT('/api/toy/connect', { mainToken: 'wearer-token', webhookId: 'SECRETHOOK1', toys, disclaimerVersion: 2 });
+
+  beforeEach(() => {
+    sent = [];
+    fake.addSession('s1', toyCfg as any);
+  });
+
+  it('connect: only the wearer, with the disclaimer; the Webhook ID stays in D1 and never shows up in a view', async () => {
+    expect((await postT('/api/toy/connect', { mainToken: 'kh-token', webhookId: 'SECRETHOOK1', toys, disclaimerVersion: 2 })).status).toBe(403);
+    expect((await postT('/api/toy/connect', { mainToken: 'wearer-token', webhookId: 'SECRETHOOK1', toys, disclaimerVersion: 1 })).status).toBe(400);
+    const r = await connect();
+    expect(r.status).toBe(200);
+    const v = (await r.json()) as any;
+    expect(v.toys).toMatchObject({ connected: true, verified: false, toys: [{ name: 'Bullet', type: 'vibrator', bodyPart: 'genitals' }, { name: 'Coyote' }] });
+    expect(db.rows('toys')).toEqual([expect.objectContaining({ session_id: 's1', webhook_id: 'SECRETHOOK1' })]);
+    const kh = (await (await post('/api/session', { mainToken: 'kh-token' })).json()) as any;
+    expect(JSON.stringify(kh)).not.toContain('SECRETHOOK1');
+    expect(JSON.stringify(v)).not.toContain('SECRETHOOK1');
+    expect(JSON.stringify(fake.calls)).not.toContain('SECRETHOOK1'); // not in the Chaster state or log
+  });
+
+  it('test pulse and confirmation', async () => {
+    await connect();
+    expect((await postT('/api/toy/test', { mainToken: 'wearer-token' })).status).toBe(200);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]!.startsWith('https://webhook.xtoys.app/SECRETHOOK1?action=lockation&slot=part-vibrator-a&ch=all&cmd=play&shape=pulse')).toBe(true);
+    const v = (await (await postT('/api/toy/confirm', { mainToken: 'wearer-token' })).json()) as any;
+    expect(v.toys.verified).toBe(true);
+  });
+
+  it('a toy consequence goes to the matching toy, with full details and a cheeky comment in the lock log', async () => {
+    await connect();
+    sent = [];
+    const r = await postT('/api/checkin', { mainToken: 'wearer-token', fix: { lat: BAR.lat, lng: BAR.lng, accuracy: 10, timestamp: now.getTime() } });
+    expect(r.status).toBe(200);
+    expect(sent).toHaveLength(1); // genitals → Bullet only
+    expect(sent[0]).toContain('cmd=play');
+    expect(sent[0]).toContain('level=90'); // as the rule says – the wearer's limit is applied by XToys
+    const log = fake.calls.filter((c) => c.path.endsWith('/logs/custom')).map((c) => c.body.description).join('\n');
+    expect(log).toMatch(/🎮 pulse 90 % for 30s \(toys – genitals\) → Bullet\./);
+    expect(log).toMatch(/😈 /);
+  });
+
+  it('without connected toys the action is skipped and logged', async () => {
+    const r = await postT('/api/checkin', { mainToken: 'wearer-token', fix: { lat: BAR.lat, lng: BAR.lng, accuracy: 10, timestamp: now.getTime() } });
+    expect(r.status).toBe(200);
+    expect(sent).toEqual([]);
+    const log = fake.calls.filter((c) => c.path.endsWith('/logs/custom')).map((c) => c.body.description).join('\n');
+    expect(log).toContain('🎮 Skipped (no toys connected)');
+  });
+
+  it('emergency stop: stops all toys, forgets the ID, applies the punishment, tells the keyholder; reconnecting works', async () => {
+    await connect();
+    await subscribe('kh-token');
+    ntfy.sent = [];
+    sent = [];
+    const v = (await (await postT('/api/toy/emergency-stop', { mainToken: 'wearer-token' })).json()) as any;
+    expect(sent).toEqual(['https://webhook.xtoys.app/SECRETHOOK1?action=lockation&cmd=stopAll']);
+    expect(db.rows('toys')).toEqual([]);
+    expect(v.toys).toMatchObject({ connected: false, emergencyStops: 1 });
+    expect(fake.calls.some((c) => c.body?.action?.name === 'add_time' && c.body?.action?.params === 7200)).toBe(true);
+    expect(ntfy.sent).toContainEqual(expect.objectContaining({ title: 'Lockation: toy emergency stop' }));
+    expect((await connect()).status).toBe(200);
+  });
+
+  it('emergency stop without consequences (optional): stops the toys, changes nothing on the lock', async () => {
+    fake.addSession('s1', { ...toyCfg, rules: { ...toyCfg.rules, toy: { enabled: true, onEmergencyStop: [] } } } as any);
+    await connect();
+    await subscribe('kh-token');
+    ntfy.sent = [];
+    sent = [];
+    const v = (await (await postT('/api/toy/emergency-stop', { mainToken: 'wearer-token' })).json()) as any;
+    expect(sent).toEqual(['https://webhook.xtoys.app/SECRETHOOK1?action=lockation&cmd=stopAll']);
+    expect(v.toys).toMatchObject({ connected: false, emergencyStops: 1, onEmergencyStop: 'nothing' });
+    expect(fake.calls.some((c) => c.path.endsWith('/action'))).toBe(false);
+    expect(ntfy.sent).toContainEqual(expect.objectContaining({ title: 'Lockation: toy emergency stop', message: expect.stringContaining('No consequences are set.') }));
+  });
+
+  it('session end stops the toys and deletes the ID', async () => {
+    await connect();
+    sent = [];
+    const auth = { Authorization: `Basic ${btoa('hook:secret')}` };
+    await handleRequest(
+      new Request('https://worker.test/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json', ...auth }, body: JSON.stringify({ event: 'extension_session.deleted', data: { session: { sessionId: 's1' } } }) }),
+      env,
+      { ...o(), toyFetch },
+    );
+    expect(sent).toEqual(['https://webhook.xtoys.app/SECRETHOOK1?action=lockation&cmd=stopAll']);
+    expect(db.rows('toys')).toEqual([]);
+  });
+});
+
+describe('toys: actions that keep running (F27 step 3)', () => {
+  const effCfg = {
+    ...config,
+    rules: {
+      ...config.rules,
+      forbidden: {
+        enabled: true,
+        firstWarningAfterMinutes: null,
+        firstPenaltyAfterMinutes: 0,
+        repeatEveryMinutes: 5,
+        onEnter: [
+          { type: 'toy', action: 'play', target: { bodyPart: 'anal' }, shape: 'wave', intensity: 30, keep: { until: 'leave' } },
+          { type: 'toy', action: 'intensity', target: { bodyPart: 'anal' }, delta: 10 },
+        ],
+      },
+      toy: { enabled: true, onEmergencyStop: [] },
+    },
+  };
+  const toys = [
+    { id: 'vibe', name: 'Bullet', type: 'vibrator', bodyPart: 'genitals' },
+    { id: 'plug', name: 'Plug', type: 'vibrator', bodyPart: 'anal' },
+  ];
+  let sent: string[];
+  const toyFetch = async (url: string) => {
+    sent.push(url);
+    return new Response('OK', { status: 200 });
+  };
+  const ov = () => ({ ...o(), toyFetch });
+  const postT = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+    handleRequest(new Request(`https://worker.test${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://user.github.io', ...headers }, body: JSON.stringify(body) }), env, ov());
+  const plays = () => sent.filter((u) => u.includes('cmd=play'));
+
+  beforeEach(() => {
+    sent = [];
+    fake.addSession('s1', effCfg as any);
+  });
+
+  it('keeps running until leaving, not stacked, 10 % stronger at every penalty, renewed by the cron, stopped on leaving', async () => {
+    expect((await postT('/api/toy/connect', { mainToken: 'wearer-token', webhookId: 'HOOK2', toys, disclaimerVersion: 2 })).status).toBe(200);
+    const p = (await (await postT('/api/tracking/pair', { mainToken: 'wearer-token' })).json()) as any;
+    await postT('/track/owntracks', loc(BAR, now), basic(p.username, p.password));
+    // penalty 1: the wave starts on the Plug (anal) only, already +10 %
+    expect(plays()).toHaveLength(1);
+    expect(plays()[0]).toContain('slot=part-vibrator-b');
+    expect(plays()[0]).toContain('shape=wave');
+    expect(plays()[0]).toContain('level=40');
+    expect(plays()[0]).toContain('seconds=300'); // ends by itself after the toy's maximum
+    let v = (await (await postT('/api/session', { mainToken: 'kh-token' })).json()) as any;
+    expect(v.toys.running).toEqual([expect.objectContaining({ toy: 'Plug', shape: 'wave', level: 40, label: 'until you leave "Bar"' })]);
+
+    // penalty 2 (cron): no second wave, but 10 % stronger – and it sticks
+    sent = [];
+    now = at(5.1);
+    await runCron(env, ov(), 40, { full: false });
+    expect(plays()).toHaveLength(1);
+    expect(plays()[0]).toContain('level=50');
+    v = (await (await postT('/api/session', { mainToken: 'kh-token' })).json()) as any;
+    expect(v.toys.running).toEqual([expect.objectContaining({ toy: 'Plug', level: 50 })]);
+
+    // renewed a minute before it ends, at the new level
+    sent = [];
+    now = at(9.2);
+    await runCron(env, ov(), 40, { full: false });
+    expect(plays().length).toBeGreaterThanOrEqual(1);
+    expect(plays().every((u) => /level=(50|60)/.test(u))).toBe(true);
+
+    sent = [];
+    now = at(9.5);
+    await postT('/track/owntracks', loc(HOME, now), basic(p.username, p.password));
+    expect(sent).toContain('https://webhook.xtoys.app/HOOK2?action=lockation&slot=part-vibrator-b&ch=all&cmd=stop');
+    v = (await (await postT('/api/session', { mainToken: 'kh-token' })).json()) as any;
+    expect(v.toys.running).toEqual([]);
+    const log = fake.calls.filter((c) => c.path.endsWith('/logs/custom')).map((c) => c.body.description).join('\n');
+    expect(log).toContain('🎮 Plug: wave 40 % until you leave "Bar".');
+    expect(log).toContain('🎮 Plug: wave 50 % until you leave "Bar".');
+    expect(log).toContain('🎮 Plug: stopped (until you leave "Bar").');
+  });
+
+  it('without connected toys the action waits and starts once the wearer connects (still inside)', async () => {
+    const p = (await (await postT('/api/tracking/pair', { mainToken: 'wearer-token' })).json()) as any;
+    await postT('/track/owntracks', loc(BAR, now), basic(p.username, p.password));
+    expect(sent).toEqual([]);
+    const log = fake.calls.filter((c) => c.path.endsWith('/logs/custom')).map((c) => c.body.description).join('\n');
+    expect(log).toContain('🎮 Waiting for toys (none connected)');
+    await postT('/api/toy/connect', { mainToken: 'wearer-token', webhookId: 'HOOK2', toys, disclaimerVersion: 2 });
+    expect(plays()).toHaveLength(1);
+    expect(plays()[0]).toContain('slot=part-vibrator-b');
+  });
+});

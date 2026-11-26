@@ -115,7 +115,8 @@ export async function deliverNotices(opts: {
     for (const n of notices.filter((x) => x.audience === 'keyholder')) {
       if (!n.kind || !switches[n.kind]) continue;
       if (!(await store.markSent(sessionId, `k:${n.key}`, now))) continue;
-      if (!(await store.markSent(sessionId, `rate:${n.kind}:${n.zoneId ?? ''}`, now, KEYHOLDER_RATE_MS))) continue;
+      // High-priority notices (e.g. a toy emergency stop) are never swallowed by the per-kind rate limit.
+      if (n.priority !== 'high' && !(await store.markSent(sessionId, `rate:${n.kind}:${n.zoneId ?? ''}`, now, KEYHOLDER_RATE_MS))) continue;
       lines.push(n);
     }
     if (lines.length === 1) await send('keyholder', { title: lines[0]!.title, message: lines[0]!.message, priority: lines[0]!.priority });

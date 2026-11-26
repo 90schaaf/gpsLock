@@ -76,8 +76,8 @@ export function ZonesTab({ config, edit, commands, reach, selected, setSelected 
                   Independent of the role – also for neutral zones. Leaving counts once the wearer is clearly outside (with background tracking at
                   once, otherwise at the next check-in outside).
                 </p>
-                <ConsequenceEditor label="When entering" value={z.actions.onEnter} commands={commands} onChange={(v) => edit((d) => { d.zones[i]!.actions.onEnter = v; })} />
-                <ConsequenceEditor label="When leaving" value={z.actions.onLeave} commands={commands} onChange={(v) => edit((d) => { d.zones[i]!.actions.onLeave = v; })} />
+                <ConsequenceEditor label="When entering" toyKeep={['leave']} value={z.actions.onEnter} commands={commands} onChange={(v) => edit((d) => { d.zones[i]!.actions.onEnter = v; })} />
+                <ConsequenceEditor label="When leaving" toyKeep={['return']} value={z.actions.onLeave} commands={commands} onChange={(v) => edit((d) => { d.zones[i]!.actions.onLeave = v; })} />
                 <div class="grid2">
                   <NumberField path={`zones.${i}.actions.minStayMinutes`} label="Leaving counts only after at least" suffix="minutes inside" min={0} value={z.actions.minStayMinutes} hint="E.g. 45 min at the gym before 'unfreeze'." onChange={(v) => edit((d) => { d.zones[i]!.actions.minStayMinutes = v ?? 0; })} />
                   <NumberField path={`zones.${i}.actions.cooldownMinutes`} label="Cooldown" suffix="minutes" min={0} value={z.actions.cooldownMinutes} hint="Minimum time between two runs of the same action." onChange={(v) => edit((d) => { d.zones[i]!.actions.cooldownMinutes = v ?? 0; })} />

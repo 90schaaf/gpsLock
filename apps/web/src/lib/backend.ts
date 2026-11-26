@@ -59,6 +59,14 @@ export interface Backend {
   missionAction(action: MissionAction): Promise<SessionView>;
   /** Surprise zones: keyholder releases the wearer from a hold. */
   surpriseAction(action: SurpriseAction): Promise<SessionView>;
+  /** F27 – wearer: connect the toys (Webhook ID + toy list + accepted toy disclaimer). */
+  toyConnect(input: { webhookId: string; toys: unknown[]; disclaimerVersion: number }): Promise<SessionView>;
+  /** Short test pulse on every connected toy. */
+  toyTest(): Promise<SessionView>;
+  /** The wearer confirms the toys reacted. */
+  toyConfirm(): Promise<SessionView>;
+  /** Emergency stop: stop and disconnect the toys (the keyholder's punishment applies). */
+  toyEmergencyStop(): Promise<SessionView>;
 }
 
 export class ApiError extends Error {
@@ -138,6 +146,18 @@ export class HttpBackend implements Backend {
   }
   async huntAction(action: HuntAction) {
     return this.post<SessionView>('/api/hunt', { ...this.main(), action });
+  }
+  async toyConnect(input: { webhookId: string; toys: unknown[]; disclaimerVersion: number }) {
+    return this.post<SessionView>('/api/toy/connect', { ...this.main(), ...input });
+  }
+  async toyTest() {
+    return this.post<SessionView>('/api/toy/test', this.main());
+  }
+  async toyConfirm() {
+    return this.post<SessionView>('/api/toy/confirm', this.main());
+  }
+  async toyEmergencyStop() {
+    return this.post<SessionView>('/api/toy/emergency-stop', this.main());
   }
   async surpriseAction(action: SurpriseAction) {
     return this.post<SessionView>('/api/surprise', { ...this.main(), action });

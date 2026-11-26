@@ -1,5 +1,6 @@
 /** Engine state, stored in Chaster session data under `lockation`. */
 import { z } from 'zod';
+import { KeptToyEffectSchema, MAX_TOYS, RunningToyEffectSchema, ToySchema } from './toys.js';
 import type { Consequence } from './consequences.js';
 import { type LockationConfig, zonesWithRole } from './config.js';
 import { adjustForQuietHours, isInQuietHours, MINUTE } from './time.js';
@@ -93,6 +94,20 @@ export const LockationStateSchema = z.object({
       failed: z.number().default(0),
       declined: z.number().default(0),
       last: z.object({ zoneId: z.string(), outcome: z.enum(['success', 'failed', 'declined', 'cancelled']), at: iso }).optional(),
+    })
+    .default({}),
+  /** F27 – connected toys (the Webhook ID is never stored here – only by the adapter). */
+  toy: z
+    .object({
+      connectedAt: iso.optional(),
+      verifiedAt: iso.optional(),
+      disclaimerVersion: z.number().int().optional(),
+      toys: z.array(ToySchema).max(MAX_TOYS).default([]),
+      emergencyStops: z.number().default(0),
+      /** Toy actions that keep running until their situation ends (by id). */
+      kept: z.record(KeptToyEffectSchema).default({}),
+      /** Effects running now, per toy channel (renewed before they end by themselves). */
+      running: z.record(RunningToyEffectSchema).default({}),
     })
     .default({}),
   /** F26 – surprise zones: visits, last outcome and a running hold (stay / keyholder release). */

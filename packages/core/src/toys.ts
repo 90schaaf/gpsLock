@@ -1,0 +1,474 @@
+/**
+ * F27 – toys via XToys: toy model, webhook commands and the generated Lockation XToys script (proxy).
+ *
+ * The script is generated from the wearer's toy list: one XToys output slot per toy, one webhook trigger (`lockation`)
+ * whose JavaScript dispatches each command to the slot / channel named in the request. Timed actions are non-looping
+ * patterns that end at 0, so a toy stops by itself even if no `stop` arrives (dead-man's switch on the toy side).
+ * Format reference: an official XToys script export (not in the repo) and the Bondage Club XToys integration script.
+ */
+import { z } from 'zod';
+import type { Consequence } from './consequences.js';
+
+export const TOY_TYPES = {
+  vibrator: { label: 'Vibrator (1 motor)', xtoys: 'part-vibrator', channels: ['main'], shock: false },
+  dual_vibrator: { label: 'Vibrator (2 motors)', xtoys: 'part-vibrator|part-vibrator', channels: ['A', 'B'], shock: false },
+  estim: { label: 'E-stim (2 channels)', xtoys: 'part-estim|part-estim', channels: ['A', 'B'], shock: true },
+  vibe_rotator: { label: 'Vibrator + rotator', xtoys: 'part-vibrator|part-rotator', channels: ['vibration', 'rotation'], shock: false },
+  rotator: { label: 'Rotator', xtoys: 'part-rotator', channels: ['main'], shock: false },
+} as const;
+export type ToyType = keyof typeof TOY_TYPES;
+export const TOY_TYPE_IDS = Object.keys(TOY_TYPES) as ToyType[];
+
+export const BODY_PARTS = ['genitals', 'anal', 'nipples', 'other'] as const;
+export type BodyPart = (typeof BODY_PARTS)[number];
+
+export const MAX_TOYS = 8;
+
+/** Which toys a toy action / effect addresses. */
+export const ToyTargetSchema = z.object({
+  bodyPart: z.enum([...BODY_PARTS, 'all'] as [string, ...string[]]),
+  toyType: z.enum(Object.keys(TOY_TYPES) as [ToyType, ...ToyType[]]).optional(),
+  channel: z.string().max(20).optional(),
+});
+export type ToyTarget = z.infer<typeof ToyTargetSchema>;
+
+/**
+ * Keep running (play only): `leave` – until the wearer leaves the zone (enter triggers); `return` – until back in the
+ * zone (leave triggers); `released` – until a surprise hold ends; `time` – for `minutes`. With the zone endings,
+ * `minutes` is an optional "at the latest after" cap.
+ */
+export const TOY_KEEP_UNTIL = ['leave', 'return', 'released', 'time'] as const;
+export type ToyKeepUntil = (typeof TOY_KEEP_UNTIL)[number];
+export const ToyKeepSchema = z.object({ until: z.enum(TOY_KEEP_UNTIL), minutes: z.number().int().min(1).max(1440).optional() });
+export type ToyKeep = z.infer<typeof ToyKeepSchema>;
+export const MAX_TOY_SECONDS = 3600;
+export const TOY_SHAPES = ['constant', 'pulse', 'wave', 'ramp'] as const;
+export type ToyShape = (typeof TOY_SHAPES)[number];
+
+/**
+ * Length of one self-ending pattern of a kept-running effect (renewed a minute before it ends). If Lockation stops
+ * renewing, the toy stops by itself after at most this long.
+ */
+export const TOY_EFFECT_SECONDS = 300;
+
+/**
+ * One toy of the wearer. Limits (maximum intensity) are set by the wearer in XToys itself – Lockation sends 0–100 %.
+ * Older setups with `maxIntensity` / `maxSeconds` still parse (unknown keys are dropped).
+ */
+export const ToySchema = z.object({
+  id: z.string().regex(/^[a-z0-9]{1,12}$/, 'lowercase letters and digits only'),
+  name: z.string().min(1).max(40),
+  type: z.enum(TOY_TYPE_IDS as [ToyType, ...ToyType[]]),
+  bodyPart: z.enum(BODY_PARTS),
+});
+export type Toy = z.infer<typeof ToySchema>;
+
+export const ToySetupSchema = z
+  .object({ version: z.literal(1).default(1), toys: z.array(ToySchema).max(MAX_TOYS).default([]) })
+  .superRefine((s, ctx) => {
+    const ids = new Set<string>();
+    s.toys.forEach((t, i) => {
+      if (ids.has(t.id)) ctx.addIssue({ code: 'custom', path: ['toys', i, 'id'], message: `duplicate toy id "${t.id}"` });
+      ids.add(t.id);
+    });
+  });
+export type ToySetup = z.infer<typeof ToySetupSchema>;
+
+/** A new toy of this type (body part to be chosen by the wearer). */
+export function defaultToy(type: ToyType, id: string, name: string = TOY_TYPES[type].label): Toy {
+  return { id, name, type, bodyPart: 'genitals' };
+}
+
+/** XToys channel key per toy, e.g. `part-estim|part-estim-a` (letters a–h per XToys type, in list order). */
+export function toySlots(setup: ToySetup): Record<string, string> {
+  const used: Record<string, number> = {};
+  const out: Record<string, string> = {};
+  for (const t of setup.toys) {
+    const x = TOY_TYPES[t.type].xtoys;
+    const n = used[x] ?? 0;
+    used[x] = n + 1;
+    out[t.id] = `${x}-${'abcdefgh'[n]}`;
+  }
+  return out;
+}
+
+// ---------- commands (Lockation → XToys webhook) ----------
+
+export type ToyCommandInput =
+  | { cmd: 'play'; shape: ToyShape; intensity: number; seconds: number; channel?: string }
+  | { cmd: 'intensity'; intensity?: number; delta?: number; channel?: string }
+  | { cmd: 'shock'; intensity: number; seconds: number; channel?: string }
+  | { cmd: 'stop'; channel?: string };
+
+/** Body of `POST https://webhook.xtoys.app/<webhookId>`. Values are strings (XToys trigger variables). */
+export type ToyWebhookBody = Record<string, string> & { action: 'lockation'; cmd: string };
+
+export class ToyCommandError extends Error {}
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.round(v)));
+
+/** XToys `actionChannel` for a channel name: "1" / "2" / "all". */
+function actionChannel(toy: Toy, channel: string | undefined): string {
+  const chans = TOY_TYPES[toy.type].channels as readonly string[];
+  if (!channel || channel === 'all' || chans.length === 1) return 'all';
+  const i = chans.indexOf(channel);
+  if (i < 0) throw new ToyCommandError(`"${toy.name}" has no channel ${channel}`);
+  return String(i + 1);
+}
+
+/** Build the webhook body for one command (0–100 %; the wearer's limits are applied by XToys). Throws `ToyCommandError` on invalid input. */
+export function toyCommand(setup: ToySetup, toyId: 'all' | string, input: ToyCommandInput): ToyWebhookBody {
+  if (toyId === 'all') {
+    if (input.cmd !== 'stop') throw new ToyCommandError('Only "stop" can address all toys at once.');
+    return { action: 'lockation', cmd: 'stopAll' };
+  }
+  const toy = setup.toys.find((t) => t.id === toyId);
+  if (!toy) throw new ToyCommandError(`Unknown toy "${toyId}".`);
+  const slot = toySlots(setup)[toy.id]!;
+  const ch = actionChannel(toy, input.channel);
+  const max = 100;
+  const base = { action: 'lockation' as const, slot, ch };
+  switch (input.cmd) {
+    case 'play':
+      return { ...base, cmd: 'play', shape: input.shape, level: String(clamp(input.intensity, 0, max)), seconds: String(clamp(input.seconds, 1, MAX_TOY_SECONDS)) };
+    case 'intensity':
+      if (input.intensity === undefined && input.delta === undefined) throw new ToyCommandError('Give an intensity or a change.');
+      return input.intensity !== undefined ? { ...base, cmd: 'intensity', level: String(clamp(input.intensity, 0, max)) } : { ...base, cmd: 'intensity', delta: String(clamp(input.delta!, -100, 100)) };
+    case 'shock':
+      if (!TOY_TYPES[toy.type].shock) throw new ToyCommandError(`"${toy.name}" cannot shock.`);
+      return { ...base, cmd: 'shock', level: String(clamp(input.intensity, 0, max)), seconds: String(clamp(input.seconds, 1, 10)) };
+    case 'stop':
+      return { ...base, cmd: 'stop' };
+  }
+}
+
+export const xtoysWebhookUrl = (webhookId: string) => `https://webhook.xtoys.app/${encodeURIComponent(webhookId.trim())}`;
+export const xtoysWebsocketUrl = (webhookId: string) => `wss://webhook.xtoys.app/${encodeURIComponent(webhookId.trim())}`;
+
+// ---------- the generated XToys script ----------
+
+/**
+ * The cloud webhook block (`webhook`, reached via https://webhook.xtoys.app/<id>). Not `local-webhook` – that one only
+ * listens on the phone's local network. Reference: the Bondage Club XToys integration's script.
+ */
+const WEBHOOK = 'webhook-a';
+
+/** Webhook keys passed into the JavaScript (XToys injects them via the action's `variables` list as `t_<key>`). */
+export const TOY_WEBHOOK_KEYS = ['cmd', 'slot', 'ch', 'shape', 'level', 'delta', 'seconds'] as const;
+const injected = (keys: readonly string[]) => keys.map((k) => ({ name: `t_${k}`, value: `trigger-${k}`, expression: null }));
+
+/**
+ * ES5 JavaScript of the `lockation` webhook trigger (runs inside XToys' JS interpreter). `SLOTS` is injected:
+ * slot → { channels }. Levels are remembered per slot / channel for relative changes. Limits are the wearer's XToys settings.
+ */
+function proxyCode(slots: Record<string, { channels: number }>): string {
+  return `// Lockation proxy – generated, do not edit (re-download it from the Lockation toy page instead).
+var SLOTS = ${JSON.stringify(slots)};
+var TV = { ${TOY_WEBHOOK_KEYS.map((k) => `${k}: typeof t_${k} === 'undefined' ? undefined : t_${k}`).join(', ')} };
+// A key that was not sent may arrive empty or as the unresolved name ("trigger-delta" / "{trigger-delta}").
+function tv(k, d) { var v = TV[k]; if (v === undefined || v === null) return d; v = String(v); return (v === '' || v.indexOf('trigger-') >= 0) ? d : v; }
+function num(v, d) { var n = Number(v); return isNaN(n) ? d : n; }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, Math.round(v))); }
+function chans(s, ch) { var out = []; if (ch === 'all') { for (var i = 1; i <= SLOTS[s].channels; i++) out.push(String(i)); } else out.push(ch); return out; }
+function level(s, c) { return num(getVariable('lv-' + s + '-' + c), 0); }
+function setLevel(s, c, v) {
+  setVariable('lv-' + s + '-' + c, String(v));
+  callAction({ type: 'updateComponent', channel: s, action: 'setVolume', actionChannel: SLOTS[s].channels > 1 ? c : 'all', rampTime: '0', percentVolume: String(v) });
+}
+function points(shape, seconds, from) {
+  var ms = seconds * 1000, p = [], t;
+  if (shape === 'pulse') { for (t = 0; t < ms; t += 1000) { p.push({ at: t, pos: 100 }); p.push({ at: Math.min(ms, t + 499), pos: 100 }); p.push({ at: Math.min(ms, t + 500), pos: 0 }); p.push({ at: Math.min(ms, t + 999), pos: 0 }); } }
+  else if (shape === 'wave') { for (t = 0; t < ms; t += 100) p.push({ at: t, pos: Math.round(50 + 50 * Math.sin((t / 2000) * 2 * Math.PI - Math.PI / 2)) }); }
+  else if (shape === 'ramp') { p.push({ at: 0, pos: from }); p.push({ at: ms - 1, pos: 100 }); }
+  else { p.push({ at: 0, pos: 100 }); p.push({ at: ms - 1, pos: 100 }); }
+  p.push({ at: ms, pos: 0 });
+  return p;
+}
+function play(s, c, shape, lv, seconds) {
+  var from = 0;
+  if (shape === 'ramp') { var cur = level(s, c); from = lv > 0 ? clamp(cur / lv * 100, 0, 100) : 0; }
+  setLevel(s, c, lv);
+  var id = 'lockation-' + s + '-' + c + '-' + shape;
+  var data = { '1': points(shape, seconds, from) };
+  callAction({ type: 'updateComponent', channel: s, action: 'setPattern', actionChannel: SLOTS[s].channels > 1 ? c : 'all', patternAction: 'specific',
+    pattern: { loop: false, length: String(seconds), id: id, name: 'Lockation ' + shape, channels: 1, type: 'draw', patternData: { loop: false, channels: 1, channelData: data } },
+    patternControls: { id: id } });
+}
+// Debug: the script's text shows what happened (or the JavaScript error) – visible on the XToys script screen.
+function status(msg) { callAction({ type: 'updateScript', action: 'setText', text: 'Lockation: ' + msg }); }
+var cmd = String(tv('cmd', ''));
+var slot = String(tv('slot', ''));
+var ch = String(tv('ch', 'all'));
+try {
+  if (cmd === 'stopAll') {
+    for (var s in SLOTS) { var cs = chans(s, 'all'); for (var i = 0; i < cs.length; i++) setLevel(s, cs[i], 0); }
+    status('stop all');
+  } else if (SLOTS[slot]) {
+    var list = chans(slot, ch);
+    for (var j = 0; j < list.length; j++) {
+      var c = list[j], max = 100;
+      if (cmd === 'play') play(slot, c, String(tv('shape', 'constant')), clamp(num(tv('level', 0), 0), 0, max), clamp(num(tv('seconds', 10), 10), 1, ${MAX_TOY_SECONDS}));
+      else if (cmd === 'intensity') {
+        var d = tv('delta', null);
+        setLevel(slot, c, clamp(d === null ? num(tv('level', 0), 0) : level(slot, c) + num(d, 0), 0, max));
+      } else if (cmd === 'shock') callAction({ type: 'updateComponent', channel: slot, action: 'setShock2', actionChannel: c, percentVolume: String(clamp(num(tv('level', 0), 0), 0, max)), time: String(clamp(num(tv('seconds', 1), 1), 1, 10)), shock: true });
+      else if (cmd === 'stop') setLevel(slot, c, 0);
+    }
+    status(cmd + ' ' + slot + ' ch ' + ch + ' level ' + tv('level', '-') + ' delta ' + tv('delta', '-') + ' ' + tv('shape', '') + ' ' + tv('seconds', '') + 's');
+  } else status('unknown slot "' + slot + '" (cmd "' + cmd + '") – download the script again after changing the toys');
+} catch (e) {
+  status('ERROR in ' + cmd + ': ' + (e && e.message ? e.message : String(e)));
+}
+`;
+}
+
+/** Reports the connected toys per slot back over the webhook (outbound, WebSocket only). */
+function getToysCode(slotNames: string[]): string {
+  return `var blocks = getConnectedBlocks();
+var names = ${JSON.stringify(slotNames)};
+var out = {};
+for (var i = 0; i < names.length; i++) {
+  var raw = blocks[names[i]] || [];
+  out[names[i]] = [];
+  for (var j = 0; j < raw.length; j++) out[names[i]].push({ name: raw[j].blockName, channel: raw[j].channelName });
+}
+callAction({ type: 'updateComponent', channel: '${WEBHOOK}', action: 'send', format: 'raw', webhookAction: 'getToys', webhookData: out });
+`;
+}
+
+/** The complete XToys script (export format) for this toy setup. */
+export function buildXToysScript(setup: ToySetup) {
+  const slots = toySlots(setup);
+  const meta: Record<string, { channels: number }> = {};
+  const channels: Record<string, unknown> = { [WEBHOOK]: { type: 'webhook', outbound: true, hideWebhookInfo: false } };
+  const initialActions: unknown[] = [];
+  for (const t of setup.toys) {
+    const slot = slots[t.id]!;
+    const n = TOY_TYPES[t.type].channels.length;
+    meta[slot] = { channels: n };
+    channels[slot] = { type: TOY_TYPES[t.type].xtoys, name: `${t.name} (${t.bodyPart})` };
+    // A quiet start (the limits are the wearer's own XToys settings).
+    for (let i = 0; i < n; i++) initialActions.push({ type: 'updateComponent', channel: slot, action: 'setVolume', actionChannel: n > 1 ? String(i + 1) : 'all', rampTime: '0', percentVolume: '0' });
+  }
+  const stopAll = Object.keys(meta).flatMap((slot) =>
+    Array.from({ length: meta[slot]!.channels }, (_, i) => ({ type: 'updateComponent', channel: slot, action: 'setVolume', actionChannel: meta[slot]!.channels > 1 ? String(i + 1) : 'all', rampTime: '0', percentVolume: '0' })),
+  );
+  return {
+    initialActions,
+    finalActions: stopAll,
+    globalTriggers: [
+      {
+        type: 'componentState',
+        action: 'lockation',
+        channel: WEBHOOK,
+        parsedAction: 'lockation',
+        actions: [
+          // Shown first and without JavaScript: proves the call arrived and which values XToys passed on.
+          { type: 'updateScript', action: 'setText', text: 'Lockation received: {trigger-cmd} {trigger-slot} ch {trigger-ch} level {trigger-level}' },
+          { type: 'customCode', code: proxyCode(meta), resultVar: 'result', variables: injected(TOY_WEBHOOK_KEYS), storeResult: false },
+        ],
+      },
+      { type: 'componentState', action: 'getToys', channel: WEBHOOK, parsedAction: 'getToys', actions: [{ type: 'customCode', code: getToysCode(Object.keys(meta)), resultVar: 'result', variables: [], storeResult: false }] },
+    ],
+    jobs: { Main: { steps: { START: { actions: [] } } } },
+    queues: [],
+    channels,
+    controls: [],
+    controlPresets: [],
+    media: { patterns: {}, audio: {}, voices: {} },
+    customFunctions: '',
+  };
+}
+
+// ---------- toy disclaimer (F27) ----------
+
+/** Bump to ask every wearer again. */
+export const TOY_DISCLAIMER_VERSION = 2;
+
+/** Shown before connecting toys (toy test page and, later, in a lock). */
+export const TOY_DISCLAIMER: readonly string[] = [
+  'Lockation can start your toys at any time while they are connected – also in public, at work, on a train or in a car. Where you are is your responsibility.',
+  'Never use connected toys while driving, cycling or operating machinery. There is no automatic pause.',
+  'E-stim: never place electrodes across the chest or heart, or above the neck; follow the instructions of your device. Do not use it with a pacemaker or heart condition.',
+  'Set your limits (maximum intensity) for each toy in XToys – Lockation sends up to 100 % and as long as the rules say. Choose them carefully before you connect.',
+  'Lockation cannot confirm that a toy reacted. XToys must be running with your toys connected. XToys is a third-party service.',
+  'Only adults, only with consent. Stop immediately if anything hurts or feels wrong – your health comes before any rule.',
+];
+
+// ---------- toy consequences (F27 step 2) ----------
+
+export type ToyConsequence = Extract<Consequence, { type: 'toy' }>;
+
+/** The webhook commands for one toy consequence: one per matching connected toy. */
+export function resolveToyConsequence(toys: Toy[], c: ToyConsequence): { toy: Toy; body: ToyWebhookBody }[] {
+  const setup: ToySetup = { version: 1, toys };
+  const out: { toy: Toy; body: ToyWebhookBody }[] = [];
+  for (const toy of toys) {
+    if (c.target.bodyPart !== 'all' && toy.bodyPart !== c.target.bodyPart) continue;
+    if (c.target.toyType && toy.type !== c.target.toyType) continue;
+    const chans = TOY_TYPES[toy.type].channels as readonly string[];
+    if (c.target.channel && chans.length > 1 && !chans.includes(c.target.channel)) continue;
+    if (c.action === 'shock' && !TOY_TYPES[toy.type].shock) continue;
+    const channel = c.target.channel && chans.length > 1 ? c.target.channel : undefined;
+    const input: ToyCommandInput =
+      c.action === 'play'
+        ? { cmd: 'play', shape: c.shape ?? 'pulse', intensity: c.intensity ?? 50, seconds: c.seconds ?? 30, channel }
+        : c.action === 'intensity'
+          ? c.delta !== undefined
+            ? { cmd: 'intensity', delta: c.delta, channel }
+            : { cmd: 'intensity', intensity: c.intensity ?? 50, channel }
+          : c.action === 'shock'
+            ? { cmd: 'shock', intensity: c.intensity ?? 30, seconds: c.seconds ?? 1, channel }
+            : { cmd: 'stop', channel };
+    out.push({ toy, body: toyCommand(setup, toy.id, input) });
+  }
+  return out;
+}
+
+/** A cheeky line for the lock log (picked from the idempotency key, so retries show the same one). */
+export const TOY_COMMENTS: readonly string[] = [
+  'Buzz buzz – the rules say hello.',
+  'Feel that? That is the map talking.',
+  'A little reminder of who is in charge.',
+  'Somebody has been a little too adventurous …',
+  'That should keep you focused.',
+  'Good things come to those who obey – this is not one of them.',
+  'Location noted. Pleasure – or punishment – delivered.',
+  'Every step counts. So does every buzz.',
+];
+
+export function toyComment(key: string): string {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return TOY_COMMENTS[h % TOY_COMMENTS.length]!;
+}
+
+// ---------- continuous effects (F27 step 3: toy actions that keep running) ----------
+
+/** A toy effect that runs as long as its condition holds. */
+export interface ToyEffect {
+  target: ToyTarget;
+  shape: ToyShape;
+  intensity: number;
+}
+
+/** A toy action that keeps running until its situation ends (state `toy.kept`). `level` follows intensity changes. */
+export const KeptToyEffectSchema = z.object({
+  label: z.string(),
+  target: ToyTargetSchema,
+  shape: z.enum(TOY_SHAPES),
+  level: z.number().int().min(0).max(100),
+  until: z.enum(TOY_KEEP_UNTIL),
+  zoneIds: z.array(z.string()).default([]),
+  /** `released`: the surprise hold this effect belongs to (its `since`). */
+  holdSince: z.string().optional(),
+  startedAt: z.string(),
+  endsAt: z.string().optional(),
+});
+export type KeptToyEffect = z.infer<typeof KeptToyEffectSchema>;
+
+/** Do two targets address at least one common toy channel (independent of the connected toys)? */
+export function targetsOverlap(a: ToyTarget, b: ToyTarget): boolean {
+  const eq = (x: string | undefined, y: string | undefined) => !x || !y || x === y;
+  return (a.bodyPart === 'all' || b.bodyPart === 'all' || a.bodyPart === b.bodyPart) && eq(a.toyType, b.toyType) && eq(a.channel, b.channel);
+}
+
+/** What should run right now: one entry per condition that holds. */
+export interface DesiredToyEffect {
+  /** Stable id of the condition (the `toy.kept` key). */
+  source: string;
+  /** Human readable, e.g. `until you leave "Casino"`. */
+  label: string;
+  effect: ToyEffect;
+}
+
+/** One running effect per toy channel (`<toyId>:<channel | all>`). Stored in the state. */
+export interface RunningToyEffect {
+  source: string;
+  label: string;
+  shape: ToyShape;
+  level: number;
+  /** When the current (self-ending) pattern was sent and when it must be renewed. */
+  sentAt: string;
+  refreshAt: string;
+  /** A one-off action took the toy over; send the effect again at this time. */
+  resumeAt?: string;
+}
+
+export const RunningToyEffectSchema = z.object({
+  source: z.string(),
+  label: z.string(),
+  shape: z.enum(TOY_SHAPES),
+  level: z.number(),
+  sentAt: z.string(),
+  refreshAt: z.string(),
+  resumeAt: z.string().optional(),
+});
+
+/** Renew a self-ending pattern a minute before it ends (the cron runs every minute), at least halfway through. */
+export function refreshAfterMs(seconds: number): number {
+  return Math.max(seconds * 500, (seconds - 60) * 1000);
+}
+
+/**
+ * Compare what should run with what runs: start / renew / replace effects and stop the ones whose condition ended.
+ * The highest intensity wins per toy channel. Pure – the caller sends `commands` and stores `running`.
+ */
+export function reconcileToyEffects(
+  toys: Toy[],
+  desired: DesiredToyEffect[],
+  running: Record<string, RunningToyEffect>,
+  now: Date,
+): { commands: { toy: Toy; body: ToyWebhookBody }[]; running: Record<string, RunningToyEffect> } {
+  const setup: ToySetup = { version: 1, toys };
+  const want: Record<string, { toy: Toy; channel?: string; d: DesiredToyEffect; level: number }> = {};
+  for (const d of desired) {
+    for (const toy of toys) {
+      const e = d.effect;
+      if (e.target.bodyPart !== 'all' && toy.bodyPart !== e.target.bodyPart) continue;
+      if (e.target.toyType && toy.type !== e.target.toyType) continue;
+      const chans = TOY_TYPES[toy.type].channels as readonly string[];
+      if (e.target.channel && chans.length > 1 && !chans.includes(e.target.channel)) continue;
+      const channel = e.target.channel && chans.length > 1 ? e.target.channel : undefined;
+      const key = `${toy.id}:${channel ?? 'all'}`;
+      if (!want[key] || e.intensity > want[key]!.level) want[key] = { toy, channel, d, level: e.intensity };
+    }
+  }
+  const t = now.getTime();
+  const commands: { toy: Toy; body: ToyWebhookBody }[] = [];
+  const next: Record<string, RunningToyEffect> = {};
+  for (const [key, w] of Object.entries(want)) {
+    const cur = running[key];
+    const seconds = TOY_EFFECT_SECONDS;
+    const body = toyCommand(setup, w.toy.id, { cmd: 'play', shape: w.d.effect.shape, intensity: w.level, seconds, channel: w.channel });
+    const level = Number(body.level); // what is sent (0–100 %)
+    const same = cur && cur.source === w.d.source && cur.level === level && cur.shape === w.d.effect.shape;
+    if (same && cur.resumeAt && t < Date.parse(cur.resumeAt)) {
+      next[key] = cur; // a one-off action is playing – resume afterwards
+      continue;
+    }
+    if (same && !cur.resumeAt && t < Date.parse(cur.refreshAt)) {
+      next[key] = cur;
+      continue;
+    }
+    commands.push({ toy: w.toy, body });
+    next[key] = { source: w.d.source, label: w.d.label, shape: w.d.effect.shape, level, sentAt: now.toISOString(), refreshAt: new Date(t + refreshAfterMs(seconds)).toISOString() };
+  }
+  for (const key of Object.keys(running)) {
+    if (next[key]) continue;
+    const [toyId, ch] = key.split(':');
+    const toy = toys.find((x) => x.id === toyId);
+    if (toy) commands.push({ toy, body: toyCommand(setup, toy.id, { cmd: 'stop', channel: ch === 'all' ? undefined : ch }) });
+  }
+  return { commands, running: next };
+}
+
+/** A one-off `play` took these toys over for `seconds`: their running effects resume afterwards. */
+export function pauseToyEffects(running: Record<string, RunningToyEffect>, toyIds: string[], until: Date): Record<string, RunningToyEffect> {
+  const out: Record<string, RunningToyEffect> = {};
+  for (const [key, r] of Object.entries(running)) {
+    const resume = toyIds.includes(key.split(':')[0]!) ? until.toISOString() : r.resumeAt;
+    out[key] = resume && (!r.resumeAt || resume > r.resumeAt) ? { ...r, resumeAt: resume } : r;
+  }
+  return out;
+}

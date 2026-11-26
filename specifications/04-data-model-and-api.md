@@ -119,6 +119,21 @@ Missing or corrupt state is replaced by a fresh initial state.
 | `lastPosition` | wearer always (approximate in zone-only mode); keyholder only with exact sharing |
 | `presentZones`, `travel`, `freezeUntil`, `rulesChanged`, `notifications {available, subscribed}`, `stats`, `history` | |
 
+## Toy control (F27)
+
+- Config: `rules.toy {enabled, onEmergencyStop: Consequence[]}`, consequence `{type: "toy", action: "play" | "intensity" |
+  "shock" | "stop", target: {bodyPart: "genitals" | "anal" | "nipples" | "other" | "all", toyType?, channel?}, shape?:
+  "constant" | "pulse" | "wave" | "ramp", intensity?, delta?, seconds?, keep?: {until: "leave" | "return" | "released" |
+  "time", minutes?}}` (`keep` only with `play`).
+- Toy: `{id, name, type: "estim" | "vibrator" | "dual_vibrator" | "vibe_rotator" | "rotator", bodyPart}` (limits are set in XToys); channels per type: estim `A, B` · vibrator `main` · dual_vibrator `A, B` ·
+  vibe_rotator `vibration, rotation` · rotator `main`.
+- State: `toy {connectedAt?, verifiedAt?, disclaimerVersion?, toys: Toy[], kept: {[id]: {label, target, shape, level, until,
+  zoneIds, holdSince?, startedAt, endsAt?}}, running: {[toyId:channel]: {source, label, shape, level, sentAt, refreshAt,
+  resumeAt?}}, emergencyStops}` – the Webhook ID is **not** in the state.
+- D1 `toys`: `session_id` (PK), `webhook_id`, `created_at` – deleted on disconnect and on session end.
+- API: `/api/toy/connect {mainToken, webhookId, toys, disclaimerVersion}` (wearer), `/api/toy/test {mainToken}`,
+  `/api/toy/confirm {mainToken}`, `/api/toy/emergency-stop {mainToken}` (wearer; applies `onEmergencyStop`). The toy test page talks to XToys directly (no worker endpoint).
+
 ## Worker HTTP API
 
 All `/api/*` endpoints: `POST`, JSON, CORS restricted. Errors: `{error: {code, message, details?}}` with status
@@ -139,6 +154,10 @@ All `/api/*` endpoints: `POST`, JSON, CORS restricted. Errors: `{error: {code, m
 | `/api/notify/stop` | `{mainToken}` | `SessionView` |
 | `/api/notice/ack` | `{mainToken}` (wearer) | `SessionView` (clears `rulesChanged`) |
 | `/api/hunt` | `{mainToken, action: "start" \| "pause" \| "resume" \| "abort"}` | `SessionView`; 403 `hunt_action_not_allowed` |
+| `/api/toy/connect` | `{mainToken, webhookId, toys, disclaimerVersion}` (wearer) | `SessionView`; 400 `toy_disclaimer` / `invalid_webhook` / `invalid_toys`, 409 `toys_disabled` |
+| `/api/toy/test` | `{mainToken}` (wearer) | `SessionView`; 502 `toy_send_failed` |
+| `/api/toy/confirm` | `{mainToken}` (wearer) | `SessionView` |
+| `/api/toy/emergency-stop` | `{mainToken}` (wearer) | `SessionView` (stop all, ID deleted, `onEmergencyStop` applied) |
 | `/api/surprise` | `{mainToken, action: {type: "release", zoneId}}` (keyholder) | `SessionView`; 403 `surprise_action_not_allowed` |
 | `/api/mission` | `{mainToken, action: {type: "send", zoneId, minutes?} \| {type: "decline"} \| {type: "cancel"}}` | `SessionView`; 403 `mission_action_not_allowed` |
 | `/track/owntracks` | OwnTracks message, Basic auth with device credentials | `[]`, `setWaypoints` and/or `setConfiguration` commands; 401 on wrong credentials |

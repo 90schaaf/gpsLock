@@ -26,6 +26,7 @@ export default defineConfig({
             { text: 'Checking in', link: '/guide/checking-in' },
             { text: 'Background tracking', link: '/guide/background-tracking' },
             { text: 'Notifications', link: '/guide/notifications' },
+            { text: 'Toys (XToys)', link: '/guide/toys' },
             { text: 'Configuring a lock', link: '/guide/configuration' },
             { text: 'Rules explained', link: '/guide/rules' },
             { text: 'Privacy & fairness', link: '/guide/privacy' },

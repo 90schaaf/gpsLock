@@ -18,6 +18,10 @@ Errors: `{ "error": { "code", "message", "details"? } }`.
 | `/api/notify/stop` | `{ mainToken }` | `SessionView` |
 | `/api/notify/test` | `{ mainToken }` | `{ ok: true }` – test message to the own channel; 409 if not subscribed |
 | `/api/hunt` | `{ mainToken, action: "start" \| "pause" \| "resume" \| "abort" }` | `SessionView`; 403 `hunt_action_not_allowed` |
+| `/api/toy/connect` | `{ mainToken, webhookId, toys, disclaimerVersion }` (wearer) | `SessionView`; 400 `toy_disclaimer` / `invalid_webhook` / `invalid_toys`, 409 `toys_disabled` |
+| `/api/toy/test` | `{ mainToken }` (wearer) | `SessionView`; 502 `toy_send_failed` |
+| `/api/toy/confirm` | `{ mainToken }` (wearer) | `SessionView` |
+| `/api/toy/emergency-stop` | `{ mainToken }` (wearer) | `SessionView` |
 | `/api/surprise` | `{ mainToken, action: { type: "release", zoneId } }` (keyholder) | `SessionView`; 403 `surprise_action_not_allowed` |
 | `/api/mission` | `{ mainToken, action: { type: "send", zoneId, minutes? } \| { type: "decline" } \| { type: "cancel" } }` | `SessionView`; 403 `mission_action_not_allowed` |
 | `/api/notice/ack` | `{ mainToken }` (wearer) | `SessionView` – clears the "rules changed" notice |

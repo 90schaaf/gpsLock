@@ -21,6 +21,7 @@ import {
   parseConfig,
   parseConfigOrDefault,
 } from '@lockation/core';
+import { sendToXToys } from './xtoys.js';
 import { ApiError, type Backend, type NotificationSetup, type PairingResult } from './backend.js';
 
 type Role = 'wearer' | 'keyholder';
@@ -33,6 +34,10 @@ export interface DemoStore {
   role: Role;
   /** Fake ntfy topics per role. */
   notify?: Partial<Record<Role, string>>;
+  /** F27 – the wearer's XToys Webhook ID (demo: kept in this browser). */
+  toyWebhook?: string;
+  /** Demo: really send toy actions to the wearer's toys. */
+  toyReal?: boolean;
 }
 
 const KEY = 'lockation-demo-v1';
@@ -67,7 +72,22 @@ export function demoConfig(center = { lat: 47.3769, lng: 8.5417 }): LockationCon
         matchMode: 'strict',
         forbidden: { windows: [{ start: '20:00', end: '02:00' }], onEnter: [{ type: 'pillory', durationMinutes: 30, reason: 'Visited the bar' }] },
       },
-      { id: 'casino', name: 'Casino', ...off(-0.004, 0.009), radiusM: 100, roles: ['forbidden'], matchMode: 'strict' },
+      {
+        id: 'casino',
+        name: 'Casino',
+        ...off(-0.004, 0.009),
+        radiusM: 100,
+        roles: ['forbidden'],
+        matchMode: 'strict',
+        // Toys: a pulse at every penalty, a wave that keeps running until leaving – 10 % stronger at every further penalty.
+        forbidden: {
+          onEnter: [
+            { type: 'toy', action: 'play', target: { bodyPart: 'all' }, shape: 'pulse', intensity: 60, seconds: 30 },
+            { type: 'toy', action: 'play', target: { bodyPart: 'all' }, shape: 'wave', intensity: 30, keep: { until: 'leave' } },
+            { type: 'toy', action: 'intensity', target: { bodyPart: 'all' }, delta: 10, when: { everyNth: 2 } },
+          ],
+        },
+      },
       {
         id: 'park',
         name: 'Mystery park',
@@ -101,6 +121,7 @@ export function demoConfig(center = { lat: 47.3769, lng: 8.5417 }): LockationCon
       },
       reward: { enabled: true, maxPerDay: 1, onEnter: [{ type: 'remove_time', seconds: 1800 }] },
       surprise: { enabled: true },
+      toy: { enabled: true, onEmergencyStop: [{ type: 'add_time', seconds: 7200 }] },
       travel: { enabled: true, stepKm: 1, onStep: [{ type: 'remove_time', seconds: 300 }] },
       hunt: {
         enabled: true,
@@ -150,6 +171,20 @@ export class MockBackend implements Backend {
       },
       async applyConsequences(_d, list) {
         return list.map(() => ({ ok: true }));
+      },
+      toys: {
+        async getWebhookId(d) {
+          return d.store.toyWebhook;
+        },
+        async setWebhookId(d, id) {
+          d.store.toyWebhook = id ?? undefined;
+          self.save(d.store);
+        },
+        async send(d, webhookId, body) {
+          // Demo: only sent for real when the wearer switched it on – otherwise just shown in the log.
+          if (!d.store.toyReal) return;
+          await sendToXToys(webhookId, body);
+        },
       },
       async log(d, entry) {
         self.log(d.store, entry.title, entry.description);
@@ -328,6 +363,44 @@ export class MockBackend implements Backend {
       const d = await this.session_();
       return this.app.huntAction(d, d.store.role, action);
     });
+  }
+
+  async toyConnect(input: { webhookId: string; toys: unknown[]; disclaimerVersion: number }) {
+    return this.run(async () => {
+      const d = await this.session_();
+      return this.app.toyConnect(d, d.store.role, input);
+    });
+  }
+
+  async toyTest() {
+    return this.run(async () => {
+      const d = await this.session_();
+      return this.app.toyTest(d, d.store.role);
+    });
+  }
+
+  async toyConfirm() {
+    return this.run(async () => {
+      const d = await this.session_();
+      return this.app.toyConfirm(d, d.store.role);
+    });
+  }
+
+  async toyEmergencyStop() {
+    return this.run(async () => {
+      const d = await this.session_();
+      return this.app.toyEmergencyStop(d, d.store.role);
+    });
+  }
+
+  /** Demo: send toy actions to the wearer's real toys (off by default). */
+  get toyReal(): boolean {
+    return !!this.load().toyReal;
+  }
+  set toyReal(on: boolean) {
+    const s = this.load();
+    s.toyReal = on;
+    this.save(s);
   }
 
   async surpriseAction(action: SurpriseAction) {

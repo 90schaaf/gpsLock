@@ -13,7 +13,7 @@ export function RewardTab({ config, edit, editZone, commands, selected, setTab }
         <NumberField label="Max rewards per day – all zones" min={1} value={R.reward.maxPerDay} onChange={(v) => edit((d) => { d.rules.reward.maxPerDay = v ?? 1; })} />
         <NumberField label="Minimum stay (default)" suffix="minutes, 0 = immediately" min={0} value={R.reward.dwellMinutes} onChange={(v) => edit((d) => { d.rules.reward.dwellMinutes = v ?? 0; })} />
       </div>
-      <ConsequenceEditor label="Reward (all reward zones)" value={R.reward.onEnter} commands={commands} onChange={(v) => edit((d) => { d.rules.reward.onEnter = v; })} />
+      <ConsequenceEditor label="Reward (all reward zones)" toyKeep={['leave']} value={R.reward.onEnter} commands={commands} onChange={(v) => edit((d) => { d.rules.reward.onEnter = v; })} />
       <h3>Reward zones</h3>
       {zones.length === 0 && <NoZonesHint role="reward" setTab={setTab} />}
       {zones.map((z) => (
@@ -28,7 +28,7 @@ export function RewardTab({ config, edit, editZone, commands, selected, setTab }
               <OverrideField label="Max per day" min={1} value={z.reward.maxPerDay} inherited={R.reward.maxPerDay} onChange={(v) => editZone(z.id, (x) => { x.reward.maxPerDay = v; })} />
               <OverrideField label="Minimum stay" suffix="minutes" min={0} value={z.reward.dwellMinutes} inherited={R.reward.dwellMinutes} format={fmtMinutes} onChange={(v) => editZone(z.id, (x) => { x.reward.dwellMinutes = v; })} />
             </div>
-            <ConsequenceEditor label={`Extra reward in ${z.name}`} value={z.reward.onEnter} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.reward.onEnter = v; })} />
+            <ConsequenceEditor label={`Extra reward in ${z.name}`} toyKeep={['leave']} value={z.reward.onEnter} commands={commands} onChange={(v) => editZone(z.id, (x) => { x.reward.onEnter = v; })} />
           </div>
         </details>
       ))}

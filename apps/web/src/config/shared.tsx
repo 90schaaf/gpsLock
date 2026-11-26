@@ -8,17 +8,18 @@ import type { Tab } from './issues.js';
 export type { Tab };
 
 export const TABS: { id: Tab; label: string }[] = [
-  { id: 'zones', label: '🗺 Zones' },
-  { id: 'required', label: '⏱ Required' },
+  { id: 'zones', label: '🗺️ Zones' },
+  { id: 'required', label: '⏱️ Required' },
   { id: 'surprise', label: '🎁 Surprise' },
   { id: 'forbidden', label: '⛔ Forbidden' },
   { id: 'reward', label: '🏆 Reward' },
   { id: 'travel', label: '🚶 Travel' },
   { id: 'hunt', label: '🧭 Hunt' },
   { id: 'mission', label: '🎯 Missions' },
+  { id: 'toy', label: '🎮 Toys' },
   { id: 'tracking', label: '📡 Tracking' },
   { id: 'notify', label: '🔔 Notifications' },
-  { id: 'anticheat', label: '🛡 Anti-cheat' },
+  { id: 'anticheat', label: '🛡️ Anti-cheat' },
   { id: 'privacy', label: '🔒 Privacy' },
   { id: 'file', label: '💾 Import / Export' },
 ];

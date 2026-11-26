@@ -1,7 +1,39 @@
 # Changelog
 
+## 2026-11-26
+
+- **Toy limits in XToys (F27):** the toy setup no longer has `maxIntensity` / `maxSeconds`; the generated script has no
+  caps (`setMaximum` removed) – the wearer sets the limits in XToys. Lockation sends 0–100 %, the rule's duration (≤ 3600 s,
+  shock ≤ 10 s); kept-running effects use 300 s patterns. Toy safety notes v2. Older setups still load (limits dropped).
+- **Config tabs:** the 🗺️ / ⏱️ / 🛡️ tab icons get the emoji variation selector, so they show as icons everywhere.
+- **Toy actions that keep running (F27):** replaces zone `toy.whileInside` and `rules.toy.whileOutsideRequired`. A `play`
+  toy consequence takes `keep {until: leave | return | released | time, minutes?}` – the editor offers the endings that
+  fit the trigger; state `toy.kept`; no stacking; intensity changes stick until the effect ends ("stronger at every
+  penalty"); `stop` ends kept effects; emergency stop clears them.
+- **Toy emergency stop: consequences optional (F27):** `rules.toy.onEmergencyStop` may be empty; the wearer's card, the
+  rule summary and the keyholder notice then say that it has no consequences.
+- **Toy types vibrator + rotator and rotator (F27):** XToys types `part-vibrator|part-rotator` (channels vibration,
+  rotation) and `part-rotator` (one channel).
+
 ## 2026-11-25
 
+- **Toy effects while inside (F27, step 3):** zone `toy.whileInside` and `rules.toy.whileOutsideRequired` (need background
+  tracking); reconciled after every evaluation into `state.toy.running`; self-ending patterns renewed a minute before
+  their end via the due cron; one-off actions pause and resume them; highest intensity wins per toy channel; starts /
+  stops logged; the toy card shows running effects; demo casino plays a wave while inside.
+- **Toys in a lock (F27, step 2):** `rules.toy {enabled, onEmergencyStop}`, consequence type `toy` (play / intensity / shock /
+  stop; target body part, toy type, channel), app port `toys` (Webhook ID in D1 `toys`, migration 0002), endpoints
+  `/api/toy/connect|test|confirm|emergency-stop`, toy card on the main page, 🎮 Toys tab, demo (shown only unless real
+  sending is switched on), lock-log details with a cheeky comment, skipped actions logged, stop on session end.
+  High-priority keyholder notices bypass the per-kind rate limit.
+- **Toy test page (F27, step 1):** `toys.html` – toy list (type, body part, limits), generated Lockation XToys script, tests
+  per toy / channel (patterns, intensity, ±10 %, shock, stop), test all, stop all, "which toys does XToys see" (WebSocket
+  `getToys`), toy setup export / import; Webhook ID stays in the browser. Core: `packages/core/src/toys.ts`.
+- **Toy control via XToys (F27) specified** (not implemented): Lockation proxy script (one webhook, toy + channel in the
+  body), toy types with channels (e-stim 2, vibrator 1, dual vibrator 2, vibrator + rotator 2) and body parts, per-toy
+  limits, toy test page and demo panel, consequence type `toy` incl. intensity changes, "while inside" with dead-man's
+  switch, emergency stop with punishment and reconnect, toy disclaimer, no manual control during a lock, no automatic
+  pause; liveness check on hold.
 - **Surprise zones (F26):** zone role `surprise` – visible zones whose outcome is drawn by weight on entering (reward,
   punishment, or a hold: stay for a while / until the keyholder releases, at the latest after `holdMinutes`); once or every
   visit; early leave consequences; map marks new / visited / used / holding; `/api/surprise` release.
