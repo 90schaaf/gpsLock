@@ -250,7 +250,7 @@ manual.
   `examples/xtoys/local webhook.json`; webhook block and variable injection as in the Bondage Club XToys integration): a
   `webhook` block (the **cloud** private webhook, outbound enabled – *not* `local-webhook`, which only listens on the
   phone's LAN), webhook keys injected into the JavaScript via the action's `variables` list (`t_<key>`), one output slot per
-  toy (`part-vibrator`, `part-vibrator|part-vibrator`, `part-estim|part-estim`, key `<type>-a…h`), `setMaximum` per
+  toy (`part-vibrator`, `part-vibrator|part-vibrator`, `part-estim|part-estim`, `part-vibrator|part-rotator`, `part-rotator`, key `<type>-a…h`), `setMaximum` per
   channel as initial actions (the wearer limits, enforced again in XToys), a `lockation` webhook trigger whose ES5 code
   dispatches `{cmd, slot, ch, shape, level, delta, seconds}` (`setVolume` / `setPattern` / `setShock2` with `actionChannel`
   1 / 2 / all), a `getToys` trigger that reports the connected toys per slot (outbound), and final actions that stop
@@ -265,7 +265,8 @@ manual.
 | `estim` – e-stim unit | `A`, `B` |
 | `vibrator` – single motor | `main` |
 | `dual_vibrator` – two motors | `A`, `B` |
-| `vibe_rotator` – vibration + rotation | `vibration`, `rotation` – *XToys type name still to confirm; not offered yet* |
+| `vibe_rotator` – vibration + rotation (XToys `part-vibrator\|part-rotator`) | `vibration`, `rotation` |
+| `rotator` – rotation only (XToys `part-rotator`) | `main` |
 
 - Each toy: id, name, **type**, **body part** (`genitals`, `anal`, `nipples`, `other`), up to 8 toys per lock.
 - **Wearer limits per toy, set once when connecting** and fixed while connected: maximum intensity (0–100 %, per channel

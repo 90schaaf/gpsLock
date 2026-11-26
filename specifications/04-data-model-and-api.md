@@ -124,9 +124,9 @@ Missing or corrupt state is replaced by a fresh initial state.
 - Config: `rules.toy {enabled, onEmergencyStop: Consequence[]}`, zone `toy.whileInside? {action, target, intensity, pattern?}`,
   consequence `{type: "toy", action: "pulse" | "wave" | "constant" | "ramp" | "intensity" | "stop", target: {bodyPart:
   "genitals" | "anal" | "nipples" | "other" | "all", toyType?, channel?}, intensity?, delta?, seconds?, pattern?}`.
-- Toy: `{id, name, type: "estim" | "vibrator" | "dual_vibrator" | "vibe_rotator", bodyPart, limits: {maxIntensity |
+- Toy: `{id, name, type: "estim" | "vibrator" | "dual_vibrator" | "vibe_rotator" | "rotator", bodyPart, limits: {maxIntensity |
   {[channel]: maxIntensity}, maxSeconds}}`; channels per type: estim `A, B` · vibrator `main` · dual_vibrator `A, B` ·
-  vibe_rotator `vibration, rotation`.
+  vibe_rotator `vibration, rotation` · rotator `main`.
 - State: `toy {connectedAt?, verifiedAt?, disclaimerVersion?, toys: Toy[], running: {[toyId:channel]: {source, level, until}},
   emergencyStops}` – the Webhook ID is **not** in the state.
 - D1 `toys`: `session_id` (PK), `webhook_id`, `created_at` – deleted on disconnect and on session end.

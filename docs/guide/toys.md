@@ -22,6 +22,8 @@ public or in a car), never use them while driving, e-stim never across the chest
    | Vibrator (1 motor) | main |
    | Vibrator (2 motors) | A, B |
    | E-stim (2 channels) | A, B |
+   | Vibrator + rotator | vibration, rotation |
+   | Rotator | main |
 
    Set the **maximum intensity** (per channel) and the **maximum duration** of one action. These limits are applied by
    Lockation **and** built into the XToys script.

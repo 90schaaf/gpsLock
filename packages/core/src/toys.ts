@@ -13,6 +13,8 @@ export const TOY_TYPES = {
   vibrator: { label: 'Vibrator (1 motor)', xtoys: 'part-vibrator', channels: ['main'], shock: false },
   dual_vibrator: { label: 'Vibrator (2 motors)', xtoys: 'part-vibrator|part-vibrator', channels: ['A', 'B'], shock: false },
   estim: { label: 'E-stim (2 channels)', xtoys: 'part-estim|part-estim', channels: ['A', 'B'], shock: true },
+  vibe_rotator: { label: 'Vibrator + rotator', xtoys: 'part-vibrator|part-rotator', channels: ['vibration', 'rotation'], shock: false },
+  rotator: { label: 'Rotator', xtoys: 'part-rotator', channels: ['main'], shock: false },
 } as const;
 export type ToyType = keyof typeof TOY_TYPES;
 export const TOY_TYPE_IDS = Object.keys(TOY_TYPES) as ToyType[];

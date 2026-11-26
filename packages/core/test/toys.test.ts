@@ -53,6 +53,23 @@ describe('toy setup', () => {
   });
 });
 
+describe('rotators', () => {
+  const rot: ToySetup = { version: 1, toys: [defaultToy('vibe_rotator', 'rab', 'Rabbit'), defaultToy('rotator', 'spin', 'Spinner')] };
+  it('uses the XToys types part-vibrator|part-rotator and part-rotator', () => {
+    expect(toySlots(rot)).toEqual({ rab: 'part-vibrator|part-rotator-a', spin: 'part-rotator-a' });
+    const s = buildXToysScript(rot);
+    expect((s.channels as Record<string, { type: string }>)['part-vibrator|part-rotator-a']!.type).toBe('part-vibrator|part-rotator');
+    expect((s.channels as Record<string, { type: string }>)['part-rotator-a']!.type).toBe('part-rotator');
+  });
+  it('maps vibration / rotation to XToys channels 1 / 2', () => {
+    expect(toyCommand(rot, 'rab', { cmd: 'intensity', intensity: 30, channel: 'rotation' }).ch).toBe('2');
+    expect(toyCommand(rot, 'rab', { cmd: 'intensity', intensity: 30, channel: 'vibration' }).ch).toBe('1');
+    expect(toyCommand(rot, 'spin', { cmd: 'intensity', intensity: 30 }).ch).toBe('all');
+    const c = { type: 'toy', action: 'play', target: { bodyPart: 'all', toyType: 'vibe_rotator', channel: 'rotation' }, intensity: 50, seconds: 10 } as ToyConsequence;
+    expect(resolveToyConsequence(rot.toys, c).map((r) => [r.toy.id, r.body.ch])).toEqual([['rab', '2']]);
+  });
+});
+
 describe('commands', () => {
   it('clamps to the wearer limits and maps channels', () => {
     expect(toyCommand(setup, 'stim', { cmd: 'play', shape: 'pulse', intensity: 90, seconds: 30, channel: 'B' })).toEqual({

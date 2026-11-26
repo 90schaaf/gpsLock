@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-11-26
+
+- **Toy types vibrator + rotator and rotator (F27):** XToys types `part-vibrator|part-rotator` (channels vibration,
+  rotation) and `part-rotator` (one channel).
+
 ## 2026-11-25
 
 - **Toy effects while inside (F27, step 3):** zone `toy.whileInside` and `rules.toy.whileOutsideRequired` (need background
