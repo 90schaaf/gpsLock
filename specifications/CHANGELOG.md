@@ -2,6 +2,10 @@
 
 ## 2026-11-26
 
+- **Toy limits in XToys (F27):** the toy setup no longer has `maxIntensity` / `maxSeconds`; the generated script has no
+  caps (`setMaximum` removed) – the wearer sets the limits in XToys. Lockation sends 0–100 %, the rule's duration (≤ 3600 s,
+  shock ≤ 10 s); kept-running effects use 300 s patterns. Toy safety notes v2. Older setups still load (limits dropped).
+- **Config tabs:** the 🗺️ / ⏱️ / 🛡️ tab icons get the emoji variation selector, so they show as icons everywhere.
 - **Toy actions that keep running (F27):** replaces zone `toy.whileInside` and `rules.toy.whileOutsideRequired`. A `play`
   toy consequence takes `keep {until: leave | return | released | time, minutes?}` – the editor offers the endings that
   fit the trigger; state `toy.kept`; no stacking; intensity changes stick until the effect ends ("stronger at every

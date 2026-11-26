@@ -125,8 +125,7 @@ Missing or corrupt state is replaced by a fresh initial state.
   "shock" | "stop", target: {bodyPart: "genitals" | "anal" | "nipples" | "other" | "all", toyType?, channel?}, shape?:
   "constant" | "pulse" | "wave" | "ramp", intensity?, delta?, seconds?, keep?: {until: "leave" | "return" | "released" |
   "time", minutes?}}` (`keep` only with `play`).
-- Toy: `{id, name, type: "estim" | "vibrator" | "dual_vibrator" | "vibe_rotator" | "rotator", bodyPart, limits: {maxIntensity |
-  {[channel]: maxIntensity}, maxSeconds}}`; channels per type: estim `A, B` · vibrator `main` · dual_vibrator `A, B` ·
+- Toy: `{id, name, type: "estim" | "vibrator" | "dual_vibrator" | "vibe_rotator" | "rotator", bodyPart}` (limits are set in XToys); channels per type: estim `A, B` · vibrator `main` · dual_vibrator `A, B` ·
   vibe_rotator `vibration, rotation` · rotator `main`.
 - State: `toy {connectedAt?, verifiedAt?, disclaimerVersion?, toys: Toy[], kept: {[id]: {label, target, shape, level, until,
   zoneIds, holdSince?, startedAt, endsAt?}}, running: {[toyId:channel]: {source, label, shape, level, sentAt, refreshAt,

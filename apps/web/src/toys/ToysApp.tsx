@@ -113,7 +113,7 @@ export function ToysApp({ fetchImpl = fetch }: { fetchImpl?: typeof fetch }) {
 
   async function testAll() {
     for (const t of setup.toys) {
-      await send(t.id, { cmd: 'play', shape: 'pulse', intensity: Math.min(30, ...t.maxIntensity), seconds: 2 }, `Test ${t.name}`);
+      await send(t.id, { cmd: 'play', shape: 'pulse', intensity: 30, seconds: 2 }, `Test ${t.name}`);
       await new Promise((r) => setTimeout(r, 2500));
     }
   }
@@ -278,10 +278,10 @@ function ToyTester({ toy, disabled, onSend }: { toy: Toy; disabled: boolean; onS
   const chans = TOY_TYPES[toy.type].channels as readonly string[];
   const [channel, setChannel] = useState('all');
   const [shape, setShape] = useState<ToyShape>('pulse');
-  const [intensity, setIntensity] = useState(Math.min(30, ...toy.maxIntensity));
+  const [intensity, setIntensity] = useState(30);
   const [seconds, setSeconds] = useState(5);
   const ch = chans.length > 1 ? channel : undefined;
-  const max = ch && ch !== 'all' ? toy.maxIntensity[chans.indexOf(ch)]! : Math.min(...toy.maxIntensity);
+  const max = 100; // the wearer's limits are applied by XToys
   const tag = `${toy.name}${ch && ch !== 'all' ? ` ${ch}` : ''}`;
   return (
     <div class="card stack" style={{ padding: '10px 12px' }} data-testid="toy-tester">
@@ -309,12 +309,12 @@ function ToyTester({ toy, disabled, onSend }: { toy: Toy; disabled: boolean; onS
           </select>
         </label>
         <label class="field">
-          Intensity: {Math.min(intensity, max)} % (max {max} %)
+          Intensity: {Math.min(intensity, max)} %
           <input type="range" min={0} max={max} step={1} value={Math.min(intensity, max)} onInput={(e) => setIntensity(Number((e.target as HTMLInputElement).value))} />
         </label>
         <label class="field">
-          Duration (seconds, max {toy.maxSeconds})
-          <input type="number" min={1} max={toy.maxSeconds} value={seconds} onInput={(e) => setSeconds(Number((e.target as HTMLInputElement).value) || 1)} />
+          Duration (seconds)
+          <input type="number" min={1} max={3600} value={seconds} onInput={(e) => setSeconds(Number((e.target as HTMLInputElement).value) || 1)} />
         </label>
       </div>
       <div class="row">

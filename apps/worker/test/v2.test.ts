@@ -249,8 +249,8 @@ describe('toys (F27)', () => {
     },
   };
   const toys = [
-    { id: 'vibe', name: 'Bullet', type: 'vibrator', bodyPart: 'genitals', maxIntensity: [60], maxSeconds: 120 },
-    { id: 'stim', name: 'Coyote', type: 'estim', bodyPart: 'nipples', maxIntensity: [30, 30], maxSeconds: 60 },
+    { id: 'vibe', name: 'Bullet', type: 'vibrator', bodyPart: 'genitals' },
+    { id: 'stim', name: 'Coyote', type: 'estim', bodyPart: 'nipples' },
   ];
   let sent: string[];
   const toyFetch = async (url: string) => {
@@ -259,7 +259,7 @@ describe('toys (F27)', () => {
   };
   const postT = (path: string, body: unknown) =>
     handleRequest(new Request(`https://worker.test${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://user.github.io' }, body: JSON.stringify(body) }), env, { ...o(), toyFetch });
-  const connect = () => postT('/api/toy/connect', { mainToken: 'wearer-token', webhookId: 'SECRETHOOK1', toys, disclaimerVersion: 1 });
+  const connect = () => postT('/api/toy/connect', { mainToken: 'wearer-token', webhookId: 'SECRETHOOK1', toys, disclaimerVersion: 2 });
 
   beforeEach(() => {
     sent = [];
@@ -267,12 +267,12 @@ describe('toys (F27)', () => {
   });
 
   it('connect: only the wearer, with the disclaimer; the Webhook ID stays in D1 and never shows up in a view', async () => {
-    expect((await postT('/api/toy/connect', { mainToken: 'kh-token', webhookId: 'SECRETHOOK1', toys, disclaimerVersion: 1 })).status).toBe(403);
-    expect((await postT('/api/toy/connect', { mainToken: 'wearer-token', webhookId: 'SECRETHOOK1', toys, disclaimerVersion: 0 })).status).toBe(400);
+    expect((await postT('/api/toy/connect', { mainToken: 'kh-token', webhookId: 'SECRETHOOK1', toys, disclaimerVersion: 2 })).status).toBe(403);
+    expect((await postT('/api/toy/connect', { mainToken: 'wearer-token', webhookId: 'SECRETHOOK1', toys, disclaimerVersion: 1 })).status).toBe(400);
     const r = await connect();
     expect(r.status).toBe(200);
     const v = (await r.json()) as any;
-    expect(v.toys).toMatchObject({ connected: true, verified: false, toys: [{ name: 'Bullet', maxIntensity: [60] }, { name: 'Coyote' }] });
+    expect(v.toys).toMatchObject({ connected: true, verified: false, toys: [{ name: 'Bullet', type: 'vibrator', bodyPart: 'genitals' }, { name: 'Coyote' }] });
     expect(db.rows('toys')).toEqual([expect.objectContaining({ session_id: 's1', webhook_id: 'SECRETHOOK1' })]);
     const kh = (await (await post('/api/session', { mainToken: 'kh-token' })).json()) as any;
     expect(JSON.stringify(kh)).not.toContain('SECRETHOOK1');
@@ -289,14 +289,14 @@ describe('toys (F27)', () => {
     expect(v.toys.verified).toBe(true);
   });
 
-  it('a toy consequence goes to the matching toy (clamped), with full details and a cheeky comment in the lock log', async () => {
+  it('a toy consequence goes to the matching toy, with full details and a cheeky comment in the lock log', async () => {
     await connect();
     sent = [];
     const r = await postT('/api/checkin', { mainToken: 'wearer-token', fix: { lat: BAR.lat, lng: BAR.lng, accuracy: 10, timestamp: now.getTime() } });
     expect(r.status).toBe(200);
     expect(sent).toHaveLength(1); // genitals → Bullet only
     expect(sent[0]).toContain('cmd=play');
-    expect(sent[0]).toContain('level=60'); // 90 % clamped to the wearer's 60 %
+    expect(sent[0]).toContain('level=90'); // as the rule says – the wearer's limit is applied by XToys
     const log = fake.calls.filter((c) => c.path.endsWith('/logs/custom')).map((c) => c.body.description).join('\n');
     expect(log).toMatch(/🎮 pulse 90 % for 30s \(toys – genitals\) → Bullet\./);
     expect(log).toMatch(/😈 /);
@@ -370,8 +370,8 @@ describe('toys: actions that keep running (F27 step 3)', () => {
     },
   };
   const toys = [
-    { id: 'vibe', name: 'Bullet', type: 'vibrator', bodyPart: 'genitals', maxIntensity: [40], maxSeconds: 300 },
-    { id: 'plug', name: 'Plug', type: 'vibrator', bodyPart: 'anal', maxIntensity: [100], maxSeconds: 300 },
+    { id: 'vibe', name: 'Bullet', type: 'vibrator', bodyPart: 'genitals' },
+    { id: 'plug', name: 'Plug', type: 'vibrator', bodyPart: 'anal' },
   ];
   let sent: string[];
   const toyFetch = async (url: string) => {
@@ -389,7 +389,7 @@ describe('toys: actions that keep running (F27 step 3)', () => {
   });
 
   it('keeps running until leaving, not stacked, 10 % stronger at every penalty, renewed by the cron, stopped on leaving', async () => {
-    expect((await postT('/api/toy/connect', { mainToken: 'wearer-token', webhookId: 'HOOK2', toys, disclaimerVersion: 1 })).status).toBe(200);
+    expect((await postT('/api/toy/connect', { mainToken: 'wearer-token', webhookId: 'HOOK2', toys, disclaimerVersion: 2 })).status).toBe(200);
     const p = (await (await postT('/api/tracking/pair', { mainToken: 'wearer-token' })).json()) as any;
     await postT('/track/owntracks', loc(BAR, now), basic(p.username, p.password));
     // penalty 1: the wave starts on the Plug (anal) only, already +10 %
@@ -435,7 +435,7 @@ describe('toys: actions that keep running (F27 step 3)', () => {
     expect(sent).toEqual([]);
     const log = fake.calls.filter((c) => c.path.endsWith('/logs/custom')).map((c) => c.body.description).join('\n');
     expect(log).toContain('🎮 Waiting for toys (none connected)');
-    await postT('/api/toy/connect', { mainToken: 'wearer-token', webhookId: 'HOOK2', toys, disclaimerVersion: 1 });
+    await postT('/api/toy/connect', { mainToken: 'wearer-token', webhookId: 'HOOK2', toys, disclaimerVersion: 2 });
     expect(plays()).toHaveLength(1);
     expect(plays()[0]).toContain('slot=part-vibrator-b');
   });

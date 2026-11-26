@@ -225,9 +225,9 @@ describe('toys in the demo (F27)', () => {
     const v0 = await b.session();
     expect(v0.toys).toMatchObject({ connected: false, emergencyStops: 0, onEmergencyStop: 'add 2h' });
     expect(v0.rules.find((r) => r.rule === 'toy')).toBeDefined();
-    const toys = [{ id: 'vibe', name: 'Bullet', type: 'vibrator', bodyPart: 'genitals', maxIntensity: [60], maxSeconds: 120 }];
-    await expect(b.toyConnect({ webhookId: 'DEMOHOOK', toys, disclaimerVersion: 0 })).rejects.toThrow(/safety notes/);
-    const v1 = await b.toyConnect({ webhookId: 'DEMOHOOK', toys, disclaimerVersion: 1 });
+    const toys = [{ id: 'vibe', name: 'Bullet', type: 'vibrator', bodyPart: 'genitals' }];
+    await expect(b.toyConnect({ webhookId: 'DEMOHOOK', toys, disclaimerVersion: 1 })).rejects.toThrow(/safety notes/);
+    const v1 = await b.toyConnect({ webhookId: 'DEMOHOOK', toys, disclaimerVersion: 2 });
     expect(v1.toys).toMatchObject({ connected: true, verified: false });
     expect(JSON.stringify(v1)).not.toContain('DEMOHOOK');
     const fetchSpy: string[] = [];

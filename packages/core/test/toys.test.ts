@@ -3,9 +3,9 @@ import { desiredToyEffects, initialState, keepToyConsequences, nextDueAt, pruneK
 
 const setup: ToySetup = ToySetupSchema.parse({
   toys: [
-    { ...defaultToy('estim', 'stim', 'E-stim box'), bodyPart: 'genitals', maxIntensity: [40, 30] },
+    { ...defaultToy('estim', 'stim', 'E-stim box'), bodyPart: 'genitals' },
     defaultToy('vibrator', 'vibe', 'Bullet'),
-    { ...defaultToy('dual_vibrator', 'duo', 'Rabbit'), bodyPart: 'anal', maxIntensity: [80, 100], maxSeconds: 60 },
+    { ...defaultToy('dual_vibrator', 'duo', 'Rabbit'), bodyPart: 'anal' },
     defaultToy('vibrator', 'vibe2', 'Nipple vibe'),
   ],
 });
@@ -41,11 +41,12 @@ function xtoys(script = buildXToysScript(setup)) {
 }
 
 describe('toy setup', () => {
-  it('validates channels per type and unique ids', () => {
-    expect(ToySetupSchema.safeParse({ toys: [{ ...defaultToy('estim', 'a'), maxIntensity: [50] }] }).success).toBe(false);
+  it('validates unique ids and the number of toys; limits are not part of the setup (they are set in XToys)', () => {
     expect(ToySetupSchema.safeParse({ toys: [defaultToy('vibrator', 'a'), defaultToy('estim', 'a')] }).success).toBe(false);
     expect(ToySetupSchema.safeParse({ toys: Array.from({ length: 9 }, (_, i) => defaultToy('vibrator', `t${i}`)) }).success).toBe(false);
-    expect(defaultToy('estim', 'x').maxIntensity).toEqual([40, 40]);
+    expect(defaultToy('estim', 'x')).toEqual({ id: 'x', name: 'E-stim (2 channels)', type: 'estim', bodyPart: 'genitals' });
+    // an older setup with limits still loads; the limits are dropped
+    expect(ToySetupSchema.parse({ toys: [{ ...defaultToy('estim', 'a'), maxIntensity: [50, 50], maxSeconds: 60 }] }).toys[0]).toEqual(defaultToy('estim', 'a'));
   });
 
   it('gives each toy its own XToys slot (letters per type)', () => {
@@ -71,12 +72,13 @@ describe('rotators', () => {
 });
 
 describe('commands', () => {
-  it('clamps to the wearer limits and maps channels', () => {
+  it('sends 0–100 % (limits are the wearer\'s XToys settings) and maps channels', () => {
     expect(toyCommand(setup, 'stim', { cmd: 'play', shape: 'pulse', intensity: 90, seconds: 30, channel: 'B' })).toEqual({
-      action: 'lockation', cmd: 'play', slot: 'part-estim|part-estim-a', ch: '2', shape: 'pulse', level: '30', seconds: '30',
+      action: 'lockation', cmd: 'play', slot: 'part-estim|part-estim-a', ch: '2', shape: 'pulse', level: '90', seconds: '30',
     });
-    expect(toyCommand(setup, 'stim', { cmd: 'play', shape: 'constant', intensity: 90, seconds: 10 }).level).toBe('30'); // both channels → lower cap
-    expect(toyCommand(setup, 'duo', { cmd: 'play', shape: 'wave', intensity: 50, seconds: 999 }).seconds).toBe('60');
+    expect(toyCommand(setup, 'stim', { cmd: 'play', shape: 'constant', intensity: 150, seconds: 10 }).level).toBe('100');
+    expect(toyCommand(setup, 'duo', { cmd: 'play', shape: 'wave', intensity: 50, seconds: 9999 }).seconds).toBe('3600');
+    expect(toyCommand(setup, 'stim', { cmd: 'shock', intensity: 50, seconds: 30 }).seconds).toBe('10');
     expect(toyCommand(setup, 'vibe', { cmd: 'intensity', delta: 10 })).toMatchObject({ cmd: 'intensity', delta: '10', ch: 'all' });
     expect(toyCommand(setup, 'all', { cmd: 'stop' })).toEqual({ action: 'lockation', cmd: 'stopAll' });
   });
@@ -91,12 +93,12 @@ describe('commands', () => {
 });
 
 describe('generated XToys script', () => {
-  it('has the webhook block, one slot per toy with caps, and stops everything at the end', () => {
+  it('has the webhook block, one slot per toy starting quiet (no caps – XToys settings), and stops everything at the end', () => {
     const s = buildXToysScript(setup);
     expect(s.channels['webhook-a']).toMatchObject({ type: 'webhook', outbound: true });
     expect(s.channels['part-estim|part-estim-a']).toEqual({ type: 'part-estim|part-estim', name: 'E-stim box (genitals)' });
-    expect(s.initialActions).toContainEqual({ type: 'updateComponent', channel: 'part-estim|part-estim-a', action: 'setMaximum', actionChannel: '2', percentVolume: '30' });
-    expect(s.initialActions).toContainEqual({ type: 'updateComponent', channel: 'part-vibrator-a', action: 'setMaximum', actionChannel: 'all', percentVolume: '100' });
+    expect(s.initialActions).toContainEqual({ type: 'updateComponent', channel: 'part-estim|part-estim-a', action: 'setVolume', actionChannel: '2', rampTime: '0', percentVolume: '0' });
+    expect(JSON.stringify(s)).not.toContain('setMaximum');
     expect(s.finalActions).toHaveLength(2 + 1 + 2 + 1);
     expect(s.globalTriggers.map((t) => t.action)).toEqual(['lockation', 'getToys']);
   });
@@ -119,19 +121,19 @@ describe('generated XToys script', () => {
     expect(x.vars['lv-part-estim|part-estim-a-1']).toBe('25');
   });
 
-  it('enforces the caps again inside XToys and supports relative intensity changes', () => {
+  it('keeps levels within 0–100 % inside XToys and supports relative intensity changes', () => {
     const x = xtoys();
-    const forged: ToyWebhookBody = { action: 'lockation', cmd: 'play', slot: 'part-vibrator|part-vibrator-a', ch: '1', shape: 'constant', level: '100', seconds: '10' };
-    expect(x.run('lockation', forged)[0].percentVolume).toBe('80');
-    expect(x.run('lockation', toyCommand(setup, 'duo', { cmd: 'intensity', delta: -30, channel: 'A' }))[0].percentVolume).toBe('50');
-    expect(x.run('lockation', toyCommand(setup, 'duo', { cmd: 'intensity', delta: 100, channel: 'A' }))[0].percentVolume).toBe('80');
+    const forged: ToyWebhookBody = { action: 'lockation', cmd: 'play', slot: 'part-vibrator|part-vibrator-a', ch: '1', shape: 'constant', level: '180', seconds: '10' };
+    expect(x.run('lockation', forged)[0].percentVolume).toBe('100');
+    expect(x.run('lockation', toyCommand(setup, 'duo', { cmd: 'intensity', delta: -30, channel: 'A' }))[0].percentVolume).toBe('70');
+    expect(x.run('lockation', toyCommand(setup, 'duo', { cmd: 'intensity', delta: 100, channel: 'A' }))[0].percentVolume).toBe('100');
   });
 
   it('both channels, shock, stop and stop all', () => {
     const x = xtoys();
     expect(x.run('lockation', toyCommand(setup, 'duo', { cmd: 'play', shape: 'wave', intensity: 50, seconds: 2 })).filter((c) => c.action === 'setPattern').map((c) => c.actionChannel)).toEqual(['1', '2']);
     expect(x.run('lockation', toyCommand(setup, 'stim', { cmd: 'shock', intensity: 90, seconds: 2, channel: 'B' }))).toEqual([
-      { type: 'updateComponent', channel: 'part-estim|part-estim-a', action: 'setShock2', actionChannel: '2', percentVolume: '30', time: '2', shock: true },
+      { type: 'updateComponent', channel: 'part-estim|part-estim-a', action: 'setShock2', actionChannel: '2', percentVolume: '90', time: '2', shock: true },
     ]);
     expect(x.run('lockation', toyCommand(setup, 'vibe', { cmd: 'stop' }))).toEqual([{ type: 'updateComponent', channel: 'part-vibrator-a', action: 'setVolume', actionChannel: 'all', rampTime: '0', percentVolume: '0' }]);
     expect(x.run('lockation', toyCommand(setup, 'all', { cmd: 'stop' }))).toHaveLength(6);
@@ -201,11 +203,11 @@ describe('toy consequences (step 2)', () => {
   const toys = setup.toys;
   const c = (x: Record<string, unknown>) => ({ type: 'toy' as const, action: 'play' as const, target: { bodyPart: 'all' }, ...x }) as ToyConsequence;
 
-  it('targets toys by body part, type and channel, clamped to each toy', () => {
+  it('targets toys by body part, type and channel', () => {
     expect(resolveToyConsequence(toys, c({ target: { bodyPart: 'all' }, intensity: 90, seconds: 20 })).map((r) => [r.toy.id, r.body.level])).toEqual([
-      ['stim', '30'],
+      ['stim', '90'],
       ['vibe', '90'],
-      ['duo', '80'],
+      ['duo', '90'],
       ['vibe2', '90'],
     ]);
     expect(resolveToyConsequence(toys, c({ target: { bodyPart: 'anal' } })).map((r) => r.toy.id)).toEqual(['duo']);
@@ -239,7 +241,7 @@ describe('toy consequences (step 2)', () => {
 });
 
 describe('effects while a condition holds (step 3)', () => {
-  const toys = setup.toys; // stim (estim, max 40/30), vibe, duo (max 80/100, 60 s), vibe2
+  const toys = setup.toys; // stim (estim), vibe, duo (dual vibrator), vibe2
   const T0 = new Date('2026-06-01T10:00:00Z');
   const sec = (s: number) => new Date(T0.getTime() + s * 1000);
   const eff = (x: Record<string, unknown> = {}) => ({ target: { bodyPart: 'all' }, shape: 'wave' as const, intensity: 50, ...x }) as any;
@@ -252,7 +254,7 @@ describe('effects while a condition holds (step 3)', () => {
   });
 
   it('starts, keeps, renews and stops an effect', () => {
-    const only = [toys[1]!]; // vibe: max 100 %, 300 s
+    const only = [toys[1]!]; // vibe (patterns of TOY_EFFECT_SECONDS = 300 s)
     const a = reconcileToyEffects(only, [d('zone:bar')], {}, T0);
     expect(a.commands.map((c) => c.body)).toEqual([{ action: 'lockation', slot: 'part-vibrator-a', ch: 'all', cmd: 'play', shape: 'wave', level: '50', seconds: '300' }]);
     expect(a.running['vibe:all']).toMatchObject({ source: 'zone:bar', level: 50, refreshAt: sec(240).toISOString() });
@@ -267,8 +269,8 @@ describe('effects while a condition holds (step 3)', () => {
   it('the higher intensity wins on the same toy; channels are separate', () => {
     const r = reconcileToyEffects(toys, [d('zone:a', eff({ intensity: 20 })), d('zone:b', eff({ intensity: 70, target: { bodyPart: 'genitals', toyType: 'estim', channel: 'A' } }))], {}, T0);
     expect(r.running['vibe:all']).toMatchObject({ source: 'zone:a', level: 20 });
-    expect(r.running['stim:A']).toMatchObject({ source: 'zone:b', level: 40 }); // stored as sent: clamped to channel A's 40 %
-    expect(r.commands.find((c) => c.toy.id === 'stim' && c.body.ch === '1')!.body.level).toBe('40'); // clamped to the toy
+    expect(r.running['stim:A']).toMatchObject({ source: 'zone:b', level: 70 }); // own channel
+    expect(r.commands.find((c) => c.toy.id === 'stim' && c.body.ch === '1')!.body.level).toBe('70');
     const both = reconcileToyEffects([toys[1]!], [d('zone:a', eff({ intensity: 20 })), d('zone:b', eff({ intensity: 70 }))], {}, T0);
     expect(both.running['vibe:all']).toMatchObject({ source: 'zone:b', level: 70 });
   });

@@ -357,7 +357,7 @@ export class LockationApp<S extends LockSession = LockSession> {
     const errors: string[] = [];
     for (const t of setup.toys) {
       try {
-        await ports.send(s, webhookId, toyCommand(setup, t.id, { cmd: 'play', shape: 'pulse', intensity: Math.min(30, ...t.maxIntensity), seconds: 2 }));
+        await ports.send(s, webhookId, toyCommand(setup, t.id, { cmd: 'play', shape: 'pulse', intensity: 30, seconds: 2 }));
       } catch (e) {
         errors.push(`${t.name}: ${e instanceof Error ? e.message : String(e)}`);
       }

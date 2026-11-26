@@ -583,7 +583,7 @@ function ToyFields({ c, onChange, keepOptions }: { c: ToyConsequence; onChange: 
           stick until it ends.{c.keep.until !== 'time' ? ' Needs background tracking.' : ''}
         </span>
       )}
-      <span class="small muted">Sent to every connected toy that matches; the wearer's limits always apply. Skipped (and logged) if none is connected.</span>
+      <span class="small muted">Sent to every connected toy that matches; the wearer's limits are their XToys settings. Skipped (and logged) if none is connected.</span>
     </div>
   );
 }

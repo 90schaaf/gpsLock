@@ -25,7 +25,7 @@ const BaseConsequenceSchema = z.discriminatedUnion('type', [
     durationMinutes: z.number().int().min(1).max(1440).optional(),
   }),
   z.object({ type: z.literal('verification_picture') }),
-  /** F27 – toy action via XToys, sent to every connected toy that matches `target` (clamped to the wearer's limits). */
+  /** F27 – toy action via XToys, sent to every connected toy that matches `target` (the wearer's limits are set in XToys). */
   z.object({
     type: z.literal('toy'),
     action: z.enum(['play', 'intensity', 'shock', 'stop']),

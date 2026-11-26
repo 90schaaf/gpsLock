@@ -94,12 +94,12 @@ export interface SessionView {
     deadline?: string;
   };
   travel?: { totalKm: number; pendingKm: number; stepKm: number; kmToday: number; dailyCapKm: number };
-  /** F27 – toy control: connection status and the wearer's toys / limits (never the Webhook ID). */
+  /** F27 – toy control: connection status and the wearer's toys (never the Webhook ID). */
   toys?: {
     connected: boolean;
     verified: boolean;
     connectedAt?: string;
-    toys: { id: string; name: string; type: string; bodyPart: string; maxIntensity: number[]; maxSeconds: number }[];
+    toys: { id: string; name: string; type: string; bodyPart: string }[];
     emergencyStops: number;
     /** What the emergency stop costs (described). */
     onEmergencyStop: string;
@@ -258,7 +258,7 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
       rule: 'toy',
       title: 'Toy control',
       lines: [
-        'When you connect your toys (XToys), the rules can control them – look for 🎮 in the consequences. Your limits always apply.',
+        'When you connect your toys (XToys), the rules can control them – look for 🎮 in the consequences. Your limits are the ones you set in XToys.',
         config.rules.toy.onEmergencyStop.length
           ? `Emergency stop (disconnect the toys): ${list(config.rules.toy.onEmergencyStop)}.`
           : 'Emergency stop (disconnect the toys): possible at any time, without consequences.',
@@ -486,7 +486,7 @@ export function buildSessionView({ role, isSelfLock, config, state, history, now
       connected: !!T.connectedAt && T.toys.length > 0,
       verified: !!T.verifiedAt,
       connectedAt: T.connectedAt,
-      toys: T.toys.map((t) => ({ id: t.id, name: t.name, type: t.type, bodyPart: t.bodyPart, maxIntensity: [...t.maxIntensity], maxSeconds: t.maxSeconds })),
+      toys: T.toys.map((t) => ({ id: t.id, name: t.name, type: t.type, bodyPart: t.bodyPart })),
       emergencyStops: T.emergencyStops,
       onEmergencyStop: list(config.rules.toy.onEmergencyStop),
       running: Object.entries(T.running).map(([key, r]) => {

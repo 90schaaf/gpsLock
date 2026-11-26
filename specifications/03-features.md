@@ -250,8 +250,8 @@ manual.
   XToys script export, not in the repo; webhook block and variable injection as in the Bondage Club XToys integration): a
   `webhook` block (the **cloud** private webhook, outbound enabled – *not* `local-webhook`, which only listens on the
   phone's LAN), webhook keys injected into the JavaScript via the action's `variables` list (`t_<key>`), one output slot per
-  toy (`part-vibrator`, `part-vibrator|part-vibrator`, `part-estim|part-estim`, `part-vibrator|part-rotator`, `part-rotator`, key `<type>-a…h`), `setMaximum` per
-  channel as initial actions (the wearer limits, enforced again in XToys), a `lockation` webhook trigger whose ES5 code
+  toy (`part-vibrator`, `part-vibrator|part-vibrator`, `part-estim|part-estim`, `part-vibrator|part-rotator`, `part-rotator`, key `<type>-a…h`), `setVolume 0` per
+  channel as initial actions (no caps in the script – the wearer's limits are their XToys settings, 2026-11-26), a `lockation` webhook trigger whose ES5 code
   dispatches `{cmd, slot, ch, shape, level, delta, seconds}` (`setVolume` / `setPattern` / `setShock2` with `actionChannel`
   1 / 2 / all), a `getToys` trigger that reports the connected toys per slot (outbound), and final actions that stop
   everything. The wearer connects each real toy to its slot in XToys.
@@ -269,9 +269,9 @@ manual.
 | `rotator` – rotation only (XToys `part-rotator`) | `main` |
 
 - Each toy: id, name, **type**, **body part** (`genitals`, `anal`, `nipples`, `other`), up to 8 toys per lock.
-- **Wearer limits per toy, set once when connecting** and fixed while connected: maximum intensity (0–100 %, per channel
-  for 2-channel toys) and maximum duration of a single action. Every action is clamped to them. Suggested defaults are
-  lower for `estim`. The keyholder sees toys, types, body parts and limits – never the Webhook ID.
+- **Limits are set in XToys** (2026-11-26, replaces the former wearer limits `maxIntensity` / `maxSeconds` in Lockation):
+  the wearer sets the maximum intensity of each toy / channel in XToys. Lockation sends 0–100 % and the duration the rule
+  says (≤ 3600 s, shock ≤ 10 s). The keyholder sees toys, types and body parts – never the Webhook ID.
 
 **Connection (wearer, during a lock)**
 
@@ -294,7 +294,7 @@ manual.
   and a duration, a "test all toys" button and a big **Stop all** button. The disclaimer is accepted there as well.
 - Nothing is stored on the server: the ID stays in the page (optionally remembered in this browser). The page sends
   **directly from the browser to XToys** (XToys accepts browser requests) – no worker endpoint is involved.
-- The toy setup (toys, types, body parts, limits) can be **exported** and later imported when connecting in a lock.
+- The toy setup (toys, types, body parts) can be **exported** and later imported when connecting in a lock.
 - **Demo:** the same test panel; in addition the option *"Send the demo rules' toy actions to my toys"* (off by default) –
   otherwise demo toy actions are only shown ("🎮 would send pulse 60 % for 30 s – genitals").
 
@@ -306,7 +306,7 @@ manual.
   - `pulse`, `wave`, `constant` – pattern at `intensity` for `seconds`;
   - `ramp` – from the current level to `intensity` over `seconds`;
   - `intensity` – **change the level of what is running**: absolute (`intensity`) or relative (`delta`, e.g. +10 / −20),
-    clamped to 0 … the toy's maximum;
+    within 0–100 % (the wearer's XToys limits apply on top);
   - `shock` – e-stim only (`setShock2`, ≤ 10 s);
   - `stop`.
   `intensity` 0–100, `seconds` 1–3600. The payload never contains zone names, positions or rule texts.
@@ -314,7 +314,7 @@ manual.
   usable everywhere consequences are (zone actions, forbidden escalation, required missed / success, reward, surprise
   outcomes, missions, hunt, travel, tracking). Example: every forbidden-zone penalty `intensity +10` on the genitals toy –
   the punishment gets stronger the longer the wearer stays. Applied by the worker like ntfy delivery: sent to every
-  matching connected toy, clamped to its limits, in order, logged in the lock history with **full details and a cheeky
+  matching connected toy, in order, logged in the lock history with **full details and a cheeky
   comment** ("🎮 pulse 60 % for 30s (toys – genitals) → Bullet." + "😈 …"). No (matching) toy connected or toy control
   off → skipped and logged. Toy actions are sent even if the wearer has not confirmed the setup check (warning shown).
   Keyholder pushes only for connected / confirmed / emergency stop (high priority – never rate-limited).
@@ -348,7 +348,7 @@ manual.
   shape, level (as sent), sentAt, refreshAt, resumeAt?}` (what runs on each toy channel). After every evaluation the app
   registers new kept actions and intensity / stop changes (`keepToyConsequences`), removes ended ones
   (`pruneKeptToyEffects`) and reconciles (`desiredToyEffects` → `reconcileToyEffects`): each start is a self-ending
-  pattern of the toy's maximum duration, renewed at `max(½, maxSeconds − 60 s)` via `nextDueAt` (cron), which also
+  pattern of `TOY_EFFECT_SECONDS` = 300 s, renewed after 240 s (a minute before it ends) via `nextDueAt` (cron), which also
   covers `endsAt`. If Lockation, the network or tracking fails, the toy stops by itself. An explicit `stop` is sent when
   the effect ends, on emergency stop (which also clears `kept`), on disconnect and when the lock ends. Starts, level
   changes and stops are logged, renewals are not.
@@ -360,19 +360,19 @@ manual.
 - The wearer can always **disconnect the toys** (button with confirmation). It sends `stop` to all toys, deletes the
   Webhook ID and applies the keyholder's **emergency-stop consequences** (`toy.onEmergencyStop`, optional, e.g. +2 h; empty = free).
   The keyholder is notified, and the history shows it. Using it can never be blocked.
-- The wearer may **reconnect** during the same lock (new toys / limits, the disclaimer again, the setup check again). The
+- The wearer may **reconnect** during the same lock (new toys, the disclaimer again, the setup check again). The
   emergency-stop punishment of the earlier disconnect stays applied.
-- Changing toys or limits is only possible by disconnecting (= emergency stop) and connecting again.
+- Changing toys is only possible by disconnecting (= emergency stop) and connecting again.
 
 **Keyholder configuration (🎮 Toys tab)**
 
 - Enable toy control; `onEmergencyStop` (optional; toy actions not allowed); toy consequences in the existing
   consequence editors (target body part / toy type / channel, action, intensity or change, pattern, duration or **keep
-  running** with the endings that fit the trigger). The keyholder sees the connected toys and their limits.
+  running** with the endings that fit the trigger). The keyholder sees the connected toys.
 - Self-locks: allowed – the wearer configures their own rules and still accepts the toy disclaimer.
 
 AC: 1. No toy action during a lock without the accepted toy disclaimer and connected toys. 2. Actions (incl. intensity
-changes) are clamped to each toy's / channel's limits. 3. The Webhook ID never appears in any view, log, history or
+changes) stay within 0–100 %; the wearer's limits are their XToys settings. 3. The Webhook ID never appears in any view, log, history or
 notification, and the toy test page stores it nowhere on the server. 4. A kept-running effect stops by itself within
 its refresh time if Lockation stops refreshing, and an intensity change on it sticks until it ends. 5. Emergency stop always works, sends `stop` to all toys, deletes the ID
 and applies `onEmergencyStop`; reconnecting is possible. 6. During a lock nobody can trigger a toy action by hand.

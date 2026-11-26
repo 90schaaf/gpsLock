@@ -45,24 +45,22 @@ export const MAX_TOY_SECONDS = 3600;
 export const TOY_SHAPES = ['constant', 'pulse', 'wave', 'ramp'] as const;
 export type ToyShape = (typeof TOY_SHAPES)[number];
 
-const percent = z.number().int().min(0).max(100);
+/**
+ * Length of one self-ending pattern of a kept-running effect (renewed a minute before it ends). If Lockation stops
+ * renewing, the toy stops by itself after at most this long.
+ */
+export const TOY_EFFECT_SECONDS = 300;
 
-export const ToySchema = z
-  .object({
-    id: z.string().regex(/^[a-z0-9]{1,12}$/, 'lowercase letters and digits only'),
-    name: z.string().min(1).max(40),
-    type: z.enum(TOY_TYPE_IDS as [ToyType, ...ToyType[]]),
-    bodyPart: z.enum(BODY_PARTS),
-    /** Wearer limit per channel (same order as `TOY_TYPES[type].channels`). */
-    maxIntensity: z.array(percent).min(1).max(2),
-    /** Wearer limit for one action. */
-    maxSeconds: z.number().int().min(1).max(MAX_TOY_SECONDS),
-  })
-  .superRefine((t, ctx) => {
-    if (t.maxIntensity.length !== TOY_TYPES[t.type].channels.length) {
-      ctx.addIssue({ code: 'custom', path: ['maxIntensity'], message: `${TOY_TYPES[t.type].label} has ${TOY_TYPES[t.type].channels.length} channel(s)` });
-    }
-  });
+/**
+ * One toy of the wearer. Limits (maximum intensity) are set by the wearer in XToys itself – Lockation sends 0–100 %.
+ * Older setups with `maxIntensity` / `maxSeconds` still parse (unknown keys are dropped).
+ */
+export const ToySchema = z.object({
+  id: z.string().regex(/^[a-z0-9]{1,12}$/, 'lowercase letters and digits only'),
+  name: z.string().min(1).max(40),
+  type: z.enum(TOY_TYPE_IDS as [ToyType, ...ToyType[]]),
+  bodyPart: z.enum(BODY_PARTS),
+});
 export type Toy = z.infer<typeof ToySchema>;
 
 export const ToySetupSchema = z
@@ -76,10 +74,9 @@ export const ToySetupSchema = z
   });
 export type ToySetup = z.infer<typeof ToySetupSchema>;
 
-/** Suggested limits for a new toy (lower for e-stim). */
+/** A new toy of this type (body part to be chosen by the wearer). */
 export function defaultToy(type: ToyType, id: string, name: string = TOY_TYPES[type].label): Toy {
-  const n = TOY_TYPES[type].channels.length;
-  return { id, name, type, bodyPart: 'genitals', maxIntensity: Array(n).fill(type === 'estim' ? 40 : 100), maxSeconds: 300 };
+  return { id, name, type, bodyPart: 'genitals' };
 }
 
 /** XToys channel key per toy, e.g. `part-estim|part-estim-a` (letters a–h per XToys type, in list order). */
@@ -119,12 +116,7 @@ function actionChannel(toy: Toy, channel: string | undefined): string {
   return String(i + 1);
 }
 
-/** Highest intensity allowed on the addressed channel(s). */
-function maxFor(toy: Toy, ch: string): number {
-  return ch === 'all' ? Math.min(...toy.maxIntensity) : toy.maxIntensity[Number(ch) - 1]!;
-}
-
-/** Build the webhook body for one command, clamped to the toy's limits. Throws `ToyCommandError` on invalid input. */
+/** Build the webhook body for one command (0–100 %; the wearer's limits are applied by XToys). Throws `ToyCommandError` on invalid input. */
 export function toyCommand(setup: ToySetup, toyId: 'all' | string, input: ToyCommandInput): ToyWebhookBody {
   if (toyId === 'all') {
     if (input.cmd !== 'stop') throw new ToyCommandError('Only "stop" can address all toys at once.');
@@ -134,17 +126,17 @@ export function toyCommand(setup: ToySetup, toyId: 'all' | string, input: ToyCom
   if (!toy) throw new ToyCommandError(`Unknown toy "${toyId}".`);
   const slot = toySlots(setup)[toy.id]!;
   const ch = actionChannel(toy, input.channel);
-  const max = maxFor(toy, ch);
+  const max = 100;
   const base = { action: 'lockation' as const, slot, ch };
   switch (input.cmd) {
     case 'play':
-      return { ...base, cmd: 'play', shape: input.shape, level: String(clamp(input.intensity, 0, max)), seconds: String(clamp(input.seconds, 1, toy.maxSeconds)) };
+      return { ...base, cmd: 'play', shape: input.shape, level: String(clamp(input.intensity, 0, max)), seconds: String(clamp(input.seconds, 1, MAX_TOY_SECONDS)) };
     case 'intensity':
       if (input.intensity === undefined && input.delta === undefined) throw new ToyCommandError('Give an intensity or a change.');
       return input.intensity !== undefined ? { ...base, cmd: 'intensity', level: String(clamp(input.intensity, 0, max)) } : { ...base, cmd: 'intensity', delta: String(clamp(input.delta!, -100, 100)) };
     case 'shock':
       if (!TOY_TYPES[toy.type].shock) throw new ToyCommandError(`"${toy.name}" cannot shock.`);
-      return { ...base, cmd: 'shock', level: String(clamp(input.intensity, 0, max)), seconds: String(clamp(input.seconds, 1, Math.min(10, toy.maxSeconds))) };
+      return { ...base, cmd: 'shock', level: String(clamp(input.intensity, 0, max)), seconds: String(clamp(input.seconds, 1, 10)) };
     case 'stop':
       return { ...base, cmd: 'stop' };
   }
@@ -167,9 +159,9 @@ const injected = (keys: readonly string[]) => keys.map((k) => ({ name: `t_${k}`,
 
 /**
  * ES5 JavaScript of the `lockation` webhook trigger (runs inside XToys' JS interpreter). `SLOTS` is injected:
- * slot → { channels, max: [per channel] }. Levels are remembered per slot / channel for relative changes.
+ * slot → { channels }. Levels are remembered per slot / channel for relative changes. Limits are the wearer's XToys settings.
  */
-function proxyCode(slots: Record<string, { channels: number; max: number[] }>): string {
+function proxyCode(slots: Record<string, { channels: number }>): string {
   return `// Lockation proxy – generated, do not edit (re-download it from the Lockation toy page instead).
 var SLOTS = ${JSON.stringify(slots)};
 var TV = { ${TOY_WEBHOOK_KEYS.map((k) => `${k}: typeof t_${k} === 'undefined' ? undefined : t_${k}`).join(', ')} };
@@ -178,7 +170,6 @@ function tv(k, d) { var v = TV[k]; if (v === undefined || v === null) return d; 
 function num(v, d) { var n = Number(v); return isNaN(n) ? d : n; }
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, Math.round(v))); }
 function chans(s, ch) { var out = []; if (ch === 'all') { for (var i = 1; i <= SLOTS[s].channels; i++) out.push(String(i)); } else out.push(ch); return out; }
-function maxOf(s, c) { return SLOTS[s].max[Number(c) - 1]; }
 function level(s, c) { return num(getVariable('lv-' + s + '-' + c), 0); }
 function setLevel(s, c, v) {
   setVariable('lv-' + s + '-' + c, String(v));
@@ -215,7 +206,7 @@ try {
   } else if (SLOTS[slot]) {
     var list = chans(slot, ch);
     for (var j = 0; j < list.length; j++) {
-      var c = list[j], max = maxOf(slot, c);
+      var c = list[j], max = 100;
       if (cmd === 'play') play(slot, c, String(tv('shape', 'constant')), clamp(num(tv('level', 0), 0), 0, max), clamp(num(tv('seconds', 10), 10), 1, ${MAX_TOY_SECONDS}));
       else if (cmd === 'intensity') {
         var d = tv('delta', null);
@@ -248,20 +239,16 @@ callAction({ type: 'updateComponent', channel: '${WEBHOOK}', action: 'send', for
 /** The complete XToys script (export format) for this toy setup. */
 export function buildXToysScript(setup: ToySetup) {
   const slots = toySlots(setup);
-  const meta: Record<string, { channels: number; max: number[] }> = {};
+  const meta: Record<string, { channels: number }> = {};
   const channels: Record<string, unknown> = { [WEBHOOK]: { type: 'webhook', outbound: true, hideWebhookInfo: false } };
   const initialActions: unknown[] = [];
   for (const t of setup.toys) {
     const slot = slots[t.id]!;
     const n = TOY_TYPES[t.type].channels.length;
-    meta[slot] = { channels: n, max: [...t.maxIntensity] };
+    meta[slot] = { channels: n };
     channels[slot] = { type: TOY_TYPES[t.type].xtoys, name: `${t.name} (${t.bodyPart})` };
-    // Toy-side caps (the wearer's limits) and a quiet start.
-    t.maxIntensity.forEach((max, i) => {
-      const ac = n > 1 ? String(i + 1) : 'all';
-      initialActions.push({ type: 'updateComponent', channel: slot, action: 'setMaximum', actionChannel: ac, percentVolume: String(max) });
-      initialActions.push({ type: 'updateComponent', channel: slot, action: 'setVolume', actionChannel: ac, rampTime: '0', percentVolume: '0' });
-    });
+    // A quiet start (the limits are the wearer's own XToys settings).
+    for (let i = 0; i < n; i++) initialActions.push({ type: 'updateComponent', channel: slot, action: 'setVolume', actionChannel: n > 1 ? String(i + 1) : 'all', rampTime: '0', percentVolume: '0' });
   }
   const stopAll = Object.keys(meta).flatMap((slot) =>
     Array.from({ length: meta[slot]!.channels }, (_, i) => ({ type: 'updateComponent', channel: slot, action: 'setVolume', actionChannel: meta[slot]!.channels > 1 ? String(i + 1) : 'all', rampTime: '0', percentVolume: '0' })),
@@ -296,14 +283,14 @@ export function buildXToysScript(setup: ToySetup) {
 // ---------- toy disclaimer (F27) ----------
 
 /** Bump to ask every wearer again. */
-export const TOY_DISCLAIMER_VERSION = 1;
+export const TOY_DISCLAIMER_VERSION = 2;
 
 /** Shown before connecting toys (toy test page and, later, in a lock). */
 export const TOY_DISCLAIMER: readonly string[] = [
   'Lockation can start your toys at any time while they are connected – also in public, at work, on a train or in a car. Where you are is your responsibility.',
   'Never use connected toys while driving, cycling or operating machinery. There is no automatic pause.',
   'E-stim: never place electrodes across the chest or heart, or above the neck; follow the instructions of your device. Do not use it with a pacemaker or heart condition.',
-  'Your limits (maximum intensity and duration) are applied by Lockation and in the XToys script. Choose them carefully – during a lock they can only be changed by disconnecting (which may be punished).',
+  'Set your limits (maximum intensity) for each toy in XToys – Lockation sends up to 100 % and as long as the rules say. Choose them carefully before you connect.',
   'Lockation cannot confirm that a toy reacted. XToys must be running with your toys connected. XToys is a third-party service.',
   'Only adults, only with consent. Stop immediately if anything hurts or feels wrong – your health comes before any rule.',
 ];
@@ -312,7 +299,7 @@ export const TOY_DISCLAIMER: readonly string[] = [
 
 export type ToyConsequence = Extract<Consequence, { type: 'toy' }>;
 
-/** The webhook commands for one toy consequence: one per matching connected toy, clamped to its limits. */
+/** The webhook commands for one toy consequence: one per matching connected toy. */
 export function resolveToyConsequence(toys: Toy[], c: ToyConsequence): { toy: Toy; body: ToyWebhookBody }[] {
   const setup: ToySetup = { version: 1, toys };
   const out: { toy: Toy; body: ToyWebhookBody }[] = [];
@@ -452,9 +439,9 @@ export function reconcileToyEffects(
   const next: Record<string, RunningToyEffect> = {};
   for (const [key, w] of Object.entries(want)) {
     const cur = running[key];
-    const seconds = w.toy.maxSeconds;
+    const seconds = TOY_EFFECT_SECONDS;
     const body = toyCommand(setup, w.toy.id, { cmd: 'play', shape: w.d.effect.shape, intensity: w.level, seconds, channel: w.channel });
-    const level = Number(body.level); // what the toy really gets (clamped to its limit)
+    const level = Number(body.level); // what is sent (0–100 %)
     const same = cur && cur.source === w.d.source && cur.level === level && cur.shape === w.d.effect.shape;
     if (same && cur.resumeAt && t < Date.parse(cur.resumeAt)) {
       next[key] = cur; // a one-off action is playing – resume afterwards

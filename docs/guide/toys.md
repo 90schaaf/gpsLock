@@ -11,7 +11,7 @@ linked from the 🎮 Toys card on the main page and from the 🎮 Toys tab (also
 ## Before you start
 
 Read the safety notes on the page and accept them – in short: toys can start at any time while connected (also in
-public or in a car), never use them while driving, e-stim never across the chest or heart, choose your limits carefully.
+public or in a car), never use them while driving, e-stim never across the chest or heart, set your limits in XToys and choose them carefully.
 
 ## Set up
 
@@ -25,8 +25,8 @@ public or in a car), never use them while driving, e-stim never across the chest
    | Vibrator + rotator | vibration, rotation |
    | Rotator | main |
 
-   Set the **maximum intensity** (per channel) and the **maximum duration** of one action. These limits are applied by
-   Lockation **and** built into the XToys script.
+   **Limits are set in XToys:** set the maximum intensity of each toy (and channel) there. Lockation sends 0–100 % and
+   as long as the rules say – XToys keeps it within your limits.
 2. **XToys script** – download it (it is made for exactly your toys; download it again after changes), import it in
    XToys, connect each real toy to its slot and start it. The script listens on your account's **Private Webhook**
    (cloud) – if XToys asks how to connect the webhook, choose the private one, **not the local webhook** (that one only
@@ -45,7 +45,7 @@ public or in a car), never use them while driving, e-stim never across the chest
 Every timed action is a pattern that ends by itself after its duration – a toy never keeps running because a `stop`
 got lost.
 
-**Export toy setup** saves your toys and limits as a file, so you can load them again later.
+**Export toy setup** saves your toys (names, types, body parts) as a file, so you can load them again later.
 
 ## In a lock
 
@@ -62,7 +62,8 @@ missions, …):
 setup from the toy test page in the same browser is filled in), **Connect toys**. Then **▶ Test pulse** and **✓ My
 toys reacted**. Toy actions are sent even before you confirm.
 
-- Your **limits** are fixed while connected. To change them you have to disconnect – which is an emergency stop.
+- Your **limits** are your XToys settings. Changing the toys themselves while connected means disconnecting – which is
+  an emergency stop.
 - **🛑 Emergency stop** – always possible: stops all toys, forgets your Webhook ID and applies the keyholder's
   punishment. You can connect again afterwards.
 - No toys connected → toy actions are skipped and logged.
@@ -81,7 +82,7 @@ the endings that fit the trigger:
 
 | Duration | Offered for | Ends |
 |---|---|---|
-| for … seconds | everywhere | after the seconds (at most the toy's limit) – a one-off action |
+| for … seconds | everywhere | after the seconds – a one-off action |
 | until the wearer leaves the zone | anything triggered by *entering*: zone actions on enter, forbidden-zone penalties, rewards, surprise outcomes | on leaving |
 | until the wearer is back in the zone | anything triggered by *leaving*: zone actions on leave, a surprise zone left too early, required zones (checking in outside, outside during a stay window) | on returning |
 | until released | surprise outcomes with a hold | when the hold ends |
@@ -93,9 +94,8 @@ the endings that fit the trigger:
   5 minutes starts the wave once.
 - **Stronger over time:** a *change the intensity* action (e.g. +10 % at every penalty) changes what keeps running, and
   the change sticks until it ends. A *stop* action ends it.
-- Each start is a pattern that **ends by itself** after the toy's maximum duration; Lockation renews it about a minute
-  before. If Lockation, the network or tracking fails, the toy stops on its own. Tip: a maximum duration of at least
-  2 minutes per action keeps it running without gaps.
+- Each start is a pattern that **ends by itself** after 5 minutes; Lockation renews it about a minute before. If
+  Lockation, the network or tracking fails, the toy stops on its own.
 - A **one-off action** (e.g. the punishment pulse at the casino) takes the toy over for its duration; what keeps running
   resumes afterwards. Two on the same toy: the higher intensity wins.
 - No toys connected yet → it waits and starts as soon as the wearer connects (while the situation lasts).

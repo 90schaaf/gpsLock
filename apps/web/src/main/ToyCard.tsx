@@ -22,9 +22,6 @@ const savedWebhook = () => {
   }
 };
 
-const limits = (t: { type: string; maxIntensity: number[]; maxSeconds: number }) =>
-  `max ${t.maxIntensity.map((m, i) => `${t.maxIntensity.length > 1 ? `${(TOY_TYPES as Record<string, { channels: readonly string[] }>)[t.type]?.channels[i] ?? i + 1} ` : ''}${m} %`).join(' / ')}, ${t.maxSeconds} s per action`;
-
 /** F27 – toys in a running lock: the wearer connects / tests / stops them, the keyholder sees the status. */
 export function ToyCard({ view, backend, mock, onView, onError }: { view: SessionView; backend: Backend; mock?: MockBackend; onView: (v: SessionView) => void; onError: (m: string) => void }) {
   const T = view.toys!;
@@ -52,7 +49,7 @@ export function ToyCard({ view, backend, mock, onView, onError }: { view: Sessio
           <ul class="small" style={{ margin: 0, paddingLeft: '18px' }}>
             {T.toys.map((t) => (
               <li key={t.id}>
-                <strong>{t.name}</strong> – {(TOY_TYPES as Record<string, { label: string }>)[t.type]?.label ?? t.type}, {t.bodyPart} · {limits(t)}
+                <strong>{t.name}</strong> – {(TOY_TYPES as Record<string, { label: string }>)[t.type]?.label ?? t.type}, {t.bodyPart}
               </li>
             ))}
           </ul>
@@ -171,7 +168,7 @@ function ConnectForm({ busy, onConnect }: { busy: boolean; onConnect: (input: { 
           </button>
         ))}
       </div>
-      <p class="small muted" style={{ margin: 0 }}>Your limits are fixed while connected – changing them means disconnecting (emergency stop).</p>
+      <p class="small muted" style={{ margin: 0 }}>Set the maximum intensity of each toy in XToys. Changing the toys while connected means disconnecting (emergency stop).</p>
       <button
         class="primary"
         data-testid="toy-connect-button"
