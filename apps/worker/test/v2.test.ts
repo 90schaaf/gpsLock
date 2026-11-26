@@ -324,6 +324,19 @@ describe('toys (F27)', () => {
     expect((await connect()).status).toBe(200);
   });
 
+  it('emergency stop without consequences (optional): stops the toys, changes nothing on the lock', async () => {
+    fake.addSession('s1', { ...toyCfg, rules: { ...toyCfg.rules, toy: { enabled: true, onEmergencyStop: [] } } } as any);
+    await connect();
+    await subscribe('kh-token');
+    ntfy.sent = [];
+    sent = [];
+    const v = (await (await postT('/api/toy/emergency-stop', { mainToken: 'wearer-token' })).json()) as any;
+    expect(sent).toEqual(['https://webhook.xtoys.app/SECRETHOOK1?action=lockation&cmd=stopAll']);
+    expect(v.toys).toMatchObject({ connected: false, emergencyStops: 1, onEmergencyStop: 'nothing' });
+    expect(fake.calls.some((c) => c.path.endsWith('/action'))).toBe(false);
+    expect(ntfy.sent).toContainEqual(expect.objectContaining({ title: 'Lockation: toy emergency stop', message: expect.stringContaining('No consequences are set.') }));
+  });
+
   it('session end stops the toys and deletes the ID', async () => {
     await connect();
     sent = [];

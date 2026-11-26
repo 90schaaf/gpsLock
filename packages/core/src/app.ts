@@ -382,7 +382,7 @@ export class LockationApp<S extends LockSession = LockSession> {
         state,
         consequences,
         events: ['🛑 Emergency stop: the wearer stopped and disconnected the toys.'],
-        notices: [{ audience: 'keyholder', kind: 'toys', title: 'Lockation: toy emergency stop', message: `The wearer used the emergency stop and disconnected the toys. Consequences: ${what}.`, priority: 'high', key: `toys:estop:${now.toISOString()}` }],
+        notices: [{ audience: 'keyholder', kind: 'toys', title: 'Lockation: toy emergency stop', message: `The wearer used the emergency stop and disconnected the toys. ${punishment.length ? `Consequences: ${what}.` : 'No consequences are set.'}`, priority: 'high', key: `toys:estop:${now.toISOString()}` }],
       },
       'tick',
     );

@@ -230,8 +230,8 @@ describe('toy consequences (step 2)', () => {
     expect(TOY_COMMENTS).toContain(toyComment('anything'));
   });
 
-  it('validation: toy control needs a (non-toy) emergency-stop punishment', () => {
-    expect(parseConfig({ version: 2, rules: { toy: { enabled: true } } }).ok).toBe(false);
+  it('validation: the emergency-stop consequences are optional but cannot be toy actions', () => {
+    expect(parseConfig({ version: 2, rules: { toy: { enabled: true } } }).ok).toBe(true);
     expect(parseConfig({ version: 2, rules: { toy: { enabled: true, onEmergencyStop: [c({})] } } }).ok).toBe(false);
     expect(parseConfig({ version: 2, rules: { toy: { enabled: true, onEmergencyStop: [{ type: 'add_time', seconds: 7200 }] } } }).ok).toBe(true);
     expect(ConsequenceSchema.safeParse(c({ shape: 'zigzag' })).success).toBe(false);

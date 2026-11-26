@@ -259,7 +259,9 @@ export function summarizeRules(config: LockationConfig): RuleSummary[] {
       title: 'Toy control',
       lines: [
         'When you connect your toys (XToys), the rules can control them – look for 🎮 in the consequences. Your limits always apply.',
-        `Emergency stop (disconnect the toys): ${list(config.rules.toy.onEmergencyStop)}.`,
+        config.rules.toy.onEmergencyStop.length
+          ? `Emergency stop (disconnect the toys): ${list(config.rules.toy.onEmergencyStop)}.`
+          : 'Emergency stop (disconnect the toys): possible at any time, without consequences.',
         ...config.zones.filter((z) => z.toy.whileInside).map((z) => `While you are in "${z.name}": ${effectText(z.toy.whileInside!)} – until you leave.`),
         ...(config.rules.toy.whileOutsideRequired ? [`While you are outside the required zones: ${effectText(config.rules.toy.whileOutsideRequired)}.`] : []),
       ],

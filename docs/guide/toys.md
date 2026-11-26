@@ -49,8 +49,8 @@ got lost.
 
 ## In a lock
 
-**Keyholder** – in the configuration, enable **🎮 Toys** and set what the **emergency stop** costs (required, e.g.
-+2 hours). Then add **🎮 Toy** consequences wherever you like (forbidden zones, missed check-ins, surprise zones,
+**Keyholder** – in the configuration, enable **🎮 Toys** and optionally set what the **emergency stop** costs (e.g.
++2 hours; leave it empty for none). Then add **🎮 Toy** consequences wherever you like (forbidden zones, missed check-ins, surprise zones,
 missions, …):
 
 - **Target**: a body part or all toys, optionally a toy type and a channel;

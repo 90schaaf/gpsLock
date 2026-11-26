@@ -40,6 +40,7 @@ export function ToyCard({ view, backend, mock, onView, onError }: { view: Sessio
     }
   };
   const wearer = view.role === 'wearer';
+  const free = T.onEmergencyStop === 'nothing';
   return (
     <div class="card stack" data-testid="toy-card">
       <h2>
@@ -84,12 +85,12 @@ export function ToyCard({ view, backend, mock, onView, onError }: { view: Sessio
               class="danger-big"
               disabled={busy}
               data-testid="toy-emergency-stop"
-              onClick={() => confirm(`Emergency stop: stop and disconnect all toys?\n\nThis costs: ${T.onEmergencyStop}.`) && act(() => backend.toyEmergencyStop())}
+              onClick={() => confirm(`Emergency stop: stop and disconnect all toys?\n\n${free ? 'No consequences.' : `This costs: ${T.onEmergencyStop}.`}`) && act(() => backend.toyEmergencyStop())}
             >
               🛑 EMERGENCY STOP – disconnect toys
             </button>
           )}
-          {wearer && <p class="small muted" style={{ margin: 0 }}>Emergency stop costs: {T.onEmergencyStop}. You can connect again afterwards.</p>}
+          {wearer && <p class="small muted" style={{ margin: 0 }}>{free ? 'The emergency stop has no consequences.' : `Emergency stop costs: ${T.onEmergencyStop}.`} You can connect again afterwards.</p>}
         </>
       ) : wearer ? (
         <ConnectForm busy={busy} onConnect={(input) => act(() => backend.toyConnect(input))} />

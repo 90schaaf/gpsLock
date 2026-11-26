@@ -48,7 +48,7 @@ Each tab has an **enabled** switch and lists its zones; open a zone to override 
   until the keyholder releases), once or every visit, and whether the wearer may see the possible outcomes.
 - 🎯 **Missions** – surprise missions: target zones (never forbidden ones), time to get there, random missions (how often,
   from / until), whether the keyholder may send missions, declines per day, and the consequences *arrived in time* / *too late*.
-- 🎮 **Toys** – toy control via XToys: on / off, the (required) emergency-stop punishment and an optional effect while
+- 🎮 **Toys** – toy control via XToys: on / off, an optional emergency-stop punishment and an optional effect while
   the wearer is outside the required zones. Toy actions are 🎮 consequences in every rule; effects *while inside* a zone
   are set per zone in the Zones tab. See [Toys](./toys).
 - 📡 **Tracking** – **How is the location collected?** *Manual check-ins only*, *manual check-ins + background tracking*

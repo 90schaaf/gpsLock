@@ -2,6 +2,8 @@
 
 ## 2026-11-26
 
+- **Toy emergency stop: consequences optional (F27):** `rules.toy.onEmergencyStop` may be empty; the wearer's card, the
+  rule summary and the keyholder notice then say that it has no consequences.
 - **Toy types vibrator + rotator and rotator (F27):** XToys types `part-vibrator|part-rotator` (channels vibration,
   rotation) and `part-rotator` (one channel).
 

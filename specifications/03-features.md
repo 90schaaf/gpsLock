@@ -335,7 +335,7 @@ manual.
 **Emergency stop and reconnecting (wearer)**
 
 - The wearer can always **disconnect the toys** (button with confirmation). It sends `stop` to all toys, deletes the
-  Webhook ID and applies the keyholder's **emergency-stop consequences** (`toy.onEmergencyStop`, a punishment, e.g. +2 h).
+  Webhook ID and applies the keyholder's **emergency-stop consequences** (`toy.onEmergencyStop`, optional, e.g. +2 h; empty = free).
   The keyholder is notified, and the history shows it. Using it can never be blocked.
 - The wearer may **reconnect** during the same lock (new toys / limits, the disclaimer again, the setup check again). The
   emergency-stop punishment of the earlier disconnect stays applied.
@@ -343,7 +343,7 @@ manual.
 
 **Keyholder configuration (🎮 Toys tab)**
 
-- Enable toy control; `onEmergencyStop` (at least one consequence required when enabled); optional `whileInside` per zone;
+- Enable toy control; `onEmergencyStop` (optional; toy actions not allowed); optional `whileInside` per zone;
   toy consequences in the existing consequence editors (target body part / toy type / channel, action, intensity or
   change, duration, pattern). The keyholder sees the connected toys and their limits.
 - Self-locks: allowed – the wearer configures their own rules and still accepts the toy disclaimer.

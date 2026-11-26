@@ -1,7 +1,7 @@
 import { ConsequenceEditor, ToyEffectEditor } from '../editors.js';
 import { Section, type TabProps } from '../shared.js';
 
-/** F27 – toy control via XToys: on / off and the emergency-stop punishment. Toy actions are 🎮 consequences everywhere. */
+/** F27 – toy control via XToys: on / off and the optional emergency-stop punishment. Toy actions are 🎮 consequences everywhere. */
 export function ToysTab({ config, edit, commands }: TabProps) {
   const T = config.rules.toy;
   return (
@@ -19,7 +19,7 @@ export function ToysTab({ config, edit, commands }: TabProps) {
         <li>The wearer's limits (maximum intensity and duration per toy) always apply – you see them on the main page once the toys are connected.</li>
         <li>Without connected toys, toy actions are skipped and logged.</li>
         <li>
-          The wearer can always use the <strong>emergency stop</strong> (stop and disconnect the toys). It must cost something:
+          The wearer can always use the <strong>emergency stop</strong> (stop and disconnect the toys). Optionally, it costs something (leave empty for no consequence):
         </li>
       </ul>
       <ConsequenceEditor label="Emergency stop" value={T.onEmergencyStop} commands={commands} onChange={(v) => edit((d) => { d.rules.toy.onEmergencyStop = v; })} />

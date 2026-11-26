@@ -315,11 +315,11 @@ export const MissionRuleSchema = z
   })
   .default({});
 
-/** F27 – toy control via XToys: toy consequences need it enabled; the wearer's emergency stop is punished. */
+/** F27 – toy control via XToys: toy consequences need it enabled; the wearer's emergency stop can be punished. */
 export const ToyRuleSchema = z
   .object({
     enabled: z.boolean().default(false),
-    /** Applied when the wearer disconnects the toys (emergency stop). Required when toy control is enabled. */
+    /** Applied when the wearer disconnects the toys (emergency stop). Optional (empty = free). */
     onEmergencyStop: ConsequenceListSchema,
     /** Runs while the wearer is outside all required zones. Needs background tracking. */
     whileOutsideRequired: ToyEffectSchema.optional(),
@@ -451,7 +451,6 @@ export const LockationConfigSchema = z
     }
     if (R.hunt.enabled && R.hunt.checkpoints.length === 0) issue(['rules', 'hunt', 'checkpoints'], 'add at least one checkpoint');
     if (R.toy.enabled) {
-      if (!R.toy.onEmergencyStop.length) issue(['rules', 'toy', 'onEmergencyStop'], 'set a consequence for the emergency stop (e.g. add 2 hours)');
       if (R.toy.onEmergencyStop.some((c) => c.type === 'toy')) issue(['rules', 'toy', 'onEmergencyStop'], 'the emergency stop cannot trigger toy actions');
       if (R.toy.whileOutsideRequired && !cfg.tracking.enabled) issue(['rules', 'toy', 'whileOutsideRequired'], 'needs background tracking to notice where the wearer is');
       if (R.toy.whileOutsideRequired && !withRole('required').length) issue(['rules', 'toy', 'whileOutsideRequired'], 'mark at least one zone as required');
