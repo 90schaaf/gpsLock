@@ -612,11 +612,11 @@ function DemoBar({
         <strong>DEMO</strong>
         <span>no Chaster account needed – data stays in this browser</span>
         <span class="grow" />
-        <button onClick={() => { mock.setRole(role === 'wearer' ? 'keyholder' : 'wearer'); onChange(); }}>View as {role === 'wearer' ? 'keyholder' : 'wearer'}</button>
-        {simulating && <button onClick={onClearSim}>Use real GPS</button>}
+        <button onClick={() => { mock.setRole(role === 'wearer' ? 'keyholder' : 'wearer'); onChange(); }}>{role === 'wearer' ? '🔑 View as keyholder' : '🔒 View as wearer'}</button>
+        {simulating && <button onClick={onClearSim}>📍 Use real GPS</button>}
         {trackingOn && role === 'wearer' && (
           <button onClick={onToggleClickSends} aria-pressed={clickSends} data-testid="demo-click-sends" title="What a click on the map does">
-            🖱 Map click: {clickSends ? 'send location' : 'only set position'}
+            🖱️ Map click: {clickSends ? 'send location' : 'only set position'}
           </button>
         )}
         <button
@@ -627,10 +627,10 @@ function DemoBar({
               .finally(onChange)
           }
         >
-          Reset around me
+          🔄 Reset around me
         </button>
-        <a class="btn" href={`config.html${location.search}`}>Edit config</a>
-        <button onClick={() => setShowLog((s) => !s)}>{showLog ? 'Hide' : 'Show'} Chaster log</button>
+        <a class="btn" href={`config.html${location.search}`}>⚙️ Edit config</a>
+        <button onClick={() => setShowLog((s) => !s)}>📜 {showLog ? 'Hide' : 'Show'} Chaster log</button>
       </div>
       {showLog && (
         <div class="container">
